@@ -1,0 +1,72 @@
+[
+  {
+    "model": "admin.logentry",
+    "pk": 1,
+    "fields": {
+      "action_time": "2025-01-01T10:00:00.000Z",
+      "user": 1,
+      "content_type": 6,
+      "object_id": "1",
+      "object_repr": "admin@example.com",
+      "action_flag": 1,
+      "change_message": "[{\"added\": {}}]"
+    }
+  },
+  {
+    "model": "presenze.utente",
+    "pk": 1,
+    "fields": {
+      "password": "pbkdf2_sha256$1000000$example$salt_hash_example",
+      "last_login": null,
+      "is_superuser": true,
+      "email": "admin@example.com",
+      "nome": "Mario",
+      "cognome": "Rossi",
+      "is_active": true,
+      "is_staff": true,
+      "can_view_all_data": true,
+      "created_at": "2025-01-01T00:00:00.000Z",
+      "updated_at": "2025-01-01T00:00:00.000Z",
+      "groups": [],
+      "user_permissions": []
+    }
+  },
+  {
+    "model": "presenze.utente",
+    "pk": 2,
+    "fields": {
+      "password": "pbkdf2_sha256$1000000$example$salt_hash_example",
+      "last_login": null,
+      "is_superuser": false,
+      "email": "utente1@example.com",
+      "nome": "Luca",
+      "cognome": "Bianchi",
+      "is_active": true,
+      "is_staff": false,
+      "can_view_all_data": false,
+      "created_at": "2025-01-02T00:00:00.000Z",
+      "updated_at": "2025-01-02T00:00:00.000Z",
+      "groups": [],
+      "user_permissions": []
+    }
+  },
+  {
+    "model": "presenze.utente",
+    "pk": 3,
+    "fields": {
+      "password": "pbkdf2_sha256$1000000$example$salt_hash_example",
+      "last_login": null,
+      "is_superuser": false,
+      "email": "utente2@example.com",
+      "nome": "Giulia",
+      "cognome": "Verdi",
+      "is_active": true,
+      "is_staff": false,
+      "can_view_all_data": false,
+      "created_at": "2025-01-03T00:00:00.000Z",
+      "updated_at": "2025-01-03T00:00:00.000Z",
+      "groups": [],
+      "user_permissions": []
+    }
+  }
+]

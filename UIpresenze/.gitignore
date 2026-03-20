@@ -1,0 +1,36 @@
+# SvelteKit
+.svelte-kit/
+
+# Vite
+dist/
+.vite/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Optional caches
+.eslintcache
+.stylelintcache
+
+# Playwright
+playwright-report/
+playwright/.cache/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+
+# Build output (per sviluppo locale)
+build/

@@ -1,0 +1,40 @@
+services:
+  # ===========================================
+  # BACKEND - Django REST API
+  # ===========================================
+  backend:
+    build:
+      context: ./AppPresenze
+      dockerfile: Dockerfile
+    volumes:
+      # Dati persistenti per scontrini e PDF
+      - ./data/scontrini:/mnt/scontrini
+      - ./data/pdf:/mnt/pdf
+    ports:
+      - "7999:7999"
+    env_file:
+      - ./AppPresenze/.env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # ===========================================
+  # FRONTEND - SvelteKit UI
+  # ===========================================
+  ui:
+    build:
+      context: ./UIpresenze
+      dockerfile: Dockerfile
+    ports:
+      - "3623:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

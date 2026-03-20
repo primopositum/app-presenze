@@ -1,0 +1,130 @@
+####################################
+# SISTEMA OPERATIVO
+####################################
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+*.pdf
+####################################
+# EDITOR & IDE
+####################################
+
+# VS Code
+.vscode/
+!.vscode/extensions.json
+
+# JetBrains (IntelliJ, WebStorm, PyCharm, ecc.)
+.idea/
+*.iml
+
+# Vim
+*.swp
+*.swo
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+####################################
+# LOG & TEMP FILES
+####################################
+
+*.log
+logs/
+tmp/
+temp/
+.cache/
+
+####################################
+# DEPENDENZE
+####################################
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# PHP (Composer)
+vendor/
+
+# Java / JVM
+target/
+*.class
+
+####################################
+# BUILD & DIST
+####################################
+
+dist/
+build/
+out/
+coverage/
+
+####################################
+# ENVIRONMENT VARIABLES & SECRETS
+####################################
+
+.env
+.env.*
+!.env.example
+
+####################################
+# DATA & BACKUP (contain sensitive data)
+####################################
+
+project_data.json
+backup.JSON
+*.sql
+dump.sql
+
+####################################
+# DATABASE
+####################################
+
+*.sqlite
+*.sqlite3
+*.db
+
+####################################
+# ARCHIVI & BINARI
+####################################
+
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+*.exe
+*.dll
+*.so
+*.dylib
+
+####################################
+# BACKUP
+####################################
+
+*.bak
+*.old
+*.orig

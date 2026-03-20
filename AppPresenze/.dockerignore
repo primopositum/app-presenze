@@ -1,0 +1,63 @@
+# Docker ignore per backend Django
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.so
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.*
+
+# Database
+*.sqlite
+*.sqlite3
+db.sqlite3
+
+# Static files (collected separately)
+staticfiles/
+
+# Logs
+*.log
+logs/
+debug.log
+
+# Data
+data/
+/mnt/scontrini
+/mnt/pdf
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose*.yml
+
+# Documentation
+docs/
+*.md
+!requirements.txt
+
+# Test
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Misc
+.DS_Store
+Thumbs.db

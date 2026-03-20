@@ -1,0 +1,10 @@
+Django==5.2.6
+python-dotenv
+djangorestframework
+django-cors-headers
+psycopg2-binary
+holidays
+python-dateutil
+pypdf
+python-docx
+gunicorn

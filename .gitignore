@@ -1,0 +1,132 @@
+# ==========================================
+# SISTEMA OPERATIVO
+# ==========================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+*.swp
+*.swo
+
+# ==========================================
+# EDITOR & IDE
+# ==========================================
+
+# JetBrains (IntelliJ, PyCharm, ecc.)
+.idea/
+*.iml
+
+# VS Code
+.vscode/
+!.vscode/extensions.json
+
+# Vim
+*.swp
+*.swo
+
+# ==========================================
+# LOG & TEMP FILES
+# ==========================================
+
+*.log
+logs/
+tmp/
+temp/
+.cache/
+
+# ==========================================
+# PYTHON
+# ==========================================
+
+# Bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Django
+*.sqlite
+*.sqlite3
+db.sqlite3
+staticfiles/
+
+# ==========================================
+# ENVIRONMENT VARIABLES & SECRETS
+# ==========================================
+
+.env
+.env.local
+.env.*.local
+
+# ==========================================
+# DOCKER
+# ==========================================
+
+docker-compose.override.yml
+
+# ==========================================
+# DATA DIRECTORY (generated)
+# ==========================================
+
+data/
+
+# ==========================================
+# BACKUP FILES (contain sensitive data)
+# ==========================================
+
+backup.JSON
+*.bak
+*.old
+
+# ==========================================
+# SVELTE / NODE / VITE
+# ==========================================
+
+# SvelteKit
+.svelte-kit/
+
+# Vite
+dist/
+.vite/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build output
+build/
+.next/
+.nuxt/
+.vuepress/dist/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Optional caches
+.eslintcache
+.stylelintcache
+.pnpm-store/
+
+# Playwright
+playwright-report/
+playwright/.cache/
+

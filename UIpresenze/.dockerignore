@@ -1,0 +1,46 @@
+# Docker ignore per frontend SvelteKit
+
+# Node modules
+node_modules/
+
+# Build output
+build/
+dist/
+.svelte-kit/
+
+# Environment
+.env
+.env.*
+
+# Logs
+*.log
+logs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose*.yml
+
+# Documentation
+*.md
+!README.md
+
+# Test
+playwright-report/
+playwright/.cache/
+coverage/
+.nyc_output/
+
+# Misc
+.DS_Store
+Thumbs.db
+npm-debug.log*

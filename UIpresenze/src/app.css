@@ -1,0 +1,163 @@
+@import 'tailwindcss';
+@import '@fontsource/fira-mono';
+@plugin '@tailwindcss/forms';
+@plugin '@tailwindcss/typography';
+
+@theme {
+  /* Palette principale */
+  --color-primary: #0ea5e9;
+  --color-secondary: #9333ea;
+  --color-accent: #f59e0b;
+
+  /* Superfici e testo */
+  --color-surface: #ffffff;
+  --color-background: #f7f7fb;
+  --color-muted: #64748b;
+  --color-text: rgba(0, 0, 0, 0.7);
+
+  /* Facoltativo: mappa i font per Tailwind */
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'Fira Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-infinity: 'Infinity', 'Inter', sans-serif; 
+
+  /* Auto page palette */
+  --color-auto-bg: #f5f6f8;
+  --color-auto-panel: #ffffff;
+  --color-auto-border: #e5e7eb;
+  --color-auto-border-strong: #374151;
+  --color-auto-text: #121111;
+  --color-auto-muted: #6b7280;
+
+  --color-auto-primary: #1f2937;
+  --color-auto-primary-contrast: #ffffff;
+
+  --color-auto-accent-50: #fff7ed;
+  --color-auto-accent-100: #ffedd5;
+  --color-auto-accent-200: #fed7aa;
+  --color-auto-accent-500: #f97316;
+  --color-auto-accent-700: #121111;
+
+  --color-auto-danger-50: #fef2f2;
+  --color-auto-danger-200: #fecaca;
+  --color-auto-danger-700: #b91c1c;@
+}
+
+@font-face {
+  font-family: 'Infinity';
+  src: url('/fonts/infinity-light.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Infinity';
+  src:   url('/fonts/Infinity-Regular.otf') format('opentype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+
+/* Base globals */
+:root {
+  font-family: var(--font-sans);
+  color: var(--color-text);
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	background-attachment: fixed;
+	background-color: var(--color-background);
+	min-height: 100vh;
+}
+
+h1,
+h2,
+p {
+	font-weight: 400;
+}
+
+p {
+	line-height: 1.5;
+}
+
+a {
+	color: var(--color-primary);
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+h1 {
+	font-size: 2rem;
+	text-align: center;
+}
+
+h2 {
+	font-size: 1rem;
+}
+
+pre {
+	font-size: 16px;
+	font-family: var(--font-mono);
+	background-color: rgba(255, 255, 255, 0.45);
+	border-radius: 3px;
+	box-shadow: 2px 2px 6px rgb(255 255 255 / 25%);
+	padding: 0.5em;
+	overflow-x: auto;
+	color: var(--color-text);
+}
+
+img,
+svg,
+video,
+canvas {
+	max-width: 100%;
+	height: auto;
+}
+
+.text-column {
+	display: flex;
+	max-width: 48rem;
+	flex: 0.6;
+	flex-direction: column;
+	justify-content: center;
+	margin: 0 auto;
+}
+
+input,
+button {
+	font-size: inherit;
+	font-family: inherit;
+}
+
+button:focus:not(:focus-visible) {
+	outline: none;
+}
+
+@media (min-width: 720px) {
+	h1 {
+		font-size: 2.4rem;
+	}
+}
+
+.visually-hidden {
+	border: 0;
+	clip: rect(0 0 0 0);
+	height: auto;
+	margin: 0;
+	overflow: hidden;
+	padding: 0;
+	position: absolute;
+	width: 1px;
+	white-space: nowrap;
+}
