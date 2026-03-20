@@ -34,6 +34,23 @@ services:
     restart: unless-stopped
     networks:
       - app-network
+  # ===========================================
+  # SCHEDULER - cronjobs
+  # ===========================================
+  scheduler:
+    build:
+      context: ./AppPresenze
+      dockerfile: Dockerfile
+    env_file:
+      - ./AppPresenze/.env
+    environment:
+      TZ: Europe/Rome
+    command: ["/bin/sh", "/app/scripts/run_scheduler.sh"]
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - app-network
 
 networks:
   app-network:

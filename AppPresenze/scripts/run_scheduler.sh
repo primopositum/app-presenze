@@ -1,0 +1,34 @@
+#!/usr/bin/env sh
+set -eu
+
+export TZ="${TZ:-Europe/Rome}"
+
+STAMP_FILE="${SCHEDULER_STAMP_FILE:-/tmp/genera_timeentries_settimana.last_run}"
+CHECK_INTERVAL_SECONDS="${SCHEDULER_CHECK_INTERVAL_SECONDS:-30}"
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] scheduler started (TZ=$TZ)"
+echo "Stamp file: $STAMP_FILE"
+
+while true; do
+  set -- $(date '+%u %H:%M %F')
+  dow="$1"     # 1..7 (Mon..Sun)
+  hhmm="$2"    # HH:MM
+  today="$3"   # YYYY-MM-DD
+
+  last_run=""
+  if [ -f "$STAMP_FILE" ]; then
+    last_run="$(cat "$STAMP_FILE" 2>/dev/null || true)"
+  fi
+
+  if [ "$dow" = "1" ] && [ "$hhmm" = "00:00" ] && [ "$last_run" != "$today" ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] running genera_timeentries_settimana"
+    if python manage.py genera_timeentries_settimana; then
+      echo "$today" > "$STAMP_FILE"
+      echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] run completed"
+    else
+      echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] run failed"
+    fi
+  fi
+
+  sleep "$CHECK_INTERVAL_SECONDS"
+done
