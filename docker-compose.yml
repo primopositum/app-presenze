@@ -10,6 +10,7 @@ services:
       # Dati persistenti per scontrini e PDF
       - ./data/scontrini:/mnt/scontrini
       - ./data/pdf:/mnt/pdf
+      - static_files:/app/staticfiles
     ports:
       - "7999:7999"
     env_file:
@@ -27,6 +28,8 @@ services:
     build:
       context: ./UIpresenze
       dockerfile: Dockerfile
+    volumes:
+      - static_files:/usr/share/nginx/static
     ports:
       - "3623:80"
     depends_on:
@@ -55,3 +58,5 @@ services:
 networks:
   app-network:
     driver: bridge
+volumes:
+  static_files:

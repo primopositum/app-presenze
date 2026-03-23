@@ -35,7 +35,7 @@ SECRET_KEY = 'django-insecure-w*7t-0pc^p3+xs@cw+k#wu9$602h^u-1*r8rs6t+af#aqkxmt8
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '192.168.1.22', '127.0.0.1', '100.96.1.18', 'http://192.168.1.22']
+ALLOWED_HOSTS = ['localhost', '192.168.1.22', '127.0.0.1', '100.96.1.18', '192.168.1.22']
 CSRF_TRUSTED_ORIGINS = ["http://localhost:8080", "http://127.0.0.1:8080"]
 
 USE_X_FORWARDED_HOST = True
@@ -67,6 +67,7 @@ PDF_ROOT = Path("/mnt/pdf")
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -169,6 +170,14 @@ USE_TZ = True
 
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
@@ -210,3 +219,4 @@ LOGGING = {
         },
     },
 }
+

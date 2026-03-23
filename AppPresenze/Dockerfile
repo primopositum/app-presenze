@@ -36,4 +36,4 @@ COPY . .
 EXPOSE 7999
 
 # Avvio con gunicorn (Django WSGI)
-CMD ["gunicorn", "-c", "gunicorn.conf.py", "AppPresenze.wsgi:application"]
+CMD ["/bin/sh", "-c", "python manage.py collectstatic --noinput && gunicorn -c gunicorn.conf.py AppPresenze.wsgi:application"]
