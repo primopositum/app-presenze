@@ -13,7 +13,8 @@ export default defineConfig({
 			'/presenze': {
 				target: 'http://localhost:7999',
 				changeOrigin: true,
-				secure: false
+				secure: false,
+				rewrite: (path) => path.replace(/^\/api/, '/presenze/api')
 			}
 		}
 	},
