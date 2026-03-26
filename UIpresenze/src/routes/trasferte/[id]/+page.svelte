@@ -26,7 +26,7 @@
   import { timeEntryUser } from '$lib/stores/timeEntryUser';
   let item: Trasferta | null = null;
   let spese: Spesa[] = [];
-  let token: string | null = null;
+  let isAuthed = false;
   let loading = false;
   let showSpesaForm = false;
   let creatingSpesa = false;
@@ -52,7 +52,7 @@
   let refreshKey = 0;
   let isKmBandieraRossa = false;
 
-  $: token = $auth.token;
+  $: isAuthed = $auth.isAuthed;
   $: isSuperuser = !!$auth.user?.is_superuser;
 
   function getAutoId(auto: Automobile): number | null {
@@ -337,7 +337,7 @@
     timeEntryUser.setUser({ id: item.utente_id } as User);
   }
 
-  $: if (token) {
+  $: if (isAuthed) {
     $page.params.id;
     loadDetail();
   }
@@ -680,4 +680,5 @@
     height: 100% !important;
   }
 </style>
+
 

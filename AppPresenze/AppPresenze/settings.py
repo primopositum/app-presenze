@@ -36,8 +36,21 @@ SECRET_KEY = 'django-insecure-w*7t-0pc^p3+xs@cw+k#wu9$602h^u-1*r8rs6t+af#aqkxmt8
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '192.168.1.22', '127.0.0.1', '100.96.1.18', '192.168.1.22']
-CSRF_TRUSTED_ORIGINS = ["http://localhost:8080", "http://127.0.0.1:8080"]
+ALLOWED_HOSTS = ['localhost', '192.168.1.22', '127.0.0.1', '100.96.1.18']
+
+DEV_FRONTEND_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://192.168.1.22:5173",
+    "http://localhost:3623",
+    "http://127.0.0.1:3623",
+    "http://192.168.1.22:3623",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+    "http://192.168.1.22:8080",
+]
+
+CSRF_TRUSTED_ORIGINS = DEV_FRONTEND_ORIGINS
 
 USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
@@ -108,9 +121,7 @@ TEMPLATES = [
     },
 ]
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-]
+CORS_ALLOWED_ORIGINS = DEV_FRONTEND_ORIGINS
 CORS_ALLOW_CREDENTIALS = True
 
 WSGI_APPLICATION = 'AppPresenze.wsgi.application'
@@ -235,4 +246,5 @@ LOGGING = {
         },
     },
 }
+
 

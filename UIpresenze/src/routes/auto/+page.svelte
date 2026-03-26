@@ -21,7 +21,7 @@
   let selectedId: number | string | null = null;
   let pdfAutoId: number | string | null = null;
   let bootstrapped = false;
-  let token: string | null = null;
+  let isAuthed = false;
   let mese = '';
 
   let marca = '';
@@ -148,12 +148,12 @@
     mese = new Intl.DateTimeFormat('it-IT', { month: 'long' }).format(new Date());
   }
 
-  $: token = $auth.token;
-  $: if (token && !bootstrapped) {
+  $: isAuthed = $auth.isAuthed;
+  $: if (isAuthed && !bootstrapped) {
     bootstrapped = true;
     void loadAutomobili();
   }
-  $: if (!token) {
+  $: if (!isAuthed) {
     bootstrapped = false;
   }
 
@@ -163,7 +163,7 @@
 
   onMount(() => {
     updateMese();
-    if (token && !bootstrapped) {
+    if (isAuthed && !bootstrapped) {
       bootstrapped = true;
       void loadAutomobili();
     }
@@ -510,3 +510,4 @@
     }
   }
 </style>
+
