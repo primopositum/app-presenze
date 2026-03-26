@@ -105,6 +105,7 @@
       generatingDossier = true;
       try {
         const res = await fetchTrasfertaDossier(targetUserId, dossierDate);
+        const firmaStatus = (res.headers.get('X-Firma-Status') || '').toLowerCase();
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -114,6 +115,9 @@
         a.click();
         a.remove();
         setTimeout(() => URL.revokeObjectURL(url), 30000);
+        if (firmaStatus.includes('mancante')) {
+          dossierError = 'dossier generato ma firma mancante o caricata non correttamente.';
+        }
       } catch (e: any) {
         dossierError = e?.message || 'Errore generazione dossier trasferte';
       } finally {

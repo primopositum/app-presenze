@@ -25,4 +25,4 @@ from .scontrini import (
     pdf_auto_current_month_list,
 )
 from .automobili import (AutomobileListCreateView, AutomobileDetailView, AutomobileDeleteView, AutomobilePatchView)
-from .signatures import signature_create
+from .signatures import signature_create, signature_latest

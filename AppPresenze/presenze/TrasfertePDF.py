@@ -449,6 +449,7 @@ class TrasfertePDFView(APIView):
         utente_id_param = request.query_params.get("u_id")
         firma = _to_bool(request.query_params.get("firma"), default=False)
         firma_path_param = request.query_params.get("firma_path")
+        firma_status = "ok"
 
         if not utente_id_param:
             return Response(
@@ -516,13 +517,12 @@ class TrasfertePDFView(APIView):
                     .first()
                 )
                 if signature_used is None:
-                    return Response(
-                        {"errors": "Nessuna firma disponibile per l'utente richiesto."},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
+                    firma = False
+                    firma_status = "firma mancante"
                 temp_dir = tempfile.TemporaryDirectory()
-                firma_path = Path(temp_dir.name) / f"signature_{signature_used.id}.svg"
-                firma_path.write_text(signature_used.svg, encoding="utf-8")
+                if signature_used is not None:
+                    firma_path = Path(temp_dir.name) / f"signature_{signature_used.id}.svg"
+                    firma_path.write_text(signature_used.svg, encoding="utf-8")
 
         try:
             pdf_bytes = build_trasferte_pdf_bytes(
@@ -549,4 +549,7 @@ class TrasfertePDFView(APIView):
 
         pdf_stream = BytesIO(pdf_bytes)
         filename = f"trasferte_{user.id}_{start_prev_month.strftime('%Y_%m')}.pdf"
-        return FileResponse(pdf_stream, as_attachment=True, filename=filename)
+        response = FileResponse(pdf_stream, as_attachment=True, filename=filename)
+        response["X-Firma-Status"] = firma_status
+        response["Access-Control-Expose-Headers"] = "X-Firma-Status"
+        return response

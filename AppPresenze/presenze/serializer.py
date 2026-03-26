@@ -271,19 +271,29 @@ class SignatureSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         request = self.context["request"]
-        user = request.user
+        target_user = self.context.get("target_user") or request.user
         svg = validated_data["svg"]
         sha256 = hashlib.sha256(svg.encode("utf-8")).hexdigest()
 
-        signature = Signature.objects.create(
-            user=user,
-            sha256=sha256,
-            **validated_data
-        )
+        signature = Signature.objects.filter(user_id=target_user.id).order_by("-updated_at", "-created_at").first()
+        if signature is None:
+            signature = Signature.objects.create(
+                user=target_user,
+                sha256=sha256,
+                **validated_data
+            )
+        else:
+            signature.svg = svg
+            signature.sha256 = sha256
+            signature.width = validated_data.get("width")
+            signature.height = validated_data.get("height")
+            signature.save(update_fields=["svg", "sha256", "width", "height", "updated_at"])
+
+        Signature.objects.filter(user_id=target_user.id).exclude(pk=signature.pk).delete()
 
         SignatureEvent.objects.create(
             signature=signature,
-            user=user,
+            user=request.user,
             event_type=SignatureEvent.EventType.CREATED,
             ip_address=self._get_client_ip(request),
             user_agent=request.META.get("HTTP_USER_AGENT", ""),

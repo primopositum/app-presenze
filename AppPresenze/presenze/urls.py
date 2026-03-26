@@ -17,6 +17,7 @@ api_urlpatterns = [
     path("logout/",   views.api_logout,  name="logout"),
     path("users/",    views.users_list,  name="users-list"),
     path("signatures/", views.signature_create, name="signature-create"),
+    path("showSignatures/", views.signature_latest, name="signature-latest"),
 
     # -------------------------------------------------------------------------
     # Time Entries

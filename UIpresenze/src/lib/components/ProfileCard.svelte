@@ -2,6 +2,8 @@
   import { Motion } from 'svelte-motion';
   import { createEventDispatcher } from 'svelte';
   import type { UpdateAccountPayload, User } from '$lib/services/users';
+  import { useCreateSignatureApi, useLatestSignatureApi } from '$lib/hooks/useSignatureApi';
+  import ErrorCard from '$lib/components/ErrorCard.svelte';
 
   export let user: User;
   /**
@@ -28,6 +30,7 @@
   $: isOwnProfile = !!currentUser?.id && Number(currentUser.id) === Number(user.id);
   $: canEdit = isAdmin || isOwnProfile;
   $: canDelete = isAdmin && !isSuperProfile && Number(currentUser?.id) !== Number(user.id);
+  $: canManageSignature = isAdmin || isOwnProfile;
 
   // ── computed view ─────────────────────────────────────────────────────
 
@@ -44,7 +47,14 @@
   let editing      = false;
   let saving       = false;
   let deleting     = false;
+  let signatureLoading = false;
+  let signatureUploading = false;
+  let showSignatureModal = false;
+  let signatureSvg = '';
   let saveError    = '';
+  let signatureError = '';
+  let signatureRequestError: string | null = null;
+  let signatureFileInput: HTMLInputElement | null = null;
 
   let editNome      = '';
   let editCognome   = '';
@@ -73,6 +83,55 @@
     editing  = false;
     saving   = false;
     saveError = '';
+  }
+
+  function openSignaturePicker() {
+    if (!canManageSignature || signatureUploading) return;
+    signatureFileInput?.click();
+  }
+
+  async function onSignatureFileSelected(event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input?.files?.[0];
+    if (!file) return;
+    signatureError = '';
+    signatureUploading = true;
+    try {
+      const svg = await file.text();
+      const result = await useCreateSignatureApi({
+        svg,
+        user_id: user.id,
+      });
+      if (result.error) throw new Error(result.error);
+      signatureSvg = result.signature?.svg ?? '';
+      showSignatureModal = true;
+    } catch (e) {
+      signatureError = e instanceof Error ? e.message : 'Errore caricamento firma';
+    } finally {
+      signatureUploading = false;
+      input.value = '';
+    }
+  }
+
+  async function viewLatestSignature() {
+    if (!canManageSignature || signatureLoading) return;
+    signatureError = '';
+    signatureRequestError = null;
+    signatureLoading = true;
+    try {
+      const result = await useLatestSignatureApi(user.id);
+      if (result.error) throw new Error(result.error);
+      if (!result.signature?.svg) {
+        signatureError = 'Nessuna firma caricata per questo utente';
+        return;
+      }
+      signatureSvg = result.signature.svg;
+      showSignatureModal = true;
+    } catch (e) {
+      signatureRequestError = 'firma non caricata correttamente';
+    } finally {
+      signatureLoading = false;
+    }
   }
 
   async function deleteProfile() {
@@ -182,6 +241,14 @@
   }
 </script>
 
+<input
+  bind:this={signatureFileInput}
+  type="file"
+  accept=".svg,image/svg+xml"
+  class="hidden"
+  on:change={onSignatureFileSelected}
+/>
+
 <div style="perspective: 900px;" class="w-full">
   <Motion
     initial={{ opacity: 0, y: 32, scale: 0.94 }}
@@ -238,7 +305,7 @@
             {/if}
           </div>
 
-          {#if canEdit || canDelete}
+          {#if canEdit || canDelete || canManageSignature}
             <div class="absolute top-3 left-4 flex items-center gap-2">
               {#if canEdit}
                 <button
@@ -252,6 +319,36 @@
                       stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4">
                     <path d="M16.862 3.487a2.25 2.25 0 1 1 3.182 3.182L7.5 19.213l-4 1 1-4 12.362-12.726z"/>
                     <path d="M15 5l3 3"/>
+                  </svg>
+                </button>
+              {/if}
+              {#if canManageSignature}
+                <button
+                  type="button"
+                  class="pen-btn"
+                  title={signatureUploading ? 'Caricamento firma…' : 'Carica/Sovrascrivi firma'}
+                  aria-label="Carica o sovrascrivi firma"
+                  on:click={openSignaturePicker}
+                  disabled={signatureUploading}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                      stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4">
+                    <path d="M12 20h9"/>
+                    <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  class="view-sign-btn {signatureLoading ? 'view-sign-btn--active' : ''}"
+                  title="Visualizza ultima firma"
+                  aria-label="Visualizza ultima firma"
+                  on:click={viewLatestSignature}
+                  disabled={signatureLoading}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                      stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4">
+                    <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/>
+                    <circle cx="12" cy="12" r="3"/>
                   </svg>
                 </button>
               {/if}
@@ -415,6 +512,10 @@
 
           <!-- ── FOOTER / AZIONI ─────────────────────────────── -->
            
+          {#if signatureError}
+            <p class="mt-2 text-[0.72rem] text-red-500 font-medium">{signatureError}</p>
+          {/if}
+
           {#if editing}
             {#if saveError}
               <p class="mt-3 text-[0.72rem] text-red-500 font-medium">{saveError}</p>
@@ -482,6 +583,34 @@
   </Motion>
 </div>
 
+{#if showSignatureModal}
+  <div class="sign-backdrop" on:click={() => (showSignatureModal = false)} />
+  <div class="sign-modal" role="dialog" aria-modal="true" on:click|stopPropagation>
+    <div class="sign-modal-header">
+      <h3 class="text-sm font-bold text-zinc-800">Firma Utente</h3>
+      <button type="button" class="modal-close-btn" on:click={() => (showSignatureModal = false)} aria-label="Chiudi">×</button>
+    </div>
+    {#if signatureSvg}
+      <div class="sign-preview">
+        {@html signatureSvg}
+      </div>
+    {:else}
+      <p class="text-sm text-zinc-500">Nessuna firma disponibile.</p>
+    {/if}
+  </div>
+{/if}
+
+{#if signatureRequestError}
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+    on:click={() => (signatureRequestError = null)}
+  >
+    <div on:click|stopPropagation>
+      <ErrorCard message={signatureRequestError} onClose={() => (signatureRequestError = null)} />
+    </div>
+  </div>
+{/if}
+
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;900&family=JetBrains+Mono:wght@400;700&display=swap');
   :global(body) { font-family: 'Sora', sans-serif; }
@@ -516,6 +645,16 @@
   .pencil-btn:hover { background: rgba(255,255,255,.38); transform: scale(1.08); }
   .pencil-btn:active { transform: scale(.95); }
   .pencil-btn--active { background: rgba(255,255,255,.15); cursor: default; opacity: .55; }
+  .pen-btn, .view-sign-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px;
+    background: rgba(255,255,255,.22); backdrop-filter: blur(4px);
+    border: 1px solid rgba(255,255,255,.35); color: #fff;
+    cursor: pointer; transition: background .18s, transform .12s;
+  }
+  .pen-btn:hover, .view-sign-btn:hover { background: rgba(255,255,255,.38); transform: scale(1.08); }
+  .pen-btn:active, .view-sign-btn:active { transform: scale(.95); }
+  .view-sign-btn--active { opacity: .7; cursor: default; }
   .trash-btn {
     display: flex; align-items: center; justify-content: center;
     width: 28px; height: 28px; border-radius: 8px;
@@ -534,6 +673,46 @@
   }
   .edit-input:focus { border-color: #f97316; box-shadow: 0 0 0 3px rgba(249,115,22,.15); }
   .edit-input::placeholder { color: #a1a1aa; font-weight: 400; }
+  .sign-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    background: rgba(0, 0, 0, 0.45);
+  }
+  .sign-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 3001;
+    width: min(560px, 92vw);
+    background: white;
+    border: 1px solid #e4e4e7;
+    border-radius: 12px;
+    padding: 14px;
+  }
+  .sign-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .modal-close-btn {
+    border: none;
+    background: transparent;
+    font-size: 20px;
+    line-height: 1;
+    color: #71717a;
+    cursor: pointer;
+  }
+  .sign-preview {
+    border: 1px solid #e4e4e7;
+    border-radius: 10px;
+    padding: 12px;
+    min-height: 120px;
+    max-height: 320px;
+    overflow: auto;
+  }
 </style>
 
 
