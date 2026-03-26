@@ -38,7 +38,6 @@
         try {
         loading = true;
         const data = await getTrasferte();
-        console.log(data)
         items = data;
         } catch (e) {
         console.error('Errore caricamento trasferte', e);

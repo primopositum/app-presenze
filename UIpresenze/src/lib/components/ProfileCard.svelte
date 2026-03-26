@@ -1,27 +1,167 @@
 <script lang="ts">
   import { Motion } from 'svelte-motion';
-  import type { User } from '$lib/services/users';
+  import { createEventDispatcher } from 'svelte';
+  import type { UpdateAccountPayload, User } from '$lib/services/users';
 
   export let user: User;
+  /**
+   * Utente loggato.
+   * - is_staff / is_superuser  → può modificare qualsiasi profilo
+   * - id === user.id           → può modificare solo il proprio
+   */
+  export let currentUser: {
+    id?: number;
+    is_staff?: boolean;
+    is_superuser?: boolean;
+  } = {};
 
-  $: fullName  = `${user.nome ?? ''} ${user.cognome ?? ''}`.trim();
-  $: initials  = `${user.nome?.[0] ?? ''}${user.cognome?.[0] ?? ''}`.toUpperCase();
-  $: roleLabel = user.contratti?.find((c) => c.is_active)?.tipologia ?? 'Dipendente';
+  export let onSave: ((payload: UpdateAccountPayload) => void | Promise<void>) | null = null;
+  export let onDelete: ((userId: number) => void | Promise<void>) | null = null;
+
+  const dispatch = createEventDispatcher<{ save: UpdateAccountPayload }>();
+
+  // ── permessi ─────────────────────────────────────────────────────────
+
+  
+
+  $: isAdmin = currentUser?.is_staff === true || currentUser?.is_superuser === true;
+  $: isOwnProfile = !!currentUser?.id && Number(currentUser.id) === Number(user.id);
+  $: canEdit = isAdmin || isOwnProfile;
+  $: canDelete = isAdmin && !isSuperProfile && Number(currentUser?.id) !== Number(user.id);
+
+  // ── computed view ─────────────────────────────────────────────────────
+
+
+  $: fullName       = `${user.nome ?? ''} ${user.cognome ?? ''}`.trim();
+  $: initials       = `${user.nome?.[0] ?? ''}${user.cognome?.[0] ?? ''}`.toUpperCase();
+  $: activeContract = user.contratti?.find((c) => c.is_active);
+  $: roleLabel      = activeContract?.tipologia ?? 'Dipendente';
+  $: isSuperProfile = user?.is_superuser === true;
+
+  // ── edit state ────────────────────────────────────────────────────────
+
+
+  let editing      = false;
+  let saving       = false;
+  let deleting     = false;
+  let saveError    = '';
+
+  let editNome      = '';
+  let editCognome   = '';
+  let editEmail     = '';
+  let editSaldo     = 0;
+  let editIsActive  = false;
+  let editTipologia = '';
+
+  function fillEditFields() {
+    editNome      = user.nome      ?? '';
+    editCognome   = user.cognome   ?? '';
+    editEmail     = user.email     ?? '';
+    editSaldo     = Number(user.saldo?.valore_saldo_validato) || 0;
+    editIsActive  = activeContract?.is_active ?? false;
+    editTipologia = activeContract?.tipologia ?? '';
+  }
+
+  function startEdit() {
+    if (!canEdit) return;
+    fillEditFields();
+    saveError = '';
+    editing = true;
+  }
+
+  function cancelEdit() {
+    editing  = false;
+    saving   = false;
+    saveError = '';
+  }
+
+  async function deleteProfile() {
+    if (!canDelete || deleting || !onDelete) return;
+    const confirmed = window.confirm(`Eliminare definitivamente l'account #${user.id}?`);
+    if (!confirmed) return;
+
+    deleting = true;
+    saveError = '';
+    try {
+      await onDelete(user.id);
+    } catch (e) {
+      saveError = e instanceof Error ? e.message : 'Errore durante l\'eliminazione';
+    } finally {
+      deleting = false;
+    }
+  }
+
+  async function saveEdit() {
+    if (!canEdit || saving) return;
+
+    const payload: UpdateAccountPayload = { id: user.id, user_id: user.id };
+
+    const trimmedNome = editNome.trim();
+    const trimmedCognome = editCognome.trim();
+    const trimmedEmail = editEmail.trim();
+
+    // Invia solo i campi effettivamente modificati
+    if (trimmedNome !== (user.nome ?? '')) payload.nome = trimmedNome;
+    if (trimmedCognome !== (user.cognome ?? '')) payload.cognome = trimmedCognome;
+
+    // Email: confronto case-insensitive, in linea con il backend
+    if (trimmedEmail.toLowerCase() !== (user.email ?? '').trim().toLowerCase()) {
+      payload.email = trimmedEmail;
+    }
+
+    if (isAdmin) {
+      if (user.saldo) {
+        const saldoOriginale = Number(user.saldo.valore_saldo_validato) || 0;
+        if (editSaldo !== saldoOriginale) {
+          payload.saldo = {
+            valore_saldo_validato: String(editSaldo),
+            valore_saldo_sospeso: String(Number(user.saldo?.valore_saldo_sospeso) || 0)
+          };
+        }
+      }
+      if (activeContract) {
+        if (editTipologia !== (activeContract.tipologia ?? '') || editIsActive !== activeContract.is_active) {
+          payload.contratti = [{
+            is_active: editIsActive,
+            tipologia: editTipologia
+          }];
+        }
+      }
+    }
+
+    saving    = true;
+    saveError = '';
+
+    try {
+      if (onSave) {
+        await onSave(payload);
+      } else {
+        dispatch('save', payload);
+      }
+      editing = false;
+    } catch (e) {
+      saveError = e instanceof Error ? e.message : 'Errore durante il salvataggio';
+    } finally {
+      saving = false;
+    }
+  }
+
+  // ── 3-D tilt ─────────────────────────────────────────────────────────
+
 
   let rotateX = 0, rotateY = 0;
   let glowX = 50, glowY = 50;
   let isHover = false;
 
   function onMouseMove(e: MouseEvent) {
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const r  = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const dx = (e.clientX - r.left) / r.width;
     const dy = (e.clientY - r.top)  / r.height;
-    rotateY =  (dx - 0.5) * 12;
-    rotateX = -(dy - 0.5) * 12;
-    glowX   = dx * 100;
-    glowY   = dy * 100;
+    rotateY  =  (dx - 0.5) * 12;
+    rotateX  = -(dy - 0.5) * 12;
+    glowX    = dx * 100;
+    glowY    = dy * 100;
   }
-
   function onEnter() { isHover = true; }
   function onLeave() {
     isHover = false;
@@ -37,7 +177,7 @@
 
   function openMail() {
     const email = user?.email?.trim();
-    if (!email) return;
+    if (!email || editing) return;
     window.location.href = `mailto:${email}`;
   }
 </script>
@@ -64,194 +204,279 @@
       aria-label="Profilo di {fullName}"
     >
 
-      <!-- ╔══ CARD — sfondo bianco ══════════════════════════╗ -->
       <div class="
         relative w-full rounded-2xl overflow-visible
-        bg-white border border-orange-100
-        shadow-[0_4px_6px_-1px_rgba(249,115,22,.08),0_20px_50px_-8px_rgba(249,115,22,.15),0_2px_4px_rgba(0,0,0,.06)]
+        bg-white border {isSuperProfile ? 'border-fuchsia-200 shadow-[0_4px_6px_-1px_rgba(217,70,239,.08),0_20px_50px_-8px_rgba(217,70,239,.18),0_2px_4px_rgba(0,0,0,.06)]' : 'border-orange-100 shadow-[0_4px_6px_-1px_rgba(249,115,22,.08),0_20px_50px_-8px_rgba(249,115,22,.15),0_2px_4px_rgba(0,0,0,.06)]'}
       ">
 
-        <!-- cursor glow (arancio leggero su bianco) -->
         <div
           class="absolute inset-0 pointer-events-none z-10 rounded-2xl overflow-hidden"
           style="background: radial-gradient(circle at {glowX}% {glowY}%, rgba(251,146,60,.07) 0%, transparent 65%);"
         ></div>
 
         <!-- ── BANNER ──────────────────────────────────────── -->
-        <div class="relative h-28 overflow-hidden rounded-t-2xl banner-bg">
-          <div class="absolute inset-0 banner-grid"></div>
-          <!-- blobs -->
-          <div class="absolute -top-8 -left-6  w-44 h-32 rounded-full bg-orange-400 blur-3xl opacity-40"></div>
-          <div class="absolute -top-6 -right-6 w-40 h-28 rounded-full bg-amber-300  blur-3xl opacity-30"></div>
-          <!-- accent line top -->
-          <div class="absolute top-0 inset-x-0 h-[2px] bg-gradient-to-r from-transparent via-orange-300 to-transparent"></div>
 
-          <!-- role badge top-right -->
-          <Motion
-            initial={{ opacity: 0, x: 12 }}
-            animate={{ opacity: 1, x: 0  }}
-            transition={{ delay: 0.3, duration: 0.4 }}
-            let:motion
-          >
-            <div use:motion class="absolute top-3 right-4">
+
+        <div class="relative h-28 overflow-hidden rounded-t-2xl {isSuperProfile ? 'banner-bg-super' : 'banner-bg'}">
+          <div class="absolute inset-0 banner-grid"></div>
+          <div class="absolute -top-8 -left-6  w-44 h-32 rounded-full {isSuperProfile ? 'bg-fuchsia-400' : 'bg-orange-400'} blur-3xl opacity-40"></div>
+          <div class="absolute -top-6 -right-6 w-40 h-28 rounded-full {isSuperProfile ? 'bg-pink-300' : 'bg-amber-300'}  blur-3xl opacity-30"></div>
+          <div class="absolute top-0 inset-x-0 h-[2px] bg-gradient-to-r from-transparent {isSuperProfile ? 'via-fuchsia-300' : 'via-orange-300'} to-transparent"></div>
+
+          <div class="absolute top-3 right-4">
+            {#if editing && isAdmin}
+              <input
+                bind:value={editTipologia}
+                class="edit-input text-[0.62rem] font-bold tracking-widest uppercase font-mono w-32 text-center"
+                placeholder="Tipologia"
+              />
+            {:else}
               <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/20 backdrop-blur-sm border border-white/30 text-white text-[0.62rem] font-bold tracking-widest uppercase font-mono">
                 <span class="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
-                {roleLabel}
+                {editing ? editTipologia || roleLabel : roleLabel}
               </span>
+            {/if}
+          </div>
+
+          {#if canEdit || canDelete}
+            <div class="absolute top-3 left-4 flex items-center gap-2">
+              {#if canEdit}
+                <button
+                  type="button"
+                  class="pencil-btn {editing ? 'pencil-btn--active' : ''}"
+                  title={editing ? 'Stai modificando…' : 'Modifica profilo'}
+                  aria-label="Modifica profilo"
+                  on:click={() => !editing && startEdit()}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                      stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4">
+                    <path d="M16.862 3.487a2.25 2.25 0 1 1 3.182 3.182L7.5 19.213l-4 1 1-4 12.362-12.726z"/>
+                    <path d="M15 5l3 3"/>
+                  </svg>
+                </button>
+              {/if}
+              {#if canDelete}
+                <button
+                  type="button"
+                  class="trash-btn {deleting ? 'trash-btn--active' : ''}"
+                  title={deleting ? 'Eliminazione…' : 'Elimina account'}
+                  aria-label="Elimina account"
+                  on:click={deleteProfile}
+                  disabled={deleting}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                      stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4">
+                    <path d="M3 6h18"/>
+                    <path d="M8 6V4h8v2"/>
+                    <path d="M19 6l-1 14H6L5 6"/>
+                    <path d="M10 11v6M14 11v6"/>
+                  </svg>
+                </button>
+              {/if}
             </div>
-          </Motion>
+          {/if}
         </div>
 
-        <!-- ── AVATAR ROW — fuori dal banner, z alto ─────────
-             Il -mt-9 tira su l'avatar sopra il bordo del banner.
-             overflow-visible sulla card permette all'avatar di uscire.
-        ──────────────────────────────────────────────────────── -->
-        <div class="relative flex items-end justify-between px-5 -mt-9 z-30">
+        <!-- ── AVATAR ROW ───────────────────────────────────── -->
 
-          <!-- avatar + spinning ring -->
+
+        <div class="relative flex items-end justify-between px-5 -mt-9 z-30">
           <div class="relative w-[72px] h-[72px]">
-            <div class="avatar-ring absolute -inset-[3px] rounded-full"></div>
-            <div class="
-              w-[72px] h-[72px] rounded-full
-              bg-white border-[3px] border-white
-              flex items-center justify-center select-none
-              shadow-md
-            ">
-              <span class="text-xl font-black text-orange-500 tracking-tighter leading-none">
-                {initials}
+            <div class="absolute -inset-[3px] rounded-full {isSuperProfile ? 'avatar-ring-super' : 'avatar-ring'}"></div>
+            <div class="w-[72px] h-[72px] rounded-full bg-white border-[3px] border-white flex items-center justify-center select-none shadow-md">
+              <span class="text-xl font-black {isSuperProfile ? 'text-fuchsia-500' : 'text-orange-500'} tracking-tighter leading-none">
+                {#if editing}
+                  {`${editNome[0] ?? ''}${editCognome[0] ?? ''}`.toUpperCase() || initials}
+                {:else}
+                  {initials}
+                {/if}
               </span>
             </div>
           </div>
-
-          <!-- ID pill allineato a destra -->
-          <Motion
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1   }}
-            transition={{ delay: 0.45, duration: 0.35, type: 'spring', bounce: 0.35 }}
-            let:motion
-          >
-            <span
-              use:motion
-              class="mb-1 px-2.5 py-1 rounded-lg bg-orange-50 border border-orange-200 text-orange-500 text-[0.65rem] font-black font-mono tracking-wider"
-            >
-              #{String(user.id ?? '—').padStart(4, '0')}
-            </span>
-          </Motion>
+          <span class="mb-1 px-2.5 py-1 rounded-lg {isSuperProfile ? 'bg-fuchsia-50 border-fuchsia-200 text-fuchsia-500' : 'bg-orange-50 border-orange-200 text-orange-500'} border text-[0.65rem] font-black font-mono tracking-wider">
+            #{String(user.id ?? '—').padStart(4, '0')}
+          </span>
         </div>
 
         <!-- ── BODY ────────────────────────────────────────── -->
+
+
         <div class="px-5 pb-5 pt-3 relative z-20">
 
-          <!-- name + verified -->
           <div class="flex items-center gap-1.5 mt-2">
-            <h2 class="text-lg font-black tracking-tight text-zinc-900 leading-tight">{fullName}</h2>
-            <svg viewBox="0 0 20 20" fill="none" class="w-[18px] h-[18px] shrink-0">
-              <circle cx="10" cy="10" r="9" fill="#f97316"/>
-              <path d="M6 10l3 3 5-5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
+            {#if editing}
+              <input bind:value={editNome}    class="edit-input w-[45%]" placeholder="Nome"    />
+              <input bind:value={editCognome} class="edit-input w-[45%]" placeholder="Cognome" />
+            {:else}
+              <h2 class="text-lg font-black tracking-tight text-zinc-900 leading-tight">{fullName}</h2>
+              <svg viewBox="0 0 20 20" fill="none" class="w-[18px] h-[18px] shrink-0">
+                <circle cx="10" cy="10" r="9" fill="#f97316"/>
+                <path d="M6 10l3 3 5-5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            {/if}
           </div>
 
-          <!-- email subtitle -->
-          <Motion
-            initial={{ opacity: 0, x: -8 }}
-            animate={{ opacity: 1, x: 0  }}
-            transition={{ delay: 0.28, duration: 0.35 }}
-            let:motion
-          >
-            <p use:motion class="text-[0.72rem] text-zinc-400 font-medium tracking-wide mt-0.5 mb-4 truncate">
-              {user.email}
-            </p>
-          </Motion>
+          <div class="mt-0.5 mb-4">
+            {#if editing}
+              <input bind:value={editEmail} type="email" class="edit-input w-full text-[0.72rem]" placeholder="Email" />
+            {:else}
+              <p class="text-[0.72rem] text-zinc-400 font-medium tracking-wide truncate">{user.email}</p>
+            {/if}
+          </div>
 
-          <!-- divider -->
-          <div class="h-px bg-gradient-to-r from-orange-200 via-orange-100 to-transparent mb-4"></div>
+          <div class="h-px bg-gradient-to-r {isSuperProfile ? 'from-fuchsia-200 via-fuchsia-100' : 'from-orange-200 via-orange-100'} to-transparent mb-4"></div>
 
-          <!-- ── INFO ROWS ───────────────────────────────────── -->
+          <!-- ── INFO ROWS ─────────────────────────────────── -->
+
+
           <div class="flex flex-col gap-2.5">
-
-            <!-- saldo -->
-            <Motion
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0  }}
-              transition={{ delay: 0.32, duration: 0.38 }}
-              let:motion
-            >
-              <div use:motion class="
-                flex items-center justify-between px-3.5 py-3 rounded-xl
-                bg-orange-50 border border-orange-100
-                hover:bg-orange-100 hover:border-orange-200
-                transition-all duration-200
-              ">
-                <div class="flex items-center gap-2.5">
-                  <div class="w-7 h-7 rounded-lg bg-orange-100 flex items-center justify-center shrink-0">
-                    <svg viewBox="0 0 20 20" fill="none" class="w-3.5 h-3.5 text-orange-500" aria-hidden="true">
-                      <circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.8" />
-                      <path d="M10 6.5V10L12.8 11.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-                    </svg>
-                  </div>
-                  <span class="text-xs text-zinc-500 font-semibold tracking-wide">Saldo ore</span>
-                </div>
-                <span class="text-sm font-black text-orange-600 font-mono tabular-nums">
-                  {fmtSaldo(user.saldo?.valore_saldo_validato)}
-                </span>
+            {#if editing && isAdmin}
+              <div class="flex items-center justify-between px-3.5 py-3 rounded-xl bg-zinc-50 border border-zinc-100">
+                <span class="text-xs text-zinc-500 font-semibold tracking-wide">Tipologia</span>
+                <input
+                  bind:value={editTipologia}
+                  class="edit-input w-40 text-center text-[0.72rem] font-bold tracking-wide"
+                  placeholder="Tipologia"
+                />
               </div>
-            </Motion>
+            {/if}
+
+            <div class="flex items-center justify-between px-3.5 py-3 rounded-xl {isSuperProfile ? 'bg-fuchsia-50 border-fuchsia-100 hover:bg-fuchsia-100 hover:border-fuchsia-200' : 'bg-orange-50 border-orange-100 hover:bg-orange-100 hover:border-orange-200'} border transition-all duration-200">
+              <div class="flex items-center gap-2.5">
+                <div class="w-7 h-7 rounded-lg {isSuperProfile ? 'bg-fuchsia-100' : 'bg-orange-100'} flex items-center justify-center shrink-0">
+                  <svg viewBox="0 0 20 20" fill="none" class="w-3.5 h-3.5 {isSuperProfile ? 'text-fuchsia-500' : 'text-orange-500'}">
+                    <circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.8"/>
+                    <path d="M10 6.5V10L12.8 11.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </div>
+                <span class="text-xs text-zinc-500 font-semibold tracking-wide">Saldo ore</span>
+              </div>
+              {#if editing && isAdmin}
+                <input
+                  bind:value={editSaldo}
+                  type="number"
+                  step="0.5"
+                  class="edit-input w-24 text-right font-mono text-sm"
+                  placeholder="0"
+                />
+              {:else}
+                <span class="text-sm font-black {isSuperProfile ? 'text-fuchsia-600' : 'text-orange-600'} font-mono tabular-nums">
+                  {fmtSaldo(editing ? editSaldo : user.saldo?.valore_saldo_validato)}
+                </span>
+              {/if}
+            </div>
 
             <!-- email row -->
-            <Motion
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0  }}
-              transition={{ delay: 0.40, duration: 0.38 }}
-              let:motion
+            <div
+              class="flex items-center justify-between px-3.5 py-3 rounded-xl bg-zinc-50 border border-zinc-100 transition-all duration-200 {editing ? '' : 'hover:bg-zinc-100 hover:border-zinc-200 cursor-pointer'}"
+              role="button"
+              tabindex="0"
+              on:click={openMail}
+              on:keydown={(e) => !editing && (e.key === 'Enter' || e.key === ' ') && openMail()}
             >
-              <div
-                use:motion
-                class="
-                flex items-center justify-between px-3.5 py-3 rounded-xl
-                bg-zinc-50 border border-zinc-100
-                hover:bg-zinc-100 hover:border-zinc-200
-                transition-all duration-200
-              "
-                role="button"
-                tabindex="0"
-                on:click={openMail}
-                on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && openMail()}
-              >
+              <div class="flex items-center gap-2.5">
+                <div class="w-7 h-7 rounded-lg bg-zinc-100 flex items-center justify-center shrink-0">
+                  <svg viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5 text-zinc-400">
+                    <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/>
+                    <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/>
+                  </svg>
+                </div>
+                <span class="text-xs text-zinc-500 font-semibold tracking-wide">Email</span>
+              </div>
+              <span class="text-xs font-semibold text-zinc-700 truncate max-w-[150px]">
+                {editing ? editEmail || '—' : user.email}
+              </span>
+            </div>
+
+            <!-- contratto attivo toggle — solo admin in edit -->
+            {#if editing && isAdmin}
+              <div class="flex items-center justify-between px-3.5 py-3 rounded-xl bg-zinc-50 border border-zinc-100">
                 <div class="flex items-center gap-2.5">
                   <div class="w-7 h-7 rounded-lg bg-zinc-100 flex items-center justify-center shrink-0">
                     <svg viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5 text-zinc-400">
-                      <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/>
-                      <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/>
+                      <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clip-rule="evenodd"/>
                     </svg>
                   </div>
-                  <span class="text-xs text-zinc-500 font-semibold tracking-wide">Email</span>
+                  <span class="text-xs text-zinc-500 font-semibold tracking-wide">Contratto attivo</span>
                 </div>
-                <span class="text-xs font-semibold text-zinc-700 truncate max-w-[150px]">
-                  {user.email}
-                </span>
+                <button
+                  type="button"
+                  class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none {editIsActive ? (isSuperProfile ? 'bg-fuchsia-500' : 'bg-orange-500') : 'bg-zinc-300'}"
+                  on:click={() => (editIsActive = !editIsActive)}
+                  aria-checked={editIsActive}
+                  role="switch"
+                >
+                  <span class="inline-block h-4 w-4 rounded-full bg-white shadow-sm transform transition-transform duration-200 {editIsActive ? 'translate-x-6' : 'translate-x-1'}"></span>
+                </button>
               </div>
-            </Motion>
+            {/if}
 
           </div>
 
-          <!-- ── FOOTER ──────────────────────────────────────── -->
-          <Motion
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.5, duration: 0.4 }}
-            let:motion
-          >
-            <div use:motion class="mt-4 pt-3.5 border-t border-orange-50 flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <span class="w-2 h-2 rounded-full bg-orange-400 shadow-[0_0_6px_rgba(251,146,60,.6)] animate-pulse"></span>
-                <span class="text-[0.7rem] text-zinc-400 font-medium tracking-wide">Attivo</span>
-              </div>
-              <span class="text-[0.68rem] text-zinc-400 font-medium">{fullName}</span>
+          <!-- ── FOOTER / AZIONI ─────────────────────────────── -->
+           
+          {#if editing}
+            {#if saveError}
+              <p class="mt-3 text-[0.72rem] text-red-500 font-medium">{saveError}</p>
+            {/if}
+            <div class="mt-4 pt-3.5 border-t {isSuperProfile ? 'border-fuchsia-50' : 'border-orange-50'} flex items-center gap-2">
+              <button
+                type="button"
+                class="flex-1 py-2.5 rounded-xl text-white text-xs font-bold tracking-wide transition-all duration-150
+                       {saving
+                         ? (isSuperProfile ? 'bg-fuchsia-300 cursor-not-allowed' : 'bg-orange-300 cursor-not-allowed')
+                         : (isSuperProfile ? 'bg-fuchsia-500 hover:bg-fuchsia-600 active:scale-95' : 'bg-orange-500 hover:bg-orange-600 active:scale-95')}"
+                disabled={saving}
+                on:click={saveEdit}
+              >
+                {#if saving}
+                  <span class="inline-flex items-center gap-1.5">
+                    <span class="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin"></span>
+                    Salvataggio…
+                  </span>
+                {:else}
+                  ✓ Salva modifiche
+                {/if}
+              </button>
+              <button
+                type="button"
+                class="px-4 py-2.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 active:scale-95 text-zinc-500 text-xs font-bold tracking-wide transition-all duration-150"
+                disabled={saving}
+                on:click={cancelEdit}
+              >
+                Annulla
+              </button>
             </div>
-          </Motion>
+          {:else}
+            <Motion
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.5, duration: 0.4 }}
+              let:motion
+            >
+              <div use:motion class="mt-4 pt-3.5 border-t {isSuperProfile ? 'border-fuchsia-50' : 'border-orange-50'} flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full {isSuperProfile ? 'bg-fuchsia-400 shadow-[0_0_6px_rgba(217,70,239,.6)]' : 'bg-orange-400 shadow-[0_0_6px_rgba(251,146,60,.6)]'} animate-pulse"></span>
+                  <span class="text-[0.7rem] text-zinc-400 font-medium tracking-wide">
+                    {activeContract?.is_active ? 'Attivo' : 'Non attivo'}
+                  </span>
+                </div>
+                {#if canEdit}
+                  <button
+                    type="button"
+                    class="px-3 py-1.5 rounded-lg {isSuperProfile ? 'bg-fuchsia-100 hover:bg-fuchsia-200 text-fuchsia-700' : 'bg-orange-100 hover:bg-orange-200 text-orange-700'} text-[0.68rem] font-semibold transition-colors"
+                    on:click={startEdit}
+                  >
+                    Modifica profilo
+                  </button>
+                {:else}
+                  <span class="text-[0.68rem] text-zinc-400 font-medium">{fullName}</span>
+                {/if}
+              </div>
+            </Motion>
+          {/if}
 
         </div>
-        <!-- ╚══ /CARD ══════════════════════════════════════════╝ -->
       </div>
     </div>
   </Motion>
@@ -259,27 +484,58 @@
 
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;900&family=JetBrains+Mono:wght@400;700&display=swap');
-
   :global(body) { font-family: 'Sora', sans-serif; }
-
-  .banner-bg {
-    background: linear-gradient(135deg, #f0b799 0%, #f97316 50%, #fb923c 100%);
-  }
-
+  .banner-bg { background: linear-gradient(135deg, #f0b799 0%, #f97316 50%, #fb923c 100%); }
+  .banner-bg-super { background: linear-gradient(135deg, #f5b6ff 0%, #d946ef 50%, #ec4899 100%); }
   .banner-grid {
     background-image:
       linear-gradient(rgba(255,255,255,.08) 1px, transparent 1px),
       linear-gradient(90deg, rgba(255,255,255,.08) 1px, transparent 1px);
     background-size: 24px 24px;
   }
-
-  /* Ring arancio/ambra che ruota dietro le iniziali */
   .avatar-ring {
     background: conic-gradient(#f97316, #fbbf24, #fb923c, #f97316);
     animation: spin 5s linear infinite;
     -webkit-mask: radial-gradient(circle, transparent 50%, black 52%);
             mask: radial-gradient(circle, transparent 50%, black 52%);
   }
-
+  .avatar-ring-super {
+    background: conic-gradient(#d946ef, #f472b6, #ec4899, #d946ef);
+    animation: spin 5s linear infinite;
+    -webkit-mask: radial-gradient(circle, transparent 50%, black 52%);
+            mask: radial-gradient(circle, transparent 50%, black 52%);
+  }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .pencil-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px;
+    background: rgba(255,255,255,.22); backdrop-filter: blur(4px);
+    border: 1px solid rgba(255,255,255,.35); color: #fff;
+    cursor: pointer; transition: background .18s, transform .12s;
+  }
+  .pencil-btn:hover { background: rgba(255,255,255,.38); transform: scale(1.08); }
+  .pencil-btn:active { transform: scale(.95); }
+  .pencil-btn--active { background: rgba(255,255,255,.15); cursor: default; opacity: .55; }
+  .trash-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px;
+    background: rgba(255,255,255,.22); backdrop-filter: blur(4px);
+    border: 1px solid rgba(255,255,255,.35); color: #fff;
+    cursor: pointer; transition: background .18s, transform .12s;
+  }
+  .trash-btn:hover { background: rgba(248,113,113,.45); transform: scale(1.08); }
+  .trash-btn:active { transform: scale(.95); }
+  .trash-btn--active { background: rgba(248,113,113,.25); cursor: default; opacity: .65; }
+  .edit-input {
+    background: rgba(249,115,22,.06); border: 1px solid rgba(249,115,22,.3);
+    border-radius: 8px; padding: 5px 9px;
+    font-family: 'Sora', sans-serif; font-size: 0.82rem; font-weight: 600;
+    color: #18181b; outline: none; transition: border-color .15s, box-shadow .15s;
+  }
+  .edit-input:focus { border-color: #f97316; box-shadow: 0 0 0 3px rgba(249,115,22,.15); }
+  .edit-input::placeholder { color: #a1a1aa; font-weight: 400; }
 </style>
+
+
+
+

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import uuid
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -22,7 +24,7 @@ from rest_framework.views import APIView
 
 from docx import Document
 
-from .models import Contratto, Spesa, Trasferta, Utente
+from .models import Contratto, Signature, SignatureEvent, Spesa, Trasferta, Utente
 
 
 DOCX_TEMPLATE_PATH = Path(
@@ -361,6 +363,13 @@ def _convert_docx_to_pdf(docx_bytes: bytes) -> BytesIO:
         return out
 
 
+def _get_client_ip(request) -> str | None:
+    xff = request.META.get("HTTP_X_FORWARDED_FOR")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR")
+
+
 def build_trasferte_pdf_bytes(
     user: Utente,
     trasferte: List[Trasferta],
@@ -494,21 +503,50 @@ class TrasfertePDFView(APIView):
         )
 
         firma_path = None
+        signature_used = None
+        temp_dir = None
         if firma:
-            if not firma_path_param:
-                return Response(
-                    {"errors": "Con firma=true devi passare anche 'firma_path'."},
-                    status=status.HTTP_400_BAD_REQUEST,
+            if firma_path_param:
+                firma_path = Path(firma_path_param)
+            else:
+                signature_used = (
+                    Signature.objects
+                    .filter(user_id=user.id)
+                    .order_by("-created_at")
+                    .first()
                 )
-            firma_path = Path(firma_path_param)
+                if signature_used is None:
+                    return Response(
+                        {"errors": "Nessuna firma disponibile per l'utente richiesto."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                temp_dir = tempfile.TemporaryDirectory()
+                firma_path = Path(temp_dir.name) / f"signature_{signature_used.id}.svg"
+                firma_path.write_text(signature_used.svg, encoding="utf-8")
 
-        pdf_bytes = build_trasferte_pdf_bytes(
-            user=user,
-            trasferte=trasferte,
-            period_start=start_prev_month,
-            firma=firma,
-            firma_path=firma_path,
-        )
+        try:
+            pdf_bytes = build_trasferte_pdf_bytes(
+                user=user,
+                trasferte=trasferte,
+                period_start=start_prev_month,
+                firma=firma,
+                firma_path=firma_path,
+            )
+        finally:
+            if temp_dir is not None:
+                temp_dir.cleanup()
+
+        if firma and signature_used is not None:
+            SignatureEvent.objects.create(
+                signature=signature_used,
+                user=request.user,
+                event_type=SignatureEvent.EventType.USED,
+                document_id=uuid.uuid4(),
+                document_sha256=hashlib.sha256(pdf_bytes).hexdigest(),
+                ip_address=_get_client_ip(request),
+                user_agent=request.META.get("HTTP_USER_AGENT", ""),
+            )
+
         pdf_stream = BytesIO(pdf_bytes)
         filename = f"trasferte_{user.id}_{start_prev_month.strftime('%Y_%m')}.pdf"
         return FileResponse(pdf_stream, as_attachment=True, filename=filename)

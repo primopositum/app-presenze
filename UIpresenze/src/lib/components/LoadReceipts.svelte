@@ -133,6 +133,19 @@
     return new File([file], newName, { type: file.type });
   }
 
+  function safeRandomId(): string {
+    const cryptoObj = (globalThis as any)?.crypto;
+    if (cryptoObj?.randomUUID && typeof cryptoObj.randomUUID === 'function') {
+      return cryptoObj.randomUUID();
+    }
+    if (cryptoObj?.getRandomValues && typeof cryptoObj.getRandomValues === 'function') {
+      const bytes = new Uint8Array(16);
+      cryptoObj.getRandomValues(bytes);
+      return Array.from(bytes, (b: number) => b.toString(16).padStart(2, '0')).join('');
+    }
+    return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  }
+
   async function processFiles(rawFiles: FileList | null): Promise<void> {
     if (!rawFiles) return;
     const filtered = Array.from(rawFiles).filter((f) =>
@@ -143,7 +156,7 @@
     const processed: UploadedFile[] = filtered.map((file, i) => {
       const renamed = mode === 'trasferta' ? renameFile(file, i) : file;
       return {
-        id: crypto.randomUUID(),
+        id: safeRandomId(),
         file: renamed,
         name: renamed.name,
         size: file.size,

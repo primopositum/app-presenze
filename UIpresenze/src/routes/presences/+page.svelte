@@ -187,7 +187,6 @@ export const loadData = async () => {
       }));
       await refreshProfileUser();
       await useOneUserApi($timeEntryUser.user?.id)
-      console.log(timeEntryUser)      
     } catch (e: any) {
       error = e?.message || 'Errore caricamento';
     } finally {
@@ -520,7 +519,8 @@ export const loadData = async () => {
     <div class="w-full lg:w-[320px] lg:flex-shrink-0">
       {#if selectedDate}
         <TimeEntryCard timeEntries={selectedEntries} dateParam={selectedDate} />
-        <div class="mt-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition-all duration-200">
+        {#if selectedEntries.length > 0}
+          <div class="mt-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition-all duration-200">
           <div class="mb-1 flex items-center justify-between gap-2">
             <label for="day-note" class="block text-xs font-semibold uppercase tracking-wide text-slate-500">
               Note giorno
@@ -601,7 +601,8 @@ export const loadData = async () => {
               Salva
             </button>
           </div>
-        </div>
+          </div>
+        {/if}
       {/if}
     </div>
   </div>

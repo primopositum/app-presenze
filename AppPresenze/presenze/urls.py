@@ -7,6 +7,7 @@ api_urlpatterns = [
     # -------------------------------------------------------------------------
     path("profile/",         views.user_profile,     name="profile"),    
     path("change-password/", views.change_password,  name="change-password"),
+    path("delete-account/",  views.delete_account,   name="delete-account"),
 
     # -------------------------------------------------------------------------
     # Auth JSON
@@ -15,6 +16,7 @@ api_urlpatterns = [
     path("login/",    views.api_login,   name="login"),
     path("logout/",   views.api_logout,  name="logout"),
     path("users/",    views.users_list,  name="users-list"),
+    path("signatures/", views.signature_create, name="signature-create"),
 
     # -------------------------------------------------------------------------
     # Time Entries

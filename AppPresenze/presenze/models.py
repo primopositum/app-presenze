@@ -3,6 +3,7 @@ from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, Permis
 from django.utils import timezone
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
+import uuid
 
 
 # ---------------------------
@@ -369,3 +370,64 @@ class Spesa(models.Model):
 
     def __str__(self):
         return f"Spesa {self.type} - {self.importo}"
+
+
+# ---------------------------
+# Signature
+# ---------------------------
+
+class Signature(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        Utente,
+        on_delete=models.CASCADE,
+        related_name="signatures",
+        db_column="U_ID",
+    )
+    svg = models.TextField()
+    sha256 = models.CharField(max_length=64, db_index=True)
+    width = models.PositiveIntegerField(null=True, blank=True)
+    height = models.PositiveIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "Signature"
+        indexes = [
+            models.Index(fields=["user", "-created_at"]),
+            models.Index(fields=["sha256"]),
+        ]
+
+
+class SignatureEvent(models.Model):
+    class EventType(models.TextChoices):
+        CREATED = "created", "Created"
+        USED = "used", "Used"
+        DELETED = "deleted", "Deleted"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    signature = models.ForeignKey(
+        Signature,
+        on_delete=models.CASCADE,
+        related_name="events",
+    )
+    user = models.ForeignKey(
+        Utente,
+        on_delete=models.CASCADE,
+        related_name="signature_events",
+        db_column="U_ID",
+    )
+    event_type = models.CharField(max_length=20, choices=EventType.choices)
+    document_id = models.UUIDField(null=True, blank=True)
+    document_sha256 = models.CharField(max_length=64, null=True, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "SignatureEvent"
+        indexes = [
+            models.Index(fields=["signature", "-created_at"]),
+            models.Index(fields=["user", "-created_at"]),
+            models.Index(fields=["event_type", "-created_at"]),
+        ]

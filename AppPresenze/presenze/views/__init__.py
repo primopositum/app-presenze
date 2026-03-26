@@ -1,5 +1,5 @@
 from .auth import api_login, get_token, api_logout
-from .account import change_password, user_profile, users_list
+from .account import change_password, user_profile, users_list, delete_account
 from .timeentries import (
     time_entries_from_month_to_previous,
     timeentry_create, timeentry_detail,
@@ -25,3 +25,4 @@ from .scontrini import (
     pdf_auto_current_month_list,
 )
 from .automobili import (AutomobileListCreateView, AutomobileDetailView, AutomobileDeleteView, AutomobilePatchView)
+from .signatures import signature_create

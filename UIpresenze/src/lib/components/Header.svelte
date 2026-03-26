@@ -12,8 +12,12 @@
 
   $: saldoValidato = $auth.user?.saldo?.valore_saldo_validato ?? null;
   $: saldoTimeEntryUser = $timeEntryUser.user?.saldo?.valore_saldo_validato ?? null;
+  $: isHomeRoute = $page.url.pathname === '/';
   $: isPresencesRoute = $page.url.pathname.startsWith('/presences');
   $: isProfileRoute = $page.url.pathname === '/profilo';
+  $: showAllProfiles = $page.url.searchParams.get('show_all_users') === '1';
+  $: canToggleAllProfiles = isProfileRoute && !!$auth.user?.is_superuser;
+  $: canShowHourBalanceRoute = isHomeRoute || isPresencesRoute;
 
   $: extra = $hourBalanceExtra ?? null;
   $: canShowExtra = !!extra && extra.saldo !== undefined && extra.saldo !== null;
@@ -25,13 +29,9 @@
     const n = typeof v === 'string' ? Number(v) : (v as number);
     return Number.isFinite(n) ? n : 0;
   };
-  $: showSaldo =
-    $auth.isAuthed &&
-    ((!$auth.user?.is_superuser && saldoValidato !== null) ||
-      ($auth.user?.is_superuser && isPresencesRoute && saldoTimeEntryUser !== null));
-
   $: saldoToShow =
     $auth.user?.is_superuser && isPresencesRoute ? saldoTimeEntryUser : saldoValidato;
+  $: showSaldo = $auth.isAuthed && canShowHourBalanceRoute && saldoToShow !== null;
   
   function handleLogout() {
     auth.logout();
@@ -40,6 +40,17 @@
 
   function goToProfile() {
     goto('/profilo');
+  }
+  function toggleAllProfiles() {
+    const params = new URLSearchParams($page.url.searchParams);
+    if (showAllProfiles) {
+      params.delete('show_all_users');
+    } else {
+      params.set('show_all_users', '1');
+    }
+    const query = params.toString();
+    const target = query ? `${$page.url.pathname}?${query}` : $page.url.pathname;
+    goto(target, { replaceState: true, noScroll: true, keepFocus: true });
   }
     // $: showProfileButton = page.url.pathname !== '/profilo';
   function toggle() {
@@ -87,6 +98,19 @@
             >
               <FontAwesomeIcon icon={faKey} class="text-base" />
             </button>
+            {#if canToggleAllProfiles}
+              <button
+                type="button"
+                class="inline-flex h-10 items-center justify-center rounded-full border px-3 text-sm font-semibold transition {showAllProfiles
+                  ? 'border-orange-400 bg-orange-50 text-orange-700 hover:bg-orange-100'
+                  : 'border-gray-300 bg-white text-gray-800 hover:border-gray-400 hover:text-black'}"
+                title={showAllProfiles ? 'Mostra solo utenti normali' : 'Mostra tutti gli utenti'}
+                aria-label={showAllProfiles ? 'Mostra solo utenti normali' : 'Mostra tutti gli utenti'}
+                on:click={toggleAllProfiles}
+              >
+                {showAllProfiles ? 'Solo utenti' : 'Superusers'}
+              </button>
+            {/if}
           </div>
          {/if}
       </div>

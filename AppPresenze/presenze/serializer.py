@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import Utente, TimeEntry, Saldo, Contratto, Trasferta, Spesa, Automobile
+import hashlib
+from .models import Utente, TimeEntry, Saldo, Contratto, Trasferta, Spesa, Automobile, Signature, SignatureEvent
 from decimal import Decimal
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
@@ -233,3 +234,64 @@ class AutomobilePatchSerializer(serializers.ModelSerializer):
         if value < 0:
             raise serializers.ValidationError("Il coefficiente non può essere negativo.")
         return value
+
+class SignatureSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Signature
+        fields = [
+            "id",
+            "svg",
+            "width",
+            "height",
+            "created_at",
+        ]
+        read_only_fields = ["id", "created_at"]
+
+    def validate_svg(self, value):
+        value = value.strip()
+        if not value.startswith("<svg"):
+            raise serializers.ValidationError("Invalid SVG: must start with <svg>.")
+
+        lowered = value.lower()
+        forbidden = [
+            "<script",
+            "onload=",
+            "onclick=",
+            "onerror=",
+            "<foreignobject",
+            "javascript:",
+        ]
+        for token in forbidden:
+            if token in lowered:
+                raise serializers.ValidationError(f"Unsafe SVG content: {token}")
+
+        if len(value) > 200_000:
+            raise serializers.ValidationError("SVG too large.")
+        return value
+
+    def create(self, validated_data):
+        request = self.context["request"]
+        user = request.user
+        svg = validated_data["svg"]
+        sha256 = hashlib.sha256(svg.encode("utf-8")).hexdigest()
+
+        signature = Signature.objects.create(
+            user=user,
+            sha256=sha256,
+            **validated_data
+        )
+
+        SignatureEvent.objects.create(
+            signature=signature,
+            user=user,
+            event_type=SignatureEvent.EventType.CREATED,
+            ip_address=self._get_client_ip(request),
+            user_agent=request.META.get("HTTP_USER_AGENT", ""),
+        )
+        return signature
+
+    def _get_client_ip(self, request):
+        xff = request.META.get("HTTP_X_FORWARDED_FOR")
+        if xff:
+            return xff.split(",")[0].strip()
+        return request.META.get("REMOTE_ADDR")
