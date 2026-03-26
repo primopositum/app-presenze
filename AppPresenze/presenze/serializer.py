@@ -1,6 +1,6 @@
 from rest_framework import serializers
-import hashlib
-from .models import Utente, TimeEntry, Saldo, Contratto, Trasferta, Spesa, Automobile, Signature, SignatureEvent
+import base64
+from .models import Utente, TimeEntry, Saldo, Contratto, Trasferta, Spesa, Automobile, Signature
 from decimal import Decimal
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
@@ -236,72 +236,26 @@ class AutomobilePatchSerializer(serializers.ModelSerializer):
         return value
 
 class SignatureSerializer(serializers.ModelSerializer):
+    preview_data_url = serializers.SerializerMethodField()
+
     class Meta:
         model = Signature
         fields = [
             "id",
-            "svg",
-            "width",
-            "height",
+            "mime_type",
+            "file_name",
+            "preview_data_url",
             "created_at",
+            "updated_at",
         ]
-        read_only_fields = ["id", "created_at"]
+        read_only_fields = ["id", "mime_type", "file_name", "preview_data_url", "created_at", "updated_at"]
 
-    def validate_svg(self, value):
-        value = value.strip()
-        if not value.startswith("<svg"):
-            raise serializers.ValidationError("Invalid SVG: must start with <svg>.")
-
-        lowered = value.lower()
-        forbidden = [
-            "<script",
-            "onload=",
-            "onclick=",
-            "onerror=",
-            "<foreignobject",
-            "javascript:",
-        ]
-        for token in forbidden:
-            if token in lowered:
-                raise serializers.ValidationError(f"Unsafe SVG content: {token}")
-
-        if len(value) > 200_000:
-            raise serializers.ValidationError("SVG too large.")
-        return value
-
-    def create(self, validated_data):
-        request = self.context["request"]
-        target_user = self.context.get("target_user") or request.user
-        svg = validated_data["svg"]
-        sha256 = hashlib.sha256(svg.encode("utf-8")).hexdigest()
-
-        signature = Signature.objects.filter(user_id=target_user.id).order_by("-updated_at", "-created_at").first()
-        if signature is None:
-            signature = Signature.objects.create(
-                user=target_user,
-                sha256=sha256,
-                **validated_data
-            )
-        else:
-            signature.svg = svg
-            signature.sha256 = sha256
-            signature.width = validated_data.get("width")
-            signature.height = validated_data.get("height")
-            signature.save(update_fields=["svg", "sha256", "width", "height", "updated_at"])
-
-        Signature.objects.filter(user_id=target_user.id).exclude(pk=signature.pk).delete()
-
-        SignatureEvent.objects.create(
-            signature=signature,
-            user=request.user,
-            event_type=SignatureEvent.EventType.CREATED,
-            ip_address=self._get_client_ip(request),
-            user_agent=request.META.get("HTTP_USER_AGENT", ""),
-        )
-        return signature
-
-    def _get_client_ip(self, request):
-        xff = request.META.get("HTTP_X_FORWARDED_FOR")
-        if xff:
-            return xff.split(",")[0].strip()
-        return request.META.get("REMOTE_ADDR")
+    def get_preview_data_url(self, obj: Signature):
+        if obj.image_data:
+            mime = (obj.mime_type or "image/png").strip() or "image/png"
+            payload = base64.b64encode(bytes(obj.image_data)).decode("ascii")
+            return f"data:{mime};base64,{payload}"
+        if obj.svg:
+            payload = base64.b64encode(obj.svg.encode("utf-8")).decode("ascii")
+            return f"data:image/svg+xml;base64,{payload}"
+        return None

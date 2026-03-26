@@ -384,7 +384,10 @@ class Signature(models.Model):
         related_name="signatures",
         db_column="U_ID",
     )
-    svg = models.TextField()
+    svg = models.TextField(null=True, blank=True)
+    image_data = models.BinaryField(null=True, blank=True)
+    mime_type = models.CharField(max_length=100, default="image/png")
+    file_name = models.CharField(max_length=255, blank=True, default="")
     sha256 = models.CharField(max_length=64, db_index=True)
     width = models.PositiveIntegerField(null=True, blank=True)
     height = models.PositiveIntegerField(null=True, blank=True)

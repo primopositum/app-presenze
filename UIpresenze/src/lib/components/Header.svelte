@@ -4,7 +4,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
-  import { faHouse, faKey } from '@fortawesome/free-solid-svg-icons';
+  import { faHouse, faKey, faHammer, faUsers } from '@fortawesome/free-solid-svg-icons';
   import HourBalance from './HourBalance.svelte';
   import { timeEntryUser } from '$lib/stores/timeEntryUser';
   import { hourBalanceExtra } from '$lib/stores/hourBalanceExtra';
@@ -87,7 +87,7 @@
       {/if}
       <div class="px-4">
         {#if isProfileRoute}
-          <div class="flex items-center gap-3">
+          <div class="profile-controls">
             <span class="hidden text-xl font-infinity tracking-[3px] text-gray-900 sm:inline">Profilo Utente</span>
             <button
               type="button"
@@ -101,14 +101,14 @@
             {#if canToggleAllProfiles}
               <button
                 type="button"
-                class="inline-flex h-10 items-center justify-center rounded-full border px-3 text-sm font-semibold transition {showAllProfiles
+                class="toggle-profiles-btn inline-flex h-10 items-center justify-center rounded-full border px-3 text-sm font-semibold transition {showAllProfiles
                   ? 'border-orange-400 bg-orange-50 text-orange-700 hover:bg-orange-100'
                   : 'border-gray-300 bg-white text-gray-800 hover:border-gray-400 hover:text-black'}"
                 title={showAllProfiles ? 'Mostra solo utenti normali' : 'Mostra tutti gli utenti'}
                 aria-label={showAllProfiles ? 'Mostra solo utenti normali' : 'Mostra tutti gli utenti'}
                 on:click={toggleAllProfiles}
               >
-                {showAllProfiles ? 'Solo utenti' : 'Superusers'}
+                <FontAwesomeIcon icon={showAllProfiles ? faHammer : faUsers} class="text-base" />
               </button>
             {/if}
           </div>
@@ -253,6 +253,18 @@
   @media (max-width: 640px) {
     .hide-mobile-saldo {
       display: none;
+    }
+
+    .profile-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .toggle-profiles-btn {
+      width: 100%;
+      justify-content: center;
     }
   }
 </style>

@@ -1,4 +1,7 @@
 import zipfile
+import tempfile
+import uuid
+import hashlib
 from calendar import monthrange
 from datetime import date
 from io import BytesIO
@@ -12,11 +15,13 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from ..models import Utente, Trasferta
+from ..models import Utente, Trasferta, Signature, SignatureEvent
 from ..serializer import TrasfertaSerializer
 from ..TrasfertePDF import (
     TrasfertePDFView,
     build_trasferte_pdf_bytes,
+    _get_client_ip,
+    _signature_to_temp_file,
 )
 
 
@@ -360,23 +365,79 @@ def trasferta_dossier(request, u_id: int, data: str):
         )
 
     reference_trasferta = trasferte_mese[0]
+    firma_status = "ok"
+    signature_used = (
+        Signature.objects
+        .filter(user_id=user.id)
+        .order_by("-updated_at", "-created_at")
+        .first()
+    )
+    firma_enabled = signature_used is not None
+    if not firma_enabled:
+        firma_status = "firma mancante"
 
+    temp_dir = None
+    firma_path = None
+    if signature_used is not None:
+        temp_dir = tempfile.TemporaryDirectory()
+        firma_path = _signature_to_temp_file(signature_used, temp_dir.name)
+        if firma_path is None:
+            firma_enabled = False
+            firma_status = "firma mancante"
+
+    signature_applied = False
     try:
-        pdf_trasferte = build_trasferte_pdf_bytes(
-            user=user,
-            trasferte=trasferte_mese,
-            period_start=month_start,
-            firma=False,
-            reference_trasferta=reference_trasferta,
-        )
+        try:
+            pdf_trasferte = build_trasferte_pdf_bytes(
+                user=user,
+                trasferte=trasferte_mese,
+                period_start=month_start,
+                firma=firma_enabled,
+                firma_path=firma_path,
+                reference_trasferta=reference_trasferta,
+            )
+            signature_applied = firma_enabled
+        except ValidationError:
+            # Fallback: se la firma non è utilizzabile (es. SVG non supportato in docx),
+            # genera comunque il dossier senza firma.
+            firma_status = "firma mancante"
+            signature_applied = False
+            pdf_trasferte = build_trasferte_pdf_bytes(
+                user=user,
+                trasferte=trasferte_mese,
+                period_start=month_start,
+                firma=False,
+                firma_path=None,
+                reference_trasferta=reference_trasferta,
+            )
     except Http404 as exc:
+        if temp_dir is not None:
+            temp_dir.cleanup()
         return Response({"errors": str(exc)}, status=status.HTTP_404_NOT_FOUND)
     except ValidationError as exc:
+        if temp_dir is not None:
+            temp_dir.cleanup()
         return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
     except Exception as exc:
+        if temp_dir is not None:
+            temp_dir.cleanup()
         return Response(
             {"errors": f"Errore generazione PDF: {exc}"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    finally:
+        if temp_dir is not None:
+            temp_dir.cleanup()
+
+    if signature_applied and signature_used is not None:
+        SignatureEvent.objects.create(
+            signature=signature_used,
+            user=request.user,
+            event_type=SignatureEvent.EventType.USED,
+            document_id=uuid.uuid4(),
+            document_sha256=hashlib.sha256(pdf_trasferte).hexdigest(),
+            ip_address=_get_client_ip(request),
+            user_agent=request.META.get("HTTP_USER_AGENT", ""),
         )
 
     scontrini_root: Path = Path(settings.SCONTRINI_ROOT)
@@ -441,10 +502,11 @@ def trasferta_dossier(request, u_id: int, data: str):
     response["X-Dossier-Has-Auto-Pdf"] = "1" if has_auto_pdf else "0"
     response["X-Dossier-Auto-Pdf-Expected"] = "1" if auto_pdf_expected else "0"
     response["X-Dossier-Data-Audit"] = data_audit
+    response["X-Firma-Status"] = firma_status
     response["Access-Control-Expose-Headers"] = (
         "X-Dossier-Message, X-Dossier-Has-Scontrini, "
         "X-Dossier-Has-Auto-Pdf, X-Dossier-Auto-Pdf-Expected, "
-        "X-Dossier-Data-Audit"
+        "X-Dossier-Data-Audit, X-Firma-Status"
     )
     return response
 

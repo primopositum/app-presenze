@@ -41,6 +41,7 @@
     transition: all 0.3s;
     width: 100%;
     max-width: 350px;
+    overflow: hidden;
   }
 
   .card:hover {
@@ -105,6 +106,7 @@
     padding: 0.9em 1.2em;
     background-color: #171717;
     box-shadow: inset 2px 5px 10px rgb(20, 0, 0);
+    min-width: 0;
   }
 
   .input-icon-fa {
@@ -121,6 +123,11 @@
     color: #ffb3b3;
     font-size: 0.9em;
     line-height: 1.4;
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   @media (max-width: 520px) {

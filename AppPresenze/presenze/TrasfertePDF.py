@@ -370,6 +370,30 @@ def _get_client_ip(request) -> str | None:
     return request.META.get("REMOTE_ADDR")
 
 
+def _signature_to_temp_file(signature: Signature, temp_dir_path: str) -> Path | None:
+    mime_ext = {
+        "image/png": "png",
+        "image/jpeg": "jpg",
+        "image/jpg": "jpg",
+        "image/webp": "webp",
+        "image/bmp": "bmp",
+        "image/gif": "gif",
+        "image/svg+xml": "svg",
+    }
+    mime = (signature.mime_type or "").lower().strip()
+    ext = mime_ext.get(mime, "png")
+
+    out_path = Path(temp_dir_path) / f"signature_{signature.id}.{ext}"
+    if signature.image_data:
+        out_path.write_bytes(bytes(signature.image_data))
+        return out_path
+    if signature.svg:
+        out_path = Path(temp_dir_path) / f"signature_{signature.id}.svg"
+        out_path.write_text(signature.svg, encoding="utf-8")
+        return out_path
+    return None
+
+
 def build_trasferte_pdf_bytes(
     user: Utente,
     trasferte: List[Trasferta],
@@ -411,7 +435,6 @@ def build_trasferte_pdf_bytes(
         "#Autovettura": auto_descr,
         "#Rimborso": rimborso,
         "#data_audit": timezone.localdate().isoformat(),
-        "#FIRMA": full_name,
     }
 
     totals_map = {
@@ -521,8 +544,10 @@ class TrasfertePDFView(APIView):
                     firma_status = "firma mancante"
                 temp_dir = tempfile.TemporaryDirectory()
                 if signature_used is not None:
-                    firma_path = Path(temp_dir.name) / f"signature_{signature_used.id}.svg"
-                    firma_path.write_text(signature_used.svg, encoding="utf-8")
+                    firma_path = _signature_to_temp_file(signature_used, temp_dir.name)
+                    if firma_path is None:
+                        firma = False
+                        firma_status = "firma mancante"
 
         try:
             pdf_bytes = build_trasferte_pdf_bytes(

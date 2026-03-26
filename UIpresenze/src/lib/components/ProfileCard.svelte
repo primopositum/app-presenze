@@ -47,13 +47,15 @@
   let editing      = false;
   let saving       = false;
   let deleting     = false;
+  let showDeleteConfirm = false;
   let signatureLoading = false;
   let signatureUploading = false;
   let showSignatureModal = false;
-  let signatureSvg = '';
+  let signaturePreviewUrl = '';
   let saveError    = '';
   let signatureError = '';
   let signatureRequestError: string | null = null;
+  let signatureUploadError: string | null = null;
   let signatureFileInput: HTMLInputElement | null = null;
 
   let editNome      = '';
@@ -62,6 +64,18 @@
   let editSaldo     = 0;
   let editIsActive  = false;
   let editTipologia = '';
+
+  function isSupportedSignatureFile(file: File) {
+    const allowed = new Set([
+      'image/png',
+      'image/jpeg',
+      'image/jpg',
+      'image/webp',
+      'image/bmp',
+      'image/gif',
+    ]);
+    return allowed.has((file.type || '').toLowerCase());
+  }
 
   function fillEditFields() {
     editNome      = user.nome      ?? '';
@@ -95,18 +109,21 @@
     const file = input?.files?.[0];
     if (!file) return;
     signatureError = '';
+    signatureUploadError = null;
     signatureUploading = true;
     try {
-      const svg = await file.text();
+      if (!isSupportedSignatureFile(file)) {
+        throw new Error('Formato firma non supportato. Usa PNG, JPG/JPEG, WEBP, BMP o GIF.');
+      }
       const result = await useCreateSignatureApi({
-        svg,
+        file,
         user_id: user.id,
       });
       if (result.error) throw new Error(result.error);
-      signatureSvg = result.signature?.svg ?? '';
+      signaturePreviewUrl = result.signature?.preview_data_url ?? '';
       showSignatureModal = true;
     } catch (e) {
-      signatureError = e instanceof Error ? e.message : 'Errore caricamento firma';
+      signatureUploadError = e instanceof Error ? e.message : 'Errore caricamento firma';
     } finally {
       signatureUploading = false;
       input.value = '';
@@ -121,11 +138,11 @@
     try {
       const result = await useLatestSignatureApi(user.id);
       if (result.error) throw new Error(result.error);
-      if (!result.signature?.svg) {
+      if (!result.signature?.preview_data_url) {
         signatureError = 'Nessuna firma caricata per questo utente';
         return;
       }
-      signatureSvg = result.signature.svg;
+      signaturePreviewUrl = result.signature.preview_data_url;
       showSignatureModal = true;
     } catch (e) {
       signatureRequestError = 'firma non caricata correttamente';
@@ -136,13 +153,17 @@
 
   async function deleteProfile() {
     if (!canDelete || deleting || !onDelete) return;
-    const confirmed = window.confirm(`Eliminare definitivamente l'account #${user.id}?`);
-    if (!confirmed) return;
+    showDeleteConfirm = true;
+  }
+
+  async function confirmDeleteProfile() {
+    if (!canDelete || deleting || !onDelete) return;
 
     deleting = true;
     saveError = '';
     try {
       await onDelete(user.id);
+      showDeleteConfirm = false;
     } catch (e) {
       saveError = e instanceof Error ? e.message : 'Errore durante l\'eliminazione';
     } finally {
@@ -244,7 +265,7 @@
 <input
   bind:this={signatureFileInput}
   type="file"
-  accept=".svg,image/svg+xml"
+  accept=".png,.jpg,.jpeg,.webp,.bmp,.gif,image/png,image/jpeg,image/webp,image/bmp,image/gif"
   class="hidden"
   on:change={onSignatureFileSelected}
 />
@@ -306,7 +327,7 @@
           </div>
 
           {#if canEdit || canDelete || canManageSignature}
-            <div class="absolute top-3 left-4 flex items-center gap-2">
+            <div class="absolute top-3 left-4 action-buttons">
               {#if canEdit}
                 <button
                   type="button"
@@ -590,9 +611,9 @@
       <h3 class="text-sm font-bold text-zinc-800">Firma Utente</h3>
       <button type="button" class="modal-close-btn" on:click={() => (showSignatureModal = false)} aria-label="Chiudi">×</button>
     </div>
-    {#if signatureSvg}
+    {#if signaturePreviewUrl}
       <div class="sign-preview">
-        {@html signatureSvg}
+        <img src={signaturePreviewUrl} alt="Firma utente" class="sign-preview-image" />
       </div>
     {:else}
       <p class="text-sm text-zinc-500">Nessuna firma disponibile.</p>
@@ -607,6 +628,45 @@
   >
     <div on:click|stopPropagation>
       <ErrorCard message={signatureRequestError} onClose={() => (signatureRequestError = null)} />
+    </div>
+  </div>
+{/if}
+
+{#if signatureUploadError}
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+    on:click={() => (signatureUploadError = null)}
+  >
+    <div on:click|stopPropagation>
+      <ErrorCard message={signatureUploadError} onClose={() => (signatureUploadError = null)} />
+    </div>
+  </div>
+{/if}
+
+{#if showDeleteConfirm}
+  <div class="confirm-backdrop" on:click={() => !deleting && (showDeleteConfirm = false)} />
+  <div class="confirm-modal" role="dialog" aria-modal="true" on:click|stopPropagation>
+    <h3 class="confirm-title">Conferma eliminazione</h3>
+    <p class="confirm-text">
+      Vuoi eliminare definitivamente l'account <strong>#{user.id}</strong> ({fullName})?
+    </p>
+    <div class="confirm-actions">
+      <button
+        type="button"
+        class="confirm-cancel"
+        on:click={() => (showDeleteConfirm = false)}
+        disabled={deleting}
+      >
+        Annulla
+      </button>
+      <button
+        type="button"
+        class="confirm-delete"
+        on:click={confirmDeleteProfile}
+        disabled={deleting}
+      >
+        {deleting ? 'Eliminazione...' : 'Elimina'}
+      </button>
     </div>
   </div>
 {/if}
@@ -665,6 +725,12 @@
   .trash-btn:hover { background: rgba(248,113,113,.45); transform: scale(1.08); }
   .trash-btn:active { transform: scale(.95); }
   .trash-btn--active { background: rgba(248,113,113,.25); cursor: default; opacity: .65; }
+
+  .action-buttons {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
   .edit-input {
     background: rgba(249,115,22,.06); border: 1px solid rgba(249,115,22,.3);
     border-radius: 8px; padding: 5px 9px;
@@ -712,6 +778,81 @@
     min-height: 120px;
     max-height: 320px;
     overflow: auto;
+  }
+  .sign-preview-image {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    object-fit: contain;
+  }
+
+  @media (max-width: 640px) {
+    .action-buttons {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, max-content));
+      gap: 8px;
+    }
+  }
+
+  .confirm-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 3200;
+    background: rgba(0, 0, 0, 0.45);
+  }
+  .confirm-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 3201;
+    width: min(420px, 92vw);
+    background: #fff;
+    border: 1px solid #e4e4e7;
+    border-radius: 14px;
+    padding: 16px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+  }
+  .confirm-title {
+    margin: 0 0 8px;
+    font-size: 1rem;
+    font-weight: 800;
+    color: #27272a;
+  }
+  .confirm-text {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #52525b;
+    line-height: 1.4;
+  }
+  .confirm-actions {
+    margin-top: 14px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .confirm-cancel {
+    border: 1px solid #d4d4d8;
+    background: #fff;
+    color: #3f3f46;
+    border-radius: 10px;
+    padding: 7px 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .confirm-delete {
+    border: 1px solid #ef4444;
+    background: #ef4444;
+    color: #fff;
+    border-radius: 10px;
+    padding: 7px 12px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .confirm-cancel:disabled,
+  .confirm-delete:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 </style>
 

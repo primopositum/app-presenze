@@ -2,7 +2,7 @@ import { apiBase, getAuthToken } from '$lib/api';
 
 const BASE = apiBase();
 
-type Opts = RequestInit & { json?: any };
+type Opts = RequestInit & { json?: any; formData?: FormData };
 
 function extractErrorMessage(data: any): string | null {
   if (!data) return null;
@@ -10,6 +10,18 @@ function extractErrorMessage(data: any): string | null {
   if (typeof data.error === 'string') return data.error;
   if (typeof data.detail === 'string') return data.detail;
   if (typeof data.errors === 'string') return data.errors;
+  if (Array.isArray(data)) {
+    for (const item of data) {
+      const nested = extractErrorMessage(item);
+      if (nested) return nested;
+    }
+  }
+  if (typeof data === 'object') {
+    for (const value of Object.values(data)) {
+      const nested = extractErrorMessage(value);
+      if (nested) return nested;
+    }
+  }
   return null;
 }
 
@@ -27,7 +39,7 @@ async function request(path: string, opts: Opts = {}) {
   const res = await fetch(url, {
     ...opts,
     headers,
-    body: opts.json !== undefined ? JSON.stringify(opts.json) : opts.body
+    body: opts.json !== undefined ? JSON.stringify(opts.json) : opts.formData ?? opts.body
   });
 
   const isJson = res.headers.get('content-type')?.includes('application/json');
@@ -40,16 +52,15 @@ async function request(path: string, opts: Opts = {}) {
 
 export type Signature = {
   id: string;
-  svg: string;
-  width?: number | null;
-  height?: number | null;
+  mime_type: string;
+  file_name: string;
+  preview_data_url: string | null;
   created_at: string;
+  updated_at?: string;
 };
 
 export type SignaturePayload = {
-  svg: string;
-  width?: number;
-  height?: number;
+  file: File;
   user_id?: number;
 };
 
@@ -59,14 +70,19 @@ export function normalizeSignaturePayload(payload: unknown): Signature | null {
   if (typeof payload === 'object') {
     const data = payload as Record<string, unknown>;
     if (data.signature === null) return null;
-    if (typeof data.id === 'string' && typeof data.svg === 'string') return data as unknown as Signature;
+    if (typeof data.id === 'string' && typeof data.mime_type === 'string') return data as unknown as Signature;
     if (data.signature && typeof data.signature === 'object') return data.signature as Signature;
   }
   return null;
 }
 
 export function createSignature(payload: SignaturePayload): Promise<Signature> {
-  return request('/signatures/', { method: 'POST', json: payload });
+  const formData = new FormData();
+  formData.append('file', payload.file);
+  if (payload.user_id !== undefined) {
+    formData.append('user_id', String(payload.user_id));
+  }
+  return request('/signatures/', { method: 'POST', formData });
 }
 
 export function getLatestSignature(userId?: number): Promise<Signature | { signature: null }> {
