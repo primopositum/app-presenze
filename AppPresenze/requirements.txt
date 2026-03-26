@@ -9,3 +9,4 @@ pypdf
 python-docx
 gunicorn
 whitenoise
+djangorestframework-simplejwt

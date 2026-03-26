@@ -3,6 +3,7 @@
 	import '../app.css'; 
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
+	import { startAutoRefresh, stopAutoRefresh } from '$lib/api';
 	import { goto } from '$app/navigation';
 
 	export const prerender = false;
@@ -12,8 +13,11 @@
 		// Auth
 		auth.init();
 		if (!$auth.isAuthed) {
+			stopAutoRefresh();
 			goto('/login');
+			return;
 		}
+		startAutoRefresh();
 	});
 </script>
 

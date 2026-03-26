@@ -14,6 +14,7 @@ api_urlpatterns = [
     # -------------------------------------------------------------------------
     path("getToken/", views.get_token,   name="get-token"),
     path("login/",    views.api_login,   name="login"),
+    path("refresh/",  views.api_refresh, name="refresh"),
     path("logout/",   views.api_logout,  name="logout"),
     path("users/",    views.users_list,  name="users-list"),
     path("signatures/", views.signature_create, name="signature-create"),

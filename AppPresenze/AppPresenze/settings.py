@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from dotenv import load_dotenv
 from pathlib import Path
 import os
+from datetime import timedelta
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -52,15 +53,29 @@ INSTALLED_APPS = [
     'rest_framework',
     'corsheaders',
     'rest_framework.authtoken',
+    'rest_framework_simplejwt.token_blacklist',
     'presenze.apps.PresenzeConfig',
 ]
 
-# DRF global settings: abilita autenticazione con Bearer/Token e sessione
+# DRF global settings: JWT via cookie HttpOnly (fallback header Authorization supportato)
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'presenze.auth.BearerTokenAuthentication',  # Authorization: Bearer <token>
-        'rest_framework.authentication.TokenAuthentication',  # Authorization: Token <token>
+        'presenze.auth.CookieJWTAuthentication',
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
+}
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'AUTH_COOKIE': 'access_token',
+    'AUTH_COOKIE_REFRESH': 'refresh_token',
+    'AUTH_COOKIE_SECURE': False if DEBUG else True,
+    'AUTH_COOKIE_HTTP_ONLY': True,
+    'AUTH_COOKIE_SAMESITE': 'Lax',
+    'AUTH_COOKIE_PATH': '/',
 }
 SCONTRINI_ROOT = Path("/mnt/scontrini")
 PDF_ROOT = Path("/mnt/pdf")
@@ -96,6 +111,7 @@ TEMPLATES = [
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
 ]
+CORS_ALLOW_CREDENTIALS = True
 
 WSGI_APPLICATION = 'AppPresenze.wsgi.application'
 
