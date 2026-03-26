@@ -64,6 +64,8 @@
   let editSaldo     = 0;
   let editIsActive  = false;
   let editTipologia = '';
+  const SIGNATURE_WIDTH = 600;
+  const SIGNATURE_HEIGHT = 300;
 
   function isSupportedSignatureFile(file: File) {
     const allowed = new Set([
@@ -75,6 +77,49 @@
       'image/gif',
     ]);
     return allowed.has((file.type || '').toLowerCase());
+  }
+
+  function loadImageFromFile(file: File): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        resolve(img);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('Impossibile leggere l\'immagine firma.'));
+      };
+      img.src = url;
+    });
+  }
+
+  function canvasToPngFile(canvas: HTMLCanvasElement, originalName: string): Promise<File> {
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          reject(new Error('Errore conversione immagine firma.'));
+          return;
+        }
+        const base = originalName.replace(/\.[^/.]+$/, '') || 'signature';
+        resolve(new File([blob], `${base}_600x300.png`, { type: 'image/png' }));
+      }, 'image/png');
+    });
+  }
+
+  async function normalizeSignatureTo600x300(file: File): Promise<File> {
+    const img = await loadImageFromFile(file);
+    const canvas = document.createElement('canvas');
+    canvas.width = SIGNATURE_WIDTH;
+    canvas.height = SIGNATURE_HEIGHT;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas non disponibile per la firma.');
+
+    // Disegna su area fissa 600x300 (stretch controllato richiesto dal flusso).
+    ctx.clearRect(0, 0, SIGNATURE_WIDTH, SIGNATURE_HEIGHT);
+    ctx.drawImage(img, 0, 0, SIGNATURE_WIDTH, SIGNATURE_HEIGHT);
+    return canvasToPngFile(canvas, file.name);
   }
 
   function fillEditFields() {
@@ -115,8 +160,9 @@
       if (!isSupportedSignatureFile(file)) {
         throw new Error('Formato firma non supportato. Usa PNG, JPG/JPEG, WEBP, BMP o GIF.');
       }
+      const normalizedFile = await normalizeSignatureTo600x300(file);
       const result = await useCreateSignatureApi({
-        file,
+        file: normalizedFile,
         user_id: user.id,
       });
       if (result.error) throw new Error(result.error);

@@ -52,6 +52,8 @@ async function request(path: string, opts: Opts = {}) {
 
 export type Signature = {
   id: string;
+  // backward-compatibility for older call sites/payloads
+  svg?: string;
   mime_type: string;
   file_name: string;
   preview_data_url: string | null;

@@ -397,8 +397,8 @@ class Signature(models.Model):
     class Meta:
         db_table = "Signature"
         indexes = [
-            models.Index(fields=["user", "-created_at"]),
-            models.Index(fields=["sha256"]),
+            models.Index(fields=["user", "-created_at"], name="Signature_user_cr_70b9f5_idx"),
+            models.Index(fields=["sha256"], name="Signature_sha256_5cb32b_idx"),
         ]
 
 
@@ -430,7 +430,7 @@ class SignatureEvent(models.Model):
     class Meta:
         db_table = "SignatureEvent"
         indexes = [
-            models.Index(fields=["signature", "-created_at"]),
-            models.Index(fields=["user", "-created_at"]),
-            models.Index(fields=["event_type", "-created_at"]),
+            models.Index(fields=["signature", "-created_at"], name="SignatureEv_signat_8f2f97_idx"),
+            models.Index(fields=["user", "-created_at"], name="SignatureEv_user_id_4c4f1c_idx"),
+            models.Index(fields=["event_type", "-created_at"], name="SignatureEv_event_t_c75314_idx"),
         ]
