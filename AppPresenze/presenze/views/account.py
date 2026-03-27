@@ -1,15 +1,28 @@
 from django.contrib.auth import update_session_auth_hash
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from ..models import Utente, Saldo
+from ..models import Utente, Saldo, Contratto
 from ..serializer import UtenteSerializer, SaldoMiniSerializer, ContrattoMiniSerializer
 
 
 def _is_staff_or_super(user):
     return user.is_staff or user.is_superuser
+
+
+def _coerce_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    return bool(value)
 
 
 def _resolve_target_user(request):
@@ -256,6 +269,65 @@ def delete_account(request):
         {"message": "Account eliminato con successo.", "deleted_user_id": deleted_id},
         status=status.HTTP_200_OK
     )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def create_account(request):
+    if not request.user.is_superuser:
+        return Response(
+            {"errors": "Solo i superuser possono creare un account."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    email = (request.data.get("email") or "").strip()
+    password = request.data.get("password")
+
+    if not email:
+        return Response({"errors": "Campo email obbligatorio."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not password or not str(password).strip():
+        return Response({"errors": "Campo password obbligatorio."}, status=status.HTTP_400_BAD_REQUEST)
+
+    payload = {
+        "email": email,
+        "password": str(password),
+        "nome": request.data.get("nome", ""),
+        "cognome": request.data.get("cognome", ""),
+        "dati_anagrafici": request.data.get("dati_anagrafici", {}),
+    }
+
+    if "is_active" in request.data:
+        payload["is_active"] = _coerce_bool(request.data.get("is_active"))
+
+    create_as_superuser = _coerce_bool(request.data.get("is_superuser"))
+    tipologia_contratto = (request.data.get("tipologia_contratto") or "").strip()
+
+    serializer = UtenteSerializer(data=payload)
+    if not serializer.is_valid():
+        return Response({"errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+    with transaction.atomic():
+        user = serializer.save()
+
+        if create_as_superuser:
+            user.is_superuser = True
+            user.is_staff = True
+            user.save(update_fields=["is_superuser", "is_staff", "data_upd"])
+
+        Saldo.objects.get_or_create(utente=user)
+
+        if tipologia_contratto:
+            Contratto.objects.create(
+                utente=user,
+                data_ass=timezone.localdate(),
+                data_fine=None,
+                is_active=True,
+                tipologia=tipologia_contratto,
+                ore_sett=[8, 8, 8, 8, 8],
+            )
+
+    return Response(UtenteSerializer(user).data, status=status.HTTP_201_CREATED)
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])

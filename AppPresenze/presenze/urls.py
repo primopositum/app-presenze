@@ -8,6 +8,7 @@ api_urlpatterns = [
     path("profile/",         views.user_profile,     name="profile"),    
     path("change-password/", views.change_password,  name="change-password"),
     path("delete-account/",  views.delete_account,   name="delete-account"),
+    path("create-account/",  views.create_account,   name="create-account"),
 
     # -------------------------------------------------------------------------
     # Auth JSON
