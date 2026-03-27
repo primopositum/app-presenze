@@ -23,6 +23,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from docx import Document
+from docx.shared import Cm
 
 from .models import Contratto, Signature, SignatureEvent, Spesa, Trasferta, Utente
 
@@ -34,6 +35,9 @@ DOCX_TEMPLATE_PATH = Path(
         settings.BASE_DIR / "presenze" / "templates" / "Template_Trasferte.docx",
     )
 )
+
+SIGNATURE_WIDTH_CM = 5.0
+SIGNATURE_HEIGHT_CM = 2.5
 
 
 def _to_bool(value: str | None, default: bool = False) -> bool:
@@ -145,7 +149,11 @@ def _replace_firma_with_image(doc: Document, firma_token: str, image_path: Path)
             run.text = run.text.replace(firma_token, "")
 
         img_run = paragraph.add_run()
-        img_run.add_picture(str(image_path))
+        img_run.add_picture(
+            str(image_path),
+            width=Cm(SIGNATURE_WIDTH_CM),
+            height=Cm(SIGNATURE_HEIGHT_CM),
+        )
 
     for paragraph in doc.paragraphs:
         process_paragraph(paragraph)

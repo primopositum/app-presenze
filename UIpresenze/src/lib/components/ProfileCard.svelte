@@ -64,8 +64,11 @@
   let editSaldo     = 0;
   let editIsActive  = false;
   let editTipologia = '';
-  const SIGNATURE_WIDTH = 600;
-  const SIGNATURE_HEIGHT = 300;
+  const TARGET_WIDTH_CM = 5;
+  const TARGET_HEIGHT_CM = 2.5;
+  const TARGET_DPI = 300;
+  const SIGNATURE_WIDTH = Math.round((TARGET_WIDTH_CM / 2.54) * TARGET_DPI);
+  const SIGNATURE_HEIGHT = Math.round((TARGET_HEIGHT_CM / 2.54) * TARGET_DPI);
 
   function isSupportedSignatureFile(file: File) {
     const allowed = new Set([
@@ -108,7 +111,7 @@
     });
   }
 
-  async function normalizeSignatureTo600x300(file: File): Promise<File> {
+  async function normalizeSignature(file: File): Promise<File> {
     const img = await loadImageFromFile(file);
     const canvas = document.createElement('canvas');
     canvas.width = SIGNATURE_WIDTH;
@@ -160,7 +163,7 @@
       if (!isSupportedSignatureFile(file)) {
         throw new Error('Formato firma non supportato. Usa PNG, JPG/JPEG, WEBP, BMP o GIF.');
       }
-      const normalizedFile = await normalizeSignatureTo600x300(file);
+      const normalizedFile = await normalizeSignature(file);
       const result = await useCreateSignatureApi({
         file: normalizedFile,
         user_id: user.id,
