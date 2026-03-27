@@ -12,7 +12,7 @@ type AuthState = {
 
 type AuthStore = Readable<AuthState> & {
   init: () => void;
-  login: (token: string, user: User) => void;
+  login: (tokenOrUser: string | User | null, maybeUser?: User | null) => void;
   logout: (options?: { redirect?: boolean }) => void;
   setUser: (user: User | null) => void;
 };
@@ -35,10 +35,10 @@ function createAuth(): AuthStore {
     current = value;
     if (typeof window === 'undefined' || !hydrated) return;
     try {
-      if (value.isAuthed && value.token) {
+      if (value.isAuthed && (value.token || value.user)) {
         localStorage.setItem(
           STORAGE_KEY,
-          JSON.stringify({ token: value.token, user: value.user })
+          JSON.stringify({ isAuthed: value.isAuthed, token: value.token, user: value.user })
         );
       } else {
         localStorage.removeItem(STORAGE_KEY);
@@ -55,8 +55,10 @@ function createAuth(): AuthStore {
       if (!raw) return;
       const data = JSON.parse(raw) as Partial<AuthState> | null;
       if (!data || typeof data !== 'object') return;
+      const hasUser = !!data.user;
+      const hasToken = !!data.token;
       set({
-        isAuthed: !!data.token,
+        isAuthed: !!data.isAuthed || hasToken || hasUser,
         token: data.token ?? null,
         user: data.user ?? null
       });
@@ -67,8 +69,13 @@ function createAuth(): AuthStore {
     }
   }
 
-  function login(token: string, user: User) {
-    set({ isAuthed: true, token, user });
+  function login(tokenOrUser: string | User | null, maybeUser: User | null = null) {
+    if (typeof tokenOrUser === 'string') {
+      set({ isAuthed: true, token: tokenOrUser, user: maybeUser });
+      return;
+    }
+    const user = tokenOrUser as User | null;
+    set({ isAuthed: !!user, token: null, user });
   }
 
   function setUser(user: User | null) {

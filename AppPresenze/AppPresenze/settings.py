@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from dotenv import load_dotenv
 from pathlib import Path
 import os
+from datetime import timedelta
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -35,8 +36,21 @@ SECRET_KEY = 'django-insecure-w*7t-0pc^p3+xs@cw+k#wu9$602h^u-1*r8rs6t+af#aqkxmt8
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '192.168.1.22', '127.0.0.1', '100.96.1.18', '192.168.1.22']
-CSRF_TRUSTED_ORIGINS = ["http://localhost:8080", "http://127.0.0.1:8080"]
+ALLOWED_HOSTS = ['localhost', '192.168.1.22', '127.0.0.1', '100.96.1.18']
+
+DEV_FRONTEND_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://192.168.1.22:5173",
+    "http://localhost:3623",
+    "http://127.0.0.1:3623",
+    "http://192.168.1.22:3623",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+    "http://192.168.1.22:8080",
+]
+
+CSRF_TRUSTED_ORIGINS = DEV_FRONTEND_ORIGINS
 
 USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
@@ -52,15 +66,29 @@ INSTALLED_APPS = [
     'rest_framework',
     'corsheaders',
     'rest_framework.authtoken',
+    'rest_framework_simplejwt.token_blacklist',
     'presenze.apps.PresenzeConfig',
 ]
 
-# DRF global settings: abilita autenticazione con Bearer/Token e sessione
+# DRF global settings: JWT via cookie HttpOnly (fallback header Authorization supportato)
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'presenze.auth.BearerTokenAuthentication',  # Authorization: Bearer <token>
-        'rest_framework.authentication.TokenAuthentication',  # Authorization: Token <token>
+        'presenze.auth.CookieJWTAuthentication',
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
+}
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'AUTH_COOKIE': 'access_token',
+    'AUTH_COOKIE_REFRESH': 'refresh_token',
+    'AUTH_COOKIE_SECURE': False if DEBUG else True,
+    'AUTH_COOKIE_HTTP_ONLY': True,
+    'AUTH_COOKIE_SAMESITE': 'Lax',
+    'AUTH_COOKIE_PATH': '/',
 }
 SCONTRINI_ROOT = Path("/mnt/scontrini")
 PDF_ROOT = Path("/mnt/pdf")
@@ -93,9 +121,8 @@ TEMPLATES = [
     },
 ]
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-]
+CORS_ALLOWED_ORIGINS = DEV_FRONTEND_ORIGINS
+CORS_ALLOW_CREDENTIALS = True
 
 WSGI_APPLICATION = 'AppPresenze.wsgi.application'
 
@@ -219,4 +246,5 @@ LOGGING = {
         },
     },
 }
+
 

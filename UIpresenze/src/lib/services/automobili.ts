@@ -1,4 +1,4 @@
-import { apiBase, getAuthToken } from '$lib/api';
+import { apiBase, authFetch } from '$lib/api';
 
 const BASE = apiBase();
 
@@ -6,22 +6,7 @@ type Opts = RequestInit & { json?: any };
 
 async function request(path: string, opts: Opts = {}) {
   const url = path.startsWith('http') ? path : `${BASE}${path.startsWith('/') ? '' : '/'}${path}`;
-
-  const headers = new Headers(opts.headers || {});
-  if (opts.json !== undefined) {
-    headers.set('Content-Type', 'application/json');
-  }
-
-  const token = getAuthToken();
-  if (token && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
-
-  const res = await fetch(url, {
-    ...opts,
-    headers,
-    body: opts.json !== undefined ? JSON.stringify(opts.json) : opts.body
-  });
+  const res = await authFetch(url, opts);
 
   let data: any = null;
   const contentType = res.headers.get('content-type');

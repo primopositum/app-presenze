@@ -51,13 +51,13 @@
   }
 
   onMount(() => {
-    const token = get(auth).token;
-    if (token) {
+    const state = get(auth);
+    if (state.isAuthed || state.user) {
       void loadUsers();
       return;
     }
     const unsub = auth.subscribe((value) => {
-      if (value.token) {
+      if (value.isAuthed || value.user) {
         unsub();
         void loadUsers();
       }
@@ -120,3 +120,4 @@
     cursor: pointer;
   }
 </style>
+

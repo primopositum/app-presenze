@@ -1,6 +1,7 @@
 <script lang="ts">
   import ButtonGradient from './ButtonGradient.svelte';
   import { auth } from '$lib/stores/auth';
+  import { apiLogout, stopAutoRefresh } from '$lib/api';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
@@ -33,9 +34,14 @@
     $auth.user?.is_superuser && isPresencesRoute ? saldoTimeEntryUser : saldoValidato;
   $: showSaldo = $auth.isAuthed && canShowHourBalanceRoute && saldoToShow !== null;
   
-  function handleLogout() {
+  async function handleLogout() {
+    stopAutoRefresh();
+    try {
+      await apiLogout();
+    } catch {
+      // prosegui comunque con logout locale
+    }
     auth.logout();
-    goto('/login');
   }
 
   function goToProfile() {

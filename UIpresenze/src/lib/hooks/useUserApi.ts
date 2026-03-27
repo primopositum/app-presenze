@@ -5,34 +5,12 @@ import { get } from 'svelte/store';
 import { timeEntryUser } from '$lib/stores/timeEntryUser';
 import type { UpdateAccountPayload } from '$lib/services/users';
 
-async function waitForToken(timeoutMs = 3000) {
-  const existing = get(auth).token;
-  if (existing) return existing;
-  return new Promise<string | null>((resolve) => {
-    const timer = setTimeout(() => {
-      unsub();
-      resolve(null);
-    }, timeoutMs);
-    const unsub = auth.subscribe((value) => {
-      if (value.token) {
-        clearTimeout(timer);
-        unsub();
-        resolve(value.token);
-      }
-    });
-  });
-}
-
 
 export async function useUsersApi(): Promise<{
   users: User[];
   error: string | null;
 }> {
   try {
-    const token = await waitForToken();
-    if (!token) {
-      throw new Error('Token non disponibile');
-    }
     const data = await fetchUsers();
     const users = normalizeUsersPayload(data);
     return { users, error: null };
@@ -73,10 +51,6 @@ export async function useUserProfile(): Promise<{
   error: string | null;
 }> {
   try {
-    const token = await waitForToken();
-    if (!token) {
-      throw new Error('Token non disponibile');
-    }
     const data = await fetchProfiles();
     const users = normalizeUsersPayload(data);
     return { users, error: null };
@@ -93,11 +67,6 @@ export async function useUpdateAccountApi(payload: UpdateAccountPayload): Promis
   error: string | null;
 }> {
   try {
-    const token = await waitForToken();
-    if (!token) {
-      throw new Error('Token non disponibile');
-    }
-
     const authUser = get(auth).user;
     if (!authUser?.id) {
       throw new Error('Utente autenticato non disponibile');
@@ -149,11 +118,6 @@ export async function useDeleteAccountApi(userId: number): Promise<{
   error: string | null;
 }> {
   try {
-    const token = await waitForToken();
-    if (!token) {
-      throw new Error('Token non disponibile');
-    }
-
     const authUser = get(auth).user;
     if (!authUser?.is_superuser) {
       throw new Error('Solo i superuser possono eliminare account');

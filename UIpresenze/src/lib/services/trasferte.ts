@@ -1,4 +1,4 @@
-import { apiBase, getAuthToken } from '$lib/api';
+import { apiBase, authFetch } from '$lib/api';
 import { get } from 'svelte/store';
 import { auth } from '$lib/stores/auth';
 
@@ -9,22 +9,7 @@ type Opts = RequestInit & { json?: any };
 
 async function request(path: string, opts: Opts = {}) {
   const url = path.startsWith('http') ? path : `${BASE}${path.startsWith('/') ? '' : '/'}${path}`;
-  
-  const headers = new Headers({
-    ...opts.headers,
-    ...(opts.json !== undefined ? { 'Content-Type': 'application/json' } : {})
-  });
-
-  const token = getAuthToken();
-  if (token && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
-
-  const res = await fetch(url, {
-    ...opts,
-    headers,
-    body: opts.json !== undefined ? JSON.stringify(opts.json) : opts.body
-  });
+  const res = await authFetch(url, opts);
 
   let data: any = null;
   const contentType = res.headers.get('content-type');
@@ -158,13 +143,7 @@ export function getSpeseByTrasferta(tId: number | string) {
 
 export async function fetchTrasfertaDossier(uId: number | string, data: string): Promise<Response> {
   const url = `${BASE}/trasferte/${uId}/${data}/dossier/`;
-  const headers = new Headers();
-  const token = getAuthToken();
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
-
-  const res = await fetch(url, { headers });
+  const res = await authFetch(url, { method: 'GET' });
   if (!res.ok) {
     let message = res.statusText || 'Request failed';
     const contentType = res.headers.get('content-type') || '';
@@ -216,16 +195,10 @@ export async function getScontrinoByTrasferta(tId: number | string, filename: st
     `${API_ROOT}/trasferte/${tId}/scontrini/${encoded}/`
   ];
 
-  const token = getAuthToken();
-  const headers = new Headers();
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
-
   let lastError: Error | null = null;
   for (const url of paths) {
     try {
-      const res = await fetch(url, { method: 'GET', headers });
+      const res = await authFetch(url, { method: 'GET' });
       if (!res.ok) {
         let message = res.statusText || 'Request failed';
         const contentType = res.headers.get('content-type') || '';

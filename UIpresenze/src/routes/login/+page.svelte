@@ -1,6 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { getToken } from '$lib/api';
+  import { getToken, startAutoRefresh, stopAutoRefresh } from '$lib/api';
   import { auth } from '$lib/stores/auth';
   import ButtonGradient from '$lib/components/ButtonGradient.svelte';
   import LoaderOverlay from '$lib/components/loader/LoaderOverlay.svelte';
@@ -22,8 +22,8 @@
     loading = true;
     try {
       const data = await getToken(email, password);
-      auth.login(data.token, data.user);
-      console.log(data.user)
+      auth.login(data.user ?? null);
+      startAutoRefresh();
       await goto('/');
     } catch (err: any) {
       error = err?.message || 'Errore imprevisto';
@@ -33,8 +33,12 @@
   }
 
   onMount(() => {
+    stopAutoRefresh();
     auth.init();
-    if ($auth.isAuthed) goto('/');
+    if ($auth.isAuthed) {
+      startAutoRefresh();
+      goto('/');
+    }
   });
 </script>
 

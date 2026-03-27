@@ -1,4 +1,4 @@
-import { apiBase, getAuthToken } from '$lib/api';
+import { apiBase, authFetch } from '$lib/api';
 import { get } from 'svelte/store';
 import { auth } from '$lib/stores/auth';
 
@@ -8,19 +8,7 @@ type Opts = RequestInit & { json?: any };
 
 async function request(path: string, opts: Opts = {}) {
   const url = path.startsWith('http') ? path : `${BASE}${path.startsWith('/') ? '' : '/'}${path}`;
-  const headers = new Headers(opts.headers || {});
-  if (opts.json !== undefined) {
-    headers.set('Content-Type', 'application/json');
-  }
-  const token = getAuthToken();
-  if (token && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
-  const res = await fetch(url, {
-    ...opts,
-    headers,
-    body: opts.json !== undefined ? JSON.stringify(opts.json) : opts.body
-  });
+  const res = await authFetch(url, opts);
   const isJson = res.headers.get('content-type')?.includes('application/json');
   const data = isJson ? await res.json() : await res.text();
   if (!res.ok) {
@@ -124,12 +112,7 @@ export async function getMeseScorsoPdf(params: { u_id?: number; date?: string; n
   if (params.date) qs.set('data', params.date);
   if (params.note !== undefined) qs.set('note', params.note);
   const url = `${BASE}/pdf/${qs.toString() ? `?${qs.toString()}` : ''}`;
-  const headers = new Headers();
-  const token = getAuthToken();
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
-  const res = await fetch(url, { headers });
+  const res = await authFetch(url, { method: 'GET' });
   if (!res.ok) {
     const message = res.statusText || 'Request failed';
     throw new Error(message);

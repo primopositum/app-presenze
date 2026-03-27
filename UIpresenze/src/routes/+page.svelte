@@ -5,9 +5,9 @@
   import { auth } from '$lib/stores/auth';
 
   let user: any = null;
-  let token: string | null = null;
+  let isAuthed = false;
   $: user = $auth.user;
-  $: token = $auth.token;
+  $: isAuthed = $auth.isAuthed;
   
    const redirect = (route : string) => {
     if (user?.is_superuser){goto(`/preMenu`, {state : {route}});}
@@ -19,7 +19,7 @@
 
 <main class="flex flex-col justify-center items-center max-w-3xl mx-auto">
 <img src="/logo2.png" alt="logo1" class="justify-center">
-{#if token}
+{#if isAuthed}
   <p  class="font-infinity tracking-[3px]">Buongiorno, {user?.nome}</p>
 {:else}
   <p>Non sei autenticato.</p>
@@ -44,4 +44,5 @@
   <IconLinkBar></IconLinkBar>
 </div>
 </main>
+
 
