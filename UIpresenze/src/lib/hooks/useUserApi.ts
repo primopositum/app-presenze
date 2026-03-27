@@ -1,9 +1,9 @@
 import type { User } from '$lib/services/users';
-import { deleteAccountById, fetchUsers, fetchProfiles, normalizeUsersPayload, updateAccount } from '$lib/services/users';
+import { createAccount, deleteAccountById, fetchUsers, fetchProfiles, normalizeUsersPayload, updateAccount } from '$lib/services/users';
 import { auth } from '$lib/stores/auth';
 import { get } from 'svelte/store';
 import { timeEntryUser } from '$lib/stores/timeEntryUser';
-import type { UpdateAccountPayload } from '$lib/services/users';
+import type { CreateAccountPayload, UpdateAccountPayload } from '$lib/services/users';
 
 
 export async function useUsersApi(): Promise<{
@@ -138,6 +138,31 @@ export async function useDeleteAccountApi(userId: number): Promise<{
     return {
       deletedUserId: null,
       error: (e as Error).message ?? 'Errore eliminando account'
+    };
+  }
+}
+
+export async function useCreateAccountApi(payload: CreateAccountPayload): Promise<{
+  user: User | null;
+  error: string | null;
+}> {
+  try {
+    const authUser = get(auth).user;
+    if (!authUser?.is_superuser) {
+      throw new Error('Solo i superuser possono creare account');
+    }
+
+    const data = await createAccount(payload);
+    const user = normalizeUsersPayload(data)[0] ?? null;
+    if (!user) {
+      throw new Error('Risposta create account non valida');
+    }
+
+    return { user, error: null };
+  } catch (e) {
+    return {
+      user: null,
+      error: (e as Error).message ?? 'Errore creando account'
     };
   }
 }

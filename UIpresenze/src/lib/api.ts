@@ -2,7 +2,8 @@ import { PUBLIC_API_BASE } from '$env/static/public';
 import { get } from 'svelte/store';
 import { auth } from '$lib/stores/auth';
 
-const BASE = (PUBLIC_API_BASE + '/api').replace(/\/$/, '');
+const DEFAULT_API_BASE = '/presenze';
+const BASE = `${(PUBLIC_API_BASE || DEFAULT_API_BASE).replace(/\/$/, '')}/api`;
 const AUTO_REFRESH_MS = 14 * 60 * 1000;
 
 export function getAuthToken() {

@@ -113,6 +113,17 @@ export type DeleteAccountResponse = {
   deleted_user_id: number;
 };
 
+export type CreateAccountPayload = {
+  email: string;
+  password: string;
+  nome?: string;
+  cognome?: string;
+  is_active?: boolean;
+  is_superuser?: boolean;
+  tipologia_contratto?: string;
+  dati_anagrafici?: Record<string, unknown> | string | null;
+};
+
 export function fetchUsers(): Promise<User[]> {
   return request('/users/');
 }
@@ -179,6 +190,10 @@ export function deleteAccountById(userId: number) {
     throw new Error('ID utente non valido');
   }
   return request(`/delete-account/?id=${parsedUserId}`, { method: 'DELETE' }) as Promise<DeleteAccountResponse>;
+}
+
+export function createAccount(entry: CreateAccountPayload) {
+  return request('/create-account/', { method: 'POST', json: entry }) as Promise<User>;
 }
 
 // Backwards compatibility: keep the old name if it is used elsewhere.
