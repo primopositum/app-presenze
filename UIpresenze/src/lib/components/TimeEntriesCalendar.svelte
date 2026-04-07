@@ -6,6 +6,7 @@
     type_display?: string;
     ore_tot: number;
     validation_level: number;
+    note?: string | null;
   };
 
   export type DayHours = {
@@ -151,6 +152,7 @@
       {@const isToday = today.getFullYear() === year && today.getMonth() + 1 === month && today.getDate() === day}
       {@const hours = byDate[dstr]}
       {@const entries = byEntries[dstr] || []}
+      {@const hasNotes = entries.some((entry) => !!entry.note?.trim())}
       {@const visibleEntries = entries.slice(0, maxVisibleEntries)}
       {@const hiddenCount = Math.max(0, entries.length - maxVisibleEntries)}
       {@const weekend = isWeekend(year, month, day)}
@@ -165,6 +167,7 @@
         tabindex={isDisabled ? -1 : 0}
         aria-disabled={isDisabled}
         class={`flex flex-col items-center border-2 gap-0.5 sm:gap-1 h-20 sm:h-24 overflow-hidden rounded-md p-1 sm:p-1.5
+          relative
           transition-colors
           ${isDisabled ? `${vBg || 'bg-gray-50'} opacity-60` : `cursor-pointer ${vBg || (weekendEmpty ? 'bg-blue-100' : weekend ? 'bg-gray-50' : 'bg-gray-100')} hover:opacity-90`}
           ${isToday ? 'outline outline-2 outline-green-500 border-none' : 'border-gray-400'}
@@ -175,6 +178,14 @@
           if (e.key === 'Enter' || e.key === ' ') handleDay(day);
         }}
       >
+        {#if hasNotes}
+          <span
+            class="absolute top-1 right-1 w-2 h-2 rounded-full bg-orange-500"
+            title="Presente almeno una nota in questo giorno"
+            aria-label="Giorno con nota"
+          ></span>
+        {/if}
+
         <!-- Numero giorno -->
         <div class="text-[10px] sm:text-xs font-medium text-gray-500 mb-0.5">
           {String(day).padStart(2, '0')}

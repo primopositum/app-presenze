@@ -4,6 +4,7 @@ from .models import Utente, TimeEntry, Saldo, Contratto, Trasferta, Spesa, Autom
 from decimal import Decimal
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
+from django.db.models import Q
 
 class UtenteSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False)
@@ -77,18 +78,85 @@ class TimeEntrySerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "utente", "data_creaz", "data_upd"]
 
+    def _get_contract_day_hours(self, utente_id: int, target_date):
+        if target_date.weekday() > 4:
+            return None
+
+        contract = (
+            Contratto.objects
+            .filter(utente_id=utente_id, is_active=True, data_ass__lte=target_date)
+            .filter(Q(data_fine__isnull=True) | Q(data_fine__gte=target_date))
+            .order_by("-data_ass", "-id")
+            .first()
+        )
+        if not contract or not contract.ore_sett or len(contract.ore_sett) != 5:
+            return None
+        return Decimal(str(contract.ore_sett[target_date.weekday()]))
+
+    def _sync_prelievo_under_contract(self, lavoro_entry: TimeEntry):
+        if lavoro_entry.type != TimeEntry.EntryType.LAVORO_ORDINARIO:
+            return
+
+        has_other_types = TimeEntry.objects.filter(
+            utente_id=lavoro_entry.utente_id,
+            data=lavoro_entry.data,
+        ).exclude(pk=lavoro_entry.pk).exclude(
+            type__in=[
+                TimeEntry.EntryType.LAVORO_ORDINARIO,
+                TimeEntry.EntryType.PRELIEVO_BANCA_ORE,
+            ]
+        ).exists()
+
+        if has_other_types:
+            return
+
+        expected_hours = self._get_contract_day_hours(lavoro_entry.utente_id, lavoro_entry.data)
+        if expected_hours is None:
+            return
+
+        ore_lavoro = Decimal(str(lavoro_entry.ore_tot))
+        delta = expected_hours - ore_lavoro
+
+        prelievo_entry = TimeEntry.objects.filter(
+            utente_id=lavoro_entry.utente_id,
+            data=lavoro_entry.data,
+            type=TimeEntry.EntryType.PRELIEVO_BANCA_ORE
+        ).exclude(pk=lavoro_entry.pk).first()
+
+        if delta > 0:
+            if prelievo_entry:
+                prelievo_entry.ore_tot = delta
+                prelievo_entry.validation_level = lavoro_entry.validation_level
+                prelievo_entry.save(update_fields=["ore_tot", "validation_level", "data_upd"])
+            else:
+                TimeEntry.objects.create(
+                    utente_id=lavoro_entry.utente_id,
+                    data=lavoro_entry.data,
+                    type=TimeEntry.EntryType.PRELIEVO_BANCA_ORE,
+                    ore_tot=delta,
+                    validation_level=lavoro_entry.validation_level,
+                )
+        elif prelievo_entry:
+            prelievo_entry.delete()
+
     @transaction.atomic
     def create(self, validated_data):
         utente_id = validated_data.pop("utente_id")
         entry_type = validated_data.get('type')
         ore_tot = validated_data.get('ore_tot')
+        target_date = validated_data.get('data')
+        expected_hours = self._get_contract_day_hours(utente_id, target_date) if target_date else None
         
-        # Se è lavoro ordinario e supera le 8 ore, split automatico
-        if entry_type == TimeEntry.EntryType.LAVORO_ORDINARIO and ore_tot > 8:
-            ore_lavoro = Decimal('8.00')
+        # Se è lavoro ordinario e supera le ore contrattuali del giorno, split automatico
+        if (
+            entry_type == TimeEntry.EntryType.LAVORO_ORDINARIO
+            and expected_hours is not None
+            and ore_tot > expected_hours
+        ):
+            ore_lavoro = expected_hours
             ore_banca = ore_tot - ore_lavoro
             
-            # Crea entry lavoro ordinario (max 8 ore)
+            # Crea entry lavoro ordinario (max ore contrattuali del giorno)
             validated_data['ore_tot'] = ore_lavoro
             validated_data["utente_id"] = utente_id
             time_entry = super().create(validated_data)
@@ -101,12 +169,14 @@ class TimeEntrySerializer(serializers.ModelSerializer):
                 ore_tot=ore_banca,
                 validation_level=validated_data.get('validation_level', TimeEntry.ValidationLevel.AUTO)
             )
-            
+            self._sync_prelievo_under_contract(time_entry)
             return time_entry
         
         # Comportamento normale
         validated_data["utente_id"] = utente_id
-        return super().create(validated_data)
+        time_entry = super().create(validated_data)
+        self._sync_prelievo_under_contract(time_entry)
+        return time_entry
 
     @transaction.atomic
     def update(self, instance, validated_data):
@@ -116,6 +186,8 @@ class TimeEntrySerializer(serializers.ModelSerializer):
         # Gestiamo lo split solo se è lavoro ordinario
         entry_type = validated_data.get('type', instance.type)
         ore_tot = validated_data.get('ore_tot', instance.ore_tot)
+        target_date = validated_data.get('data', instance.data)
+        expected_hours = self._get_contract_day_hours(instance.utente_id, target_date)
         
         if entry_type == TimeEntry.EntryType.LAVORO_ORDINARIO:
             # Cerca se esiste già un'entry banca ore collegata
@@ -125,9 +197,9 @@ class TimeEntrySerializer(serializers.ModelSerializer):
                 type=TimeEntry.EntryType.VERSAMENTO_BANCA_ORE
             ).exclude(pk=instance.pk).first()
             
-            if ore_tot > 8:
+            if expected_hours is not None and ore_tot > expected_hours:
                 # Caso: dobbiamo splittare (o aggiornare lo split esistente)
-                ore_lavoro = Decimal('8.00')
+                ore_lavoro = expected_hours
                 ore_banca = ore_tot - ore_lavoro
                 
                 validated_data['ore_tot'] = ore_lavoro
@@ -153,15 +225,16 @@ class TimeEntrySerializer(serializers.ModelSerializer):
                             instance.validation_level
                         )
                     )
-                
+                self._sync_prelievo_under_contract(instance)
                 return instance
             
             else:
-                # Caso: ore <= 8, eliminiamo l'entry banca ore se esiste
+                # Caso: ore <= ore contrattuali (o nessun contratto valido), eliminiamo l'entry banca ore se esiste
                 if banca_entry:
                     banca_entry.delete()
-                
-                return super().update(instance, validated_data)
+                instance = super().update(instance, validated_data)
+                self._sync_prelievo_under_contract(instance)
+                return instance
         
         # Se non è lavoro ordinario, comportamento normale
         return super().update(instance, validated_data)

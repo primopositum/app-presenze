@@ -182,7 +182,8 @@ export const loadData = async () => {
           date: e.data,
           type: e.type,
           ore_tot: Number(e.ore_tot),
-          validation_level: e.validation_level
+          validation_level: e.validation_level,
+          note: e.note ?? null
         }))
       }));
       await refreshProfileUser();

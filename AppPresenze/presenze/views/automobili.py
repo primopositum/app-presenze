@@ -1,5 +1,4 @@
 from rest_framework import status
-from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import ListCreateAPIView, RetrieveUpdateAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -8,11 +7,13 @@ from rest_framework.views import APIView
 from ..models import Automobile
 from ..serializer import AutomobileSerializer, AutomobilePatchSerializer
 
+
 class AutomobileListCreateView(ListCreateAPIView):
     """
-    GET  /automobili/   → lista (query param ?is_active=true/false)
-    POST /automobili/   → crea
+    GET  /automobili/   -> lista (query param ?is_active=true/false)
+    POST /automobili/   -> crea
     """
+
     serializer_class = AutomobileSerializer
     permission_classes = [IsAuthenticated]
 
@@ -25,57 +26,21 @@ class AutomobileListCreateView(ListCreateAPIView):
         return qs
 
     def create(self, request, *args, **kwargs):
-        if not request.user.is_superuser:
-            return Response(
-                {"errors": "Solo admin può creare automobili."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
         return super().create(request, *args, **kwargs)
 
 
 class AutomobileDetailView(RetrieveUpdateAPIView):
     """
-    GET   /automobili/<a_id>/   → dettaglio
-    PUT   /automobili/<a_id>/   → aggiornamento completo
-    PATCH /automobili/<a_id>/   → aggiornamento parziale (qualsiasi campo)
+    GET   /automobili/<a_id>/   -> dettaglio
+    PUT   /automobili/<a_id>/   -> aggiornamento completo
+    PATCH /automobili/<a_id>/   -> aggiornamento parziale (qualsiasi campo)
     """
+
     queryset = Automobile.objects.all()
     serializer_class = AutomobileSerializer
     permission_classes = [IsAuthenticated]
 
-    def _is_owner(self, automobile):
-        return automobile.trasferte.filter(utente_id=self.request.user.id).exists()
-
-    def _has_other_owners(self, automobile):
-        return automobile.trasferte.exclude(utente_id=self.request.user.id).exists()
-
-    def get_object(self):
-        automobile = super().get_object()
-        is_super = self.request.user.is_superuser
-        is_owner = self._is_owner(automobile)
-
-        if not (is_super or is_owner):
-            raise PermissionDenied("Non hai i permessi per visualizzare questa automobile.")
-
-        return automobile
-
     def update(self, request, *args, **kwargs):
-        automobile = self.get_object()
-        is_super = request.user.is_superuser
-        is_owner = self._is_owner(automobile)
-
-        if not (is_super or is_owner):
-            return Response(
-                {"errors": "Non hai i permessi per modificare questa automobile."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        if not is_super and self._has_other_owners(automobile):
-            return Response(
-                {"errors": "Non puoi modificare un'auto collegata alle trasferte di altri utenti."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
         return super().update(request, *args, **kwargs)
 
 
@@ -83,10 +48,10 @@ class AutomobileDeleteView(APIView):
     """
     DELETE /automobili/<a_id>/delete/
 
-    - Se l'auto è collegata ad altre entità  → soft delete (is_active=False)
+    - Se l'auto e collegata ad altre entita -> soft delete (is_active=False)
       HTTP 200  { "detail": "Automobile archiviata.", "action": "archived", "data": {...} }
 
-    - Se l'auto non ha relazioni             → hard delete
+    - Se l'auto non ha relazioni             -> hard delete
       HTTP 200  { "detail": "Automobile eliminata.", "action": "deleted" }
     """
 
@@ -104,9 +69,6 @@ class AutomobileDeleteView(APIView):
                 return True
         return False
 
-    def _is_owner(self, request, automobile):
-        return automobile.trasferte.filter(utente_id=request.user.id).exists()
-
     def delete(self, request, pk):
         try:
             automobile = Automobile.objects.get(pk=pk)
@@ -114,21 +76,6 @@ class AutomobileDeleteView(APIView):
             return Response(
                 {"detail": "Automobile non trovata."},
                 status=status.HTTP_404_NOT_FOUND,
-            )
-
-        is_super = request.user.is_superuser
-        is_owner = self._is_owner(request, automobile)
-
-        if not (is_super or is_owner):
-            return Response(
-                {"errors": "Non hai i permessi per eliminare questa automobile."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        if not is_super and automobile.trasferte.exclude(utente_id=request.user.id).exists():
-            return Response(
-                {"errors": "Non puoi eliminare un'auto collegata alle trasferte di altri utenti."},
-                status=status.HTTP_403_FORBIDDEN,
             )
 
         if self._has_related_objects(automobile):
@@ -159,6 +106,7 @@ class AutomobilePatchView(APIView):
 
     Aggiorna coefficiente e/o is_active in un'unica rotta dedicata.
     """
+
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, pk):
@@ -170,23 +118,10 @@ class AutomobilePatchView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        is_super = request.user.is_superuser
-        is_owner = automobile.trasferte.filter(utente_id=request.user.id).exists()
-
-        if not (is_super or is_owner):
-            return Response(
-                {"errors": "Non hai i permessi per modificare questa automobile."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        if not is_super and automobile.trasferte.exclude(utente_id=request.user.id).exists():
-            return Response(
-                {"errors": "Non puoi modificare un'auto collegata alle trasferte di altri utenti."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
         serializer = AutomobilePatchSerializer(
-            automobile, data=request.data, partial=True
+            automobile,
+            data=request.data,
+            partial=True,
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()
