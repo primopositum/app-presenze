@@ -18,7 +18,8 @@
     let mounted = false;
     let generatingDossier = false;
     let dossierError: string | null = null;
-    let dossierDate = new Date().toISOString().slice(0, 10);
+    let dossierMonth = new Date().toISOString().slice(0, 7);
+    let dossierDate = `${dossierMonth}-01`;
     let dossierUsers: Array<{ id: number; label: string }> = [];
     let selectedDossierUserId = '';
     let usersLoaded = false;
@@ -87,12 +88,19 @@
       return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
     }
 
+    function monthToFirstDay(monthValue: string): string {
+      const safe = (monthValue || '').trim();
+      if (!/^\d{4}-\d{2}$/.test(safe)) return '';
+      return `${safe}-01`;
+    }
+
     async function handleGenerateDossier() {
       if (generatingDossier) return;
       dossierError = null;
 
+      dossierDate = monthToFirstDay(dossierMonth);
       if (!dossierDate) {
-        dossierError = 'Inserisci una data valida.';
+        dossierError = 'Seleziona mese e anno validi.';
         return;
       }
 
@@ -154,7 +162,7 @@
           <div class="dossier-fields">
             <label class="field">
               <span>Data</span>
-              <input type="date" bind:value={dossierDate} />
+              <input type="month" bind:value={dossierMonth} />
             </label>
             {#if isSuperuser}
               <label class="field">
