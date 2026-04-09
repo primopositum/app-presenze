@@ -204,7 +204,7 @@ class TrasfertaRow:
     def to_placeholders(self) -> Dict[str, str]:
         return {
             "#Date": self.date,
-            "#tragitto": self.tragitto,
+            "#Tragitto": self.tragitto,
             "#Azienda": self.tragitto,
             "#Km": _format_decimal(self.km) if self.km > 0 else "",
             "#Calc": _format_money(self.calc) if self.calc > 0 else "",

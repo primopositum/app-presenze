@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
@@ -311,10 +311,11 @@
 
     creatingSpesa = true;
     createSpesaError = null;
-    const tragittoSegments = payload.type === 2 ? (payload.tragittoSegments ?? []) : [];
+    const spesaType = Number(payload.type);
+    const tragittoSegments = spesaType === 2 ? (payload.tragittoSegments ?? []) : [];
 
     try {
-      if (payload.type === 2) {
+      if (spesaType === 2) {
         if (!selectedAutoId) {
           throw new Error('Seleziona prima una automobile per la spesa Rimborso km.');
         }
@@ -340,10 +341,17 @@
 
       const { addSpesa } = useCreateSpese({ tId: item.id });
       const created = await addSpesa({
-        type: payload.type,
+        type: spesaType,
         importo: payload.importo,
-        tragitto: payload.type === 2 ? tragittoSegments : []
+        tragitto: spesaType === 2 ? tragittoSegments : []
       });
+      if (spesaType === 2) {
+        const createdSegments = (created.payload.tragitto ?? []).map((v) => String(v).trim()).filter(Boolean);
+        if (createdSegments.length > 0) {
+          const tragittoTrasfertaCurrent = item.tragitto ?? [];
+          item = await updateTrasferta(item.id, { tragitto: [...tragittoTrasfertaCurrent, ...createdSegments] });
+        }
+      }
       spese = [created.payload, ...spese];
       showSpesaForm = false;
     } catch (e: any) {
@@ -812,6 +820,7 @@
     height: 100% !important;
   }
 </style>
+
 
 
 

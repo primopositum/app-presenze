@@ -30,15 +30,16 @@
     { value: 7, label: 'Altro' }
   ];
 
-  let type = 1;
+  let type: number | string = 1;
   let importo = '';
   let kmPercorsi = '';
   let coefficiente = '';
   let tragitto = '';
   let coefficienteInitiale = '';
   let localError: string | null = null;
+  $: selectedType = Number(type);
 
-  $: if (type === 2) {
+  $: if (selectedType === 2) {
     const current = coefficienteInitiale;
     const next = coefficienteAuto !== null && Number.isFinite(coefficienteAuto) ? String(coefficienteAuto) : '';
     if (!current || current !== next) {
@@ -68,7 +69,7 @@
   function onSubmit() {
     localError = null;
 
-    if (type === 2) {
+    if (selectedType === 2) {
       if (!hasAutomobile) {
         localError = 'Seleziona prima una automobile per usare Rimborso km.';
         return;
@@ -97,7 +98,7 @@
 
       const parsedImporto = Number((parsedKm * parsedCoeff).toFixed(2));
       dispatch('submit', {
-        type,
+        type: selectedType,
         importo: parsedImporto,
         kmPercorsi: parsedKm,
         coefficiente: parsedCoeff,
@@ -112,7 +113,7 @@
       localError = 'Importo non valido.';
       return;
     }
-    dispatch('submit', { type, importo: parsedImporto });
+    dispatch('submit', { type: selectedType, importo: parsedImporto });
   }
 </script>
 
@@ -144,7 +145,7 @@
       </select>
     </div>
 
-    {#if type === 2}
+    {#if selectedType === 2}
       <div class="mb-4">
         <label class="block text-sm text-gray-700 mb-1">Km percorsi</label>
         <input
@@ -226,3 +227,4 @@
     </div>
   </form>
 </div>
+
