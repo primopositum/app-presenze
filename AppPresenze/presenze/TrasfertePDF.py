@@ -179,7 +179,7 @@ def _month_totals_init() -> Dict[int, Decimal]:
         Spesa.TrasfertaType.PARCHEGGI: Decimal("0.00"),
         Spesa.TrasfertaType.RISTORANTI: Decimal("0.00"),
         Spesa.TrasfertaType.HOTEL: Decimal("0.00"),
-        Spesa.TrasfertaType.BIGLIETTI: Decimal("0.00"),
+        Spesa.TrasfertaType.ALTRO: Decimal("0.00"),
         Spesa.TrasfertaType.PEDAGGI: Decimal("0.00"),
         Spesa.TrasfertaType.KM: Decimal("0.00"),
     }
@@ -194,12 +194,12 @@ class TrasfertaRow:
     park: Decimal
     rist: Decimal
     hote: Decimal
-    flight: Decimal
+    other: Decimal
     ped: Decimal
 
     @property
     def total(self) -> Decimal:
-        return self.calc + self.park + self.rist + self.hote + self.flight + self.ped
+        return self.calc + self.park + self.rist + self.hote + self.other + self.ped
 
     def to_placeholders(self) -> Dict[str, str]:
         return {
@@ -210,7 +210,7 @@ class TrasfertaRow:
             "#Park": _format_money(self.park) if self.park > 0 else "",
             "#Rist": _format_money(self.rist) if self.rist > 0 else "",
             "#Hote": _format_money(self.hote) if self.hote > 0 else "",
-            "#Flight": _format_money(self.flight) if self.flight > 0 else "",
+            "#Other": _format_money(self.other) if self.other > 0 else "",
             "#Ped": _format_money(self.ped) if self.ped > 0 else "",
             "#Tot": _format_money(self.total) if self.total > 0 else "",
         }
@@ -241,7 +241,10 @@ def _build_rows_and_totals(trasferte: List[Trasferta]) -> Tuple[List[TrasfertaRo
             park=grouped.get(Spesa.TrasfertaType.PARCHEGGI, Decimal("0.00")),
             rist=grouped.get(Spesa.TrasfertaType.RISTORANTI, Decimal("0.00")),
             hote=grouped.get(Spesa.TrasfertaType.HOTEL, Decimal("0.00")),
-            flight=grouped.get(Spesa.TrasfertaType.BIGLIETTI, Decimal("0.00")),
+            other=(
+                grouped.get(Spesa.TrasfertaType.BIGLIETTI, Decimal("0.00"))
+                + grouped.get(Spesa.TrasfertaType.ALTRO, Decimal("0.00"))
+            ),
             ped=grouped.get(Spesa.TrasfertaType.PEDAGGI, Decimal("0.00")),
         )
         rows.append(row)
@@ -249,7 +252,7 @@ def _build_rows_and_totals(trasferte: List[Trasferta]) -> Tuple[List[TrasfertaRo
         month_totals[Spesa.TrasfertaType.PARCHEGGI] += row.park
         month_totals[Spesa.TrasfertaType.RISTORANTI] += row.rist
         month_totals[Spesa.TrasfertaType.HOTEL] += row.hote
-        month_totals[Spesa.TrasfertaType.BIGLIETTI] += row.flight
+        month_totals[Spesa.TrasfertaType.ALTRO] += row.other
         month_totals[Spesa.TrasfertaType.PEDAGGI] += row.ped
         month_totals[Spesa.TrasfertaType.KM] += row.calc
 
@@ -450,8 +453,8 @@ def build_trasferte_pdf_bytes(
         "#2": _format_money(month_totals[Spesa.TrasfertaType.PARCHEGGI]) if month_totals[Spesa.TrasfertaType.PARCHEGGI] > 0 else "",
         "#3": _format_money(month_totals[Spesa.TrasfertaType.RISTORANTI]) if month_totals[Spesa.TrasfertaType.RISTORANTI] > 0 else "",
         "#4": _format_money(month_totals[Spesa.TrasfertaType.HOTEL]) if month_totals[Spesa.TrasfertaType.HOTEL] > 0 else "",
-        "#5": _format_money(month_totals[Spesa.TrasfertaType.BIGLIETTI]) if month_totals[Spesa.TrasfertaType.BIGLIETTI] > 0 else "",
-        "#6": _format_money(month_totals[Spesa.TrasfertaType.PEDAGGI]) if month_totals[Spesa.TrasfertaType.PEDAGGI] > 0 else "",
+        "#5": _format_money(month_totals[Spesa.TrasfertaType.PEDAGGI]) if month_totals[Spesa.TrasfertaType.PEDAGGI] > 0 else "",
+        "#6": _format_money(month_totals[Spesa.TrasfertaType.ALTRO]) if month_totals[Spesa.TrasfertaType.ALTRO] > 0 else "",
         "#7": _format_money(grand_total) if grand_total > 0 else "",
     }
 
@@ -586,3 +589,4 @@ class TrasfertePDFView(APIView):
         response["X-Firma-Status"] = firma_status
         response["Access-Control-Expose-Headers"] = "X-Firma-Status"
         return response
+

@@ -97,25 +97,21 @@ class TimeEntrySerializer(serializers.ModelSerializer):
         if lavoro_entry.type != TimeEntry.EntryType.LAVORO_ORDINARIO:
             return
 
-        has_other_types = TimeEntry.objects.filter(
-            utente_id=lavoro_entry.utente_id,
-            data=lavoro_entry.data,
-        ).exclude(pk=lavoro_entry.pk).exclude(
-            type__in=[
-                TimeEntry.EntryType.LAVORO_ORDINARIO,
-                TimeEntry.EntryType.PRELIEVO_BANCA_ORE,
-            ]
-        ).exists()
-
-        if has_other_types:
-            return
-
         expected_hours = self._get_contract_day_hours(lavoro_entry.utente_id, lavoro_entry.data)
         if expected_hours is None:
             return
 
-        ore_lavoro = Decimal(str(lavoro_entry.ore_tot))
-        delta = expected_hours - ore_lavoro
+        covered_hours = TimeEntry.objects.filter(
+            utente_id=lavoro_entry.utente_id,
+            data=lavoro_entry.data,
+        ).exclude(
+            type__in=[
+                TimeEntry.EntryType.PRELIEVO_BANCA_ORE,
+                TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
+            ]
+        )
+        covered_total = sum((Decimal(str(te.ore_tot)) for te in covered_hours), Decimal("0.00"))
+        delta = expected_hours - covered_total
 
         prelievo_entry = TimeEntry.objects.filter(
             utente_id=lavoro_entry.utente_id,
@@ -332,3 +328,4 @@ class SignatureSerializer(serializers.ModelSerializer):
             payload = base64.b64encode(obj.svg.encode("utf-8")).decode("ascii")
             return f"data:image/svg+xml;base64,{payload}"
         return None
+

@@ -434,3 +434,4 @@ class SignatureEvent(models.Model):
             models.Index(fields=["user", "-created_at"], name="SignatureEv_user_id_4c4f1c_idx"),
             models.Index(fields=["event_type", "-created_at"], name="SignatureEv_event_t_c75314_idx"),
         ]
+

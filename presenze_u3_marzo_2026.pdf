@@ -1,0 +1,15 @@
+HTTP/1.1 401 Unauthorized
+Server: gunicorn
+Date: Fri, 03 Apr 2026 09:15:07 GMT
+Connection: keep-alive
+Content-Type: application/json
+WWW-Authenticate: Bearer realm="api"
+Vary: Accept, origin
+Allow: GET, HEAD, OPTIONS
+X-Frame-Options: DENY
+Content-Length: 172
+X-Content-Type-Options: nosniff
+Referrer-Policy: same-origin
+Cross-Origin-Opener-Policy: same-origin
+
+{"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is invalid"}]}
