@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
@@ -32,8 +32,14 @@
   let creatingSpesa = false;
   let createSpesaError: string | null = null;
   let error: string | null = null;
-  let mapRef: { calcolaDistanza: (a1?: string, a2?: string) => Promise<number | null> } | null = null;
+  let mapRef: {
+    calcolaDistanza: (a1?: string, a2?: string) => Promise<number | null>;
+    hasError: () => boolean;
+    getErrorMessage: () => string;
+  } | null = null;
   let distanzaKm: number | null = null;
+  let distanzaKmInput = '';
+  let mapUnavailable = false;
   const DEFAULT_PARTENZA = 'Via Broseta 58, Bergamo';
   let partenza = DEFAULT_PARTENZA;
   let arrivo = '';
@@ -51,6 +57,12 @@
   let isSuperuser = false;
   let refreshKey = 0;
   let isKmBandieraRossa = false;
+  type SpesaFormSubmit = SpesaCreate & {
+    kmPercorsi?: number;
+    coefficiente?: number;
+    coefficienteChanged?: boolean;
+    tragittoSegments?: string[];
+  };
 
   $: isAuthed = $auth.isAuthed;
   $: isSuperuser = !!$auth.user?.is_superuser;
@@ -61,7 +73,7 @@
 
   function getAutoLabel(auto: Automobile): string {
     const parts = [auto.marca, auto.alimentazione].filter(Boolean);
-    return parts.join(' • ');
+    return parts.join(' - ');
   }
 
   function getTrasfertaAutoRawValue(trasferta: Trasferta | null): number | string | null {
@@ -94,6 +106,28 @@
 
     const selected = automobili.find((auto) => String(getAutoId(auto)) === selectedAutoId);
     costoKmInput = selected ? String(selected.coefficiente ?? '') : '';
+  }
+
+  function getSelectedAuto() {
+    return automobili.find((auto) => String(getAutoId(auto)) === selectedAutoId) ?? null;
+  }
+
+  function getSelectedAutoCoeff(): number | null {
+    const selected = getSelectedAuto();
+    if (!selected) return null;
+    const coeff = Number(selected.coefficiente);
+    return Number.isFinite(coeff) ? coeff : null;
+  }
+
+  function removeTragittoSegmentsOnce(source: string[], segments: string[]): string[] {
+    const next = [...source];
+    for (const raw of segments) {
+      const segment = String(raw).trim();
+      if (!segment) continue;
+      const idx = next.indexOf(segment);
+      if (idx >= 0) next.splice(idx, 1);
+    }
+    return next;
   }
 
   async function handleCoefficienteChange(event: Event) {
@@ -189,6 +223,8 @@
     kmError = null;
     autoError = null;
     distanzaKm = null;
+    distanzaKmInput = '';
+    mapUnavailable = false;
     partenza = DEFAULT_PARTENZA;
     arrivo = '';
 
@@ -270,15 +306,44 @@
     }
   }
 
-  async function handleCreateSpesa(payload: SpesaCreate) {
+  async function handleCreateSpesa(payload: SpesaFormSubmit) {
     if (!item || creatingSpesa || isLocked) return;
 
     creatingSpesa = true;
     createSpesaError = null;
+    const tragittoSegments = payload.type === 2 ? (payload.tragittoSegments ?? []) : [];
 
     try {
+      if (payload.type === 2) {
+        if (!selectedAutoId) {
+          throw new Error('Seleziona prima una automobile per la spesa Rimborso km.');
+        }
+
+        const coeff = Number(payload.coefficiente);
+        if (!Number.isFinite(coeff) || coeff < 0) {
+          throw new Error('Coefficiente non valido.');
+        }
+
+        const coeffCorrente = getSelectedAutoCoeff();
+        const coeffChanged = payload.coefficienteChanged || coeffCorrente === null || coeff !== coeffCorrente;
+        if (coeffChanged) {
+          const updatedAuto = await updateAutomobileCoeff(selectedAutoId, coeff);
+          const updatedAutoId = getAutoId(updatedAuto);
+          if (updatedAutoId !== null) {
+            automobili = automobili.map((auto) =>
+              String(getAutoId(auto)) === String(updatedAutoId) ? updatedAuto : auto
+            );
+          }
+          costoKmInput = String(updatedAuto.coefficiente ?? coeff);
+        }
+      }
+
       const { addSpesa } = useCreateSpese({ tId: item.id });
-      const created = await addSpesa(payload);
+      const created = await addSpesa({
+        type: payload.type,
+        importo: payload.importo,
+        tragitto: payload.type === 2 ? tragittoSegments : []
+      });
       spese = [created.payload, ...spese];
       showSpesaForm = false;
     } catch (e: any) {
@@ -288,9 +353,35 @@
     }
   }
 
+  async function handleDeleteSpesa(spesaToDelete: Spesa) {
+    if (!item || isLocked) return;
+
+    try {
+      const segments = (spesaToDelete.tragitto ?? []).map((v) => String(v).trim()).filter(Boolean);
+      if (segments.length > 0) {
+        const tragittoCurrent = item.tragitto ?? [];
+        const tragittoNext = removeTragittoSegmentsOnce(tragittoCurrent, segments);
+        if (tragittoNext.length !== tragittoCurrent.length) {
+          item = await updateTrasferta(item.id, { tragitto: tragittoNext });
+        }
+      }
+      spese = spese.filter((s) => s.id !== spesaToDelete.id);
+    } catch (e: any) {
+      error = e?.message || 'Errore aggiornamento tragitto trasferta dopo eliminazione spesa';
+    }
+  }
+
   async function handleCalcolaDistanza() {
     if (isLocked) return;
-    distanzaKm = await mapRef?.calcolaDistanza(partenza, arrivo) ?? null;
+    const result = await mapRef?.calcolaDistanza(partenza, arrivo) ?? null;
+    distanzaKm = result;
+    mapUnavailable = !!mapRef?.hasError();
+    if (result !== null) {
+      distanzaKmInput = result.toFixed(1);
+    }
+    if (mapUnavailable && mapRef?.getErrorMessage()) {
+      kmError = mapRef.getErrorMessage();
+    }
   }
 
   function handleRouteInputsEnter(event: KeyboardEvent) {
@@ -302,9 +393,21 @@
   async function handleCreateKmSpesa() {
     if (!item || creatingSpesa || isLocked) return;
 
+    if (mapUnavailable) {
+      const manualKm = Number(String(distanzaKmInput).replace(',', '.'));
+      distanzaKm = Number.isFinite(manualKm) && manualKm >= 0 ? manualKm : null;
+    }
+
     const costoKm = Number(costoKmInput);
     if (distanzaKm === null || Number.isNaN(costoKm) || costoKm <= 0) {
       kmError = 'dati chilometrici mancanti';
+      return;
+    }
+
+    const partenzaClean = partenza.trim();
+    const arrivoClean = arrivo.trim();
+    if (!partenzaClean || !arrivoClean) {
+      kmError = 'Inserisci partenza e arrivo per valorizzare il tragitto.';
       return;
     }
 
@@ -313,8 +416,13 @@
     try {
       const baseImporto = Number((distanzaKm * costoKm).toFixed(2));
       const importo = isKmBandieraRossa ? Number((baseImporto * 2).toFixed(2)) : baseImporto;
+      const tragitto = isKmBandieraRossa
+        ? [partenzaClean, arrivoClean, arrivoClean, partenzaClean]
+        : [partenzaClean, arrivoClean];
       const { addSpesa } = useCreateSpese({ tId: item.id });
-      const created = await addSpesa({ type: 2, importo });
+      const created = await addSpesa({ type: 2, importo, tragitto });
+      const tragittoTrasfertaCurrent = item.tragitto ?? [];
+      item = await updateTrasferta(item.id, { tragitto: [...tragittoTrasfertaCurrent, ...tragitto] });
       spese = [created.payload, ...spese];
     } catch (e: any) {
       kmError = e?.message || 'Errore creazione spesa chilometrica';
@@ -340,6 +448,10 @@
   $: if (isAuthed) {
     $page.params.id;
     loadDetail();
+  }
+
+  $: if (mapRef?.hasError()) {
+    mapUnavailable = true;
   }
 
   $: isLocked = item?.validation_level === 2;
@@ -426,13 +538,29 @@
             >
               Calcola
             </button>
-            <div class="rounded-[10px] bg-slate-50 px-2.5 py-2 text-[0.85rem] text-gray-900">
-              {#if distanzaKm !== null}
-                Km percorsi: {distanzaKm.toFixed(1)} km
-              {:else}
-                Km percorsi: -
-              {/if}
-            </div>
+            {#if mapUnavailable}
+              <div class="rounded-[10px] bg-slate-50 px-2.5 py-1.5 text-[0.85rem] text-gray-900">
+                <label for="km-manuale-input" class="mb-1 block text-[0.75rem] text-gray-600">Km percorsi</label>
+                <input
+                  id="km-manuale-input"
+                  class="w-[140px] rounded-[8px] border border-gray-300 bg-white px-2 py-1.5 text-[0.85rem] outline-none focus:border-gray-400 focus:shadow-[0_0_0_2px_rgba(156,163,175,0.18)]"
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  bind:value={distanzaKmInput}
+                  placeholder="0.0"
+                  disabled={isLocked}
+                />
+              </div>
+            {:else}
+              <div class="rounded-[10px] bg-slate-50 px-2.5 py-2 text-[0.85rem] text-gray-900">
+                {#if distanzaKm !== null}
+                  Km percorsi: {distanzaKm.toFixed(1)} km
+                {:else}
+                  Km percorsi: -
+                {/if}
+              </div>
+            {/if}
             <div class="flex items-center gap-2">
               <a
                 class="inline-flex h-[34px] w-[34px] items-center justify-center rounded-[9px] border border-gray-300 bg-white text-[1rem] leading-none no-underline transition hover:bg-gray-50"
@@ -495,38 +623,40 @@
               </button>
             </div>
           </div>
-	          <div class="grid grid-cols-[1fr_1fr_auto] items-center gap-2.5 max-sm:grid-cols-[1fr_auto]">
-	            <input
-	              class="w-full rounded-[10px] border border-gray-300 bg-white px-3 py-2.5 text-[0.9rem] outline-none focus:border-gray-400 focus:shadow-[0_0_0_2px_rgba(156,163,175,0.18)] max-sm:col-span-2"
-              type="text"
-              placeholder="Inserisci partenza"
-              bind:value={partenza}
-              on:keydown={handleRouteInputsEnter}
-              disabled={isLocked}
-            />
-            <input
-              class="w-full rounded-[10px] border border-gray-300 bg-white px-3 py-2.5 text-[0.9rem] outline-none focus:border-gray-400 focus:shadow-[0_0_0_2px_rgba(156,163,175,0.18)]"
-              type="text"
-              placeholder="Inserisci arrivo"
-              bind:value={arrivo}
-              on:keydown={handleRouteInputsEnter}
-              disabled={isLocked}
-            />
-            <button
-              class="inline-flex h-[42px] w-[42px] cursor-pointer items-center justify-center rounded-[10px] border border-gray-300 bg-white transition hover:bg-gray-50"
-              type="button"
-              on:click={handleClearRouteInputs}
-              disabled={isLocked}
-              aria-label="Pulisci partenza e arrivo"
-              title="Pulisci campi"
-            >
-              <FontAwesomeIcon
-                icon={faBroom}
-                class="text-[120%]"
-                style={`color: ${palette.secondary.main};`}
-	              />
-	            </button>
-	          </div>
+            {#if !mapUnavailable}
+	            <div class="grid grid-cols-[1fr_1fr_auto] items-center gap-2.5 max-sm:grid-cols-[1fr_auto]">
+	              <input
+	                class="w-full rounded-[10px] border border-gray-300 bg-white px-3 py-2.5 text-[0.9rem] outline-none focus:border-gray-400 focus:shadow-[0_0_0_2px_rgba(156,163,175,0.18)] max-sm:col-span-2"
+                type="text"
+                placeholder="Inserisci partenza"
+                bind:value={partenza}
+                on:keydown={handleRouteInputsEnter}
+                disabled={isLocked}
+              />
+              <input
+                class="w-full rounded-[10px] border border-gray-300 bg-white px-3 py-2.5 text-[0.9rem] outline-none focus:border-gray-400 focus:shadow-[0_0_0_2px_rgba(156,163,175,0.18)]"
+                type="text"
+                placeholder="Inserisci arrivo"
+                bind:value={arrivo}
+                on:keydown={handleRouteInputsEnter}
+                disabled={isLocked}
+              />
+              <button
+                class="inline-flex h-[42px] w-[42px] cursor-pointer items-center justify-center rounded-[10px] border border-gray-300 bg-white transition hover:bg-gray-50"
+                type="button"
+                on:click={handleClearRouteInputs}
+                disabled={isLocked}
+                aria-label="Pulisci partenza e arrivo"
+                title="Pulisci campi"
+              >
+                <FontAwesomeIcon
+                  icon={faBroom}
+                  class="text-[120%]"
+                  style={`color: ${palette.secondary.main};`}
+	                />
+	              </button>
+	            </div>
+            {/if}
 	          <section class="grid gap-2.5 rounded-xl border border-gray-200 bg-gray-50 p-3" class:validated-surface={isLocked}>
 	            <h2 class="m-0 text-base font-semibold">Automobile Trasferta</h2>
 
@@ -599,6 +729,8 @@
         <FormSpesa
           saving={creatingSpesa}
           error={createSpesaError}
+          coefficienteAuto={getSelectedAutoCoeff()}
+          hasAutomobile={!!selectedAutoId}
           on:submit={(e) => handleCreateSpesa(e.detail)}
           on:cancel={() => {
             showSpesaForm = false;
@@ -612,7 +744,7 @@
       {:else}
         <div class="grid gap-2">
           {#each spese as s (s.id)}
-            <SpeseCard spesa={s} readonly={isLocked} />
+            <SpeseCard spesa={s} readonly={isLocked} on:delete={(e) => handleDeleteSpesa(e.detail)} />
           {/each}
         </div>
       {/if}
@@ -680,5 +812,6 @@
     height: 100% !important;
   }
 </style>
+
 
 

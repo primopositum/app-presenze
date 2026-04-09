@@ -268,6 +268,14 @@
     }
   }
 
+  export function hasError(): boolean {
+    return !!error;
+  }
+
+  export function getErrorMessage(): string {
+    return error;
+  }
+
   // Reset della location salvata se l'utente modifica manualmente il testo
   function onInput(field: 'A' | 'B') {
     if (field === 'A') placeLocationA = null;

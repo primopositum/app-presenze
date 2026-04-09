@@ -5,9 +5,18 @@
   export let saving = false;
   export let error: string | null = null;
   export let submitLabel = 'Aggiungi spesa';
+  export let coefficienteAuto: number | null = null;
+  export let hasAutomobile = false;
+
+  type SpesaFormSubmit = SpesaCreate & {
+    kmPercorsi?: number;
+    coefficiente?: number;
+    coefficienteChanged?: boolean;
+    tragittoSegments?: string[];
+  };
 
   const dispatch = createEventDispatcher<{
-    submit: SpesaCreate;
+    submit: SpesaFormSubmit;
     cancel: void;
   }>();
 
@@ -23,7 +32,22 @@
 
   let type = 1;
   let importo = '';
+  let kmPercorsi = '';
+  let coefficiente = '';
+  let tragitto = '';
+  let coefficienteInitiale = '';
   let localError: string | null = null;
+
+  $: if (type === 2) {
+    const current = coefficienteInitiale;
+    const next = coefficienteAuto !== null && Number.isFinite(coefficienteAuto) ? String(coefficienteAuto) : '';
+    if (!current || current !== next) {
+      coefficienteInitiale = next;
+      if (!coefficiente || coefficiente === current) {
+        coefficiente = next;
+      }
+    }
+  }
 
   function close() {
     dispatch('cancel');
@@ -44,12 +68,50 @@
   function onSubmit() {
     localError = null;
 
+    if (type === 2) {
+      if (!hasAutomobile) {
+        localError = 'Seleziona prima una automobile per usare Rimborso km.';
+        return;
+      }
+
+      const parsedKm = Number(String(kmPercorsi).replace(',', '.'));
+      if (!Number.isFinite(parsedKm) || parsedKm < 0) {
+        localError = 'Km percorsi non valido.';
+        return;
+      }
+
+      const parsedCoeff = Number(String(coefficiente).replace(',', '.'));
+      if (!Number.isFinite(parsedCoeff) || parsedCoeff < 0) {
+        localError = 'Coefficiente non valido.';
+        return;
+      }
+
+      const tragittoSegments = tragitto
+        .split('/')
+        .map((part) => part.trim())
+        .filter((part) => part.length > 0);
+      if (tragittoSegments.length === 0) {
+        localError = 'Inserisci il tragitto (separa le tappe con /).';
+        return;
+      }
+
+      const parsedImporto = Number((parsedKm * parsedCoeff).toFixed(2));
+      dispatch('submit', {
+        type,
+        importo: parsedImporto,
+        kmPercorsi: parsedKm,
+        coefficiente: parsedCoeff,
+        coefficienteChanged: parsedCoeff !== Number(coefficienteInitiale || 0),
+        tragittoSegments
+      });
+      return;
+    }
+
     const parsedImporto = Number(importo);
     if (!Number.isFinite(parsedImporto) || parsedImporto < 0) {
       localError = 'Importo non valido.';
       return;
     }
-
     dispatch('submit', { type, importo: parsedImporto });
   }
 </script>
@@ -61,7 +123,7 @@
   on:click={onOverlayClick}
 >
   <form
-    class="bg-white rounded-xl p-6 w-full max-w-md shadow-lg"
+    class="bg-white rounded-xl border-2 border-orange-500 p-6 w-full max-w-md shadow-lg"
     on:submit|preventDefault={onSubmit}
   >
     <h2 class="text-lg font-semibold mb-4 text-gray-800">
@@ -72,7 +134,7 @@
     <div class="mb-4">
       <label class="block text-sm text-gray-700 mb-1">Tipo</label>
       <select
-        class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+        class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"
         bind:value={type}
         disabled={saving}
       >
@@ -82,20 +144,61 @@
       </select>
     </div>
 
-    <!-- Importo -->
-    <div class="mb-4">
-      <label class="block text-sm text-gray-700 mb-1">Importo</label>
-      <input
-        class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-        type="number"
-        min="0"
-        step="0.01"
-        placeholder="0.00"
-        bind:value={importo}
-        disabled={saving}
-        required
-      />
-    </div>
+    {#if type === 2}
+      <div class="mb-4">
+        <label class="block text-sm text-gray-700 mb-1">Km percorsi</label>
+        <input
+          class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"
+          type="number"
+          min="0"
+          step="0.1"
+          placeholder="0.0"
+          bind:value={kmPercorsi}
+          disabled={saving}
+          required
+        />
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-sm text-gray-700 mb-1">Coefficiente</label>
+        <input
+          class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"
+          type="number"
+          min="0"
+          step="0.0001"
+          placeholder="0.0000"
+          bind:value={coefficiente}
+          disabled={saving}
+          required
+        />
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-sm text-gray-700 mb-1">Tragitto</label>
+        <input
+          class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"
+          type="text"
+          placeholder="es. Bergamo / Milano / Torino"
+          bind:value={tragitto}
+          disabled={saving}
+          required
+        />
+      </div>
+    {:else}
+      <div class="mb-4">
+        <label class="block text-sm text-gray-700 mb-1">Importo</label>
+        <input
+          class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"
+          type="number"
+          min="0"
+          step="0.01"
+          placeholder="0.00"
+          bind:value={importo}
+          disabled={saving}
+          required
+        />
+      </div>
+    {/if}
 
     {#if localError || error}
       <div class="text-sm text-red-600 mb-2">

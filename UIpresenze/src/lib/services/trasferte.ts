@@ -38,6 +38,7 @@ export type Trasferta = {
   data: string; // YYYY-MM-DD
   azienda: string;
   indirizzo: string | null;
+  tragitto?: string[];
   note: string | null;
   validation_level: ValidationLevel;
 };
@@ -58,11 +59,13 @@ export type Spesa = {
   t_id: number;
   type: number;
   importo: string | number;
+  tragitto?: string[];
 };
 
 export type SpesaCreate = {
   type: number;
   importo: number | string;
+  tragitto?: string[];
 };
 
 export type SpesaUpdate = Partial<SpesaCreate>;

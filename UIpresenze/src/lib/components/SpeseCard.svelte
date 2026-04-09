@@ -1,14 +1,15 @@
-<script lang="ts">
+﻿<script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
   import { faTrash } from '@fortawesome/free-solid-svg-icons';
   import type { Spesa } from '$lib/services/trasferte';
   import { useDeleteSpese } from '$lib/hooks/useTrasferte';
-  import { timeEntryReload } from '$lib/stores/timeEntryReload';
+
   export let spesa: Spesa;
   export let readonly = false;
+  let loading = false;
 
-  const dispatch = createEventDispatcher<{ delete: number }>();
+  const dispatch = createEventDispatcher<{ delete: Spesa }>();
   const types: Record<number, string> = {
     1: 'Pedaggi',
     2: 'Rimborso km',
@@ -20,9 +21,7 @@
   };
 
   async function handleDelete(spesa: Spesa) {
-    let loading = false;
     let error: string | null = null;
-    //if (te.validation_level === 2) return; already 50k control on this
     try {
       loading = true;
       const deleteSpese = useDeleteSpese({ sId: spesa.id });
@@ -33,19 +32,24 @@
       loading = false;
     }
     if (!error) {
-      timeEntryReload.bump();
-      window.location.reload();
+      dispatch('delete', spesa);
     }
-
   }
 
   $: typeLabel = types[Number(spesa.type)] ?? String(spesa.type);
+  $: tragittoLabel =
+    Number(spesa.type) === 2 && Array.isArray(spesa.tragitto) && spesa.tragitto.length > 0
+      ? spesa.tragitto.join(' / ')
+      : null;
 </script>
 
 <article class="flex items-center justify-between gap-2 rounded-lg border border-gray-100 px-3 py-2 text-sm">
   <div class="flex flex-wrap gap-2">
     <span>Spesa per {typeLabel}</span>
-    <span>importo: {spesa.importo} €</span>
+    <span>importo: {spesa.importo} &euro;</span>
+    {#if tragittoLabel}
+      <span>tragitto: {tragittoLabel}</span>
+    {/if}
   </div>
   {#if !readonly}
     <button
@@ -54,8 +58,10 @@
       on:click={() => handleDelete(spesa)}
       aria-label="Elimina spesa"
       title="Elimina"
+      disabled={loading}
     >
       <FontAwesomeIcon icon={faTrash} class="text-sm text-slate-600" />
     </button>
   {/if}
 </article>
+
