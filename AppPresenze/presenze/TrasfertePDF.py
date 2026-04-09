@@ -188,7 +188,7 @@ def _month_totals_init() -> Dict[int, Decimal]:
 @dataclass
 class TrasfertaRow:
     date: str
-    azienda: str
+    tragitto: str
     km: Decimal
     calc: Decimal
     park: Decimal
@@ -204,7 +204,8 @@ class TrasfertaRow:
     def to_placeholders(self) -> Dict[str, str]:
         return {
             "#Date": self.date,
-            "#Azienda": self.azienda,
+            "#tragitto": self.tragitto,
+            "#Azienda": self.tragitto,
             "#Km": _format_decimal(self.km) if self.km > 0 else "",
             "#Calc": _format_money(self.calc) if self.calc > 0 else "",
             "#Park": _format_money(self.park) if self.park > 0 else "",
@@ -232,10 +233,11 @@ def _build_rows_and_totals(trasferte: List[Trasferta]) -> Tuple[List[TrasfertaRo
         if tr.automobile:
             coeff = Decimal(str(tr.automobile.coefficiente or Decimal("0.00")))
         calc_total = (km_total * coeff).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        tragitto_value = " / ".join([str(p).strip() for p in (tr.tragitto or []) if str(p).strip()])
 
         row = TrasfertaRow(
             date=tr.data.strftime("%d/%m/%Y"),
-            azienda=tr.azienda or "",
+            tragitto=tragitto_value,
             km=km_total,
             calc=calc_total,
             park=grouped.get(Spesa.TrasfertaType.PARCHEGGI, Decimal("0.00")),

@@ -245,7 +245,7 @@ class TrasfertaSerializer(serializers.ModelSerializer):
         model = Trasferta
         fields = [
             'id', 'utente', 'utente_email', 'utente_nome', 'utente_cognome', 'automobile',
-            'data', 'azienda', 'indirizzo', 
+            'data', 'azienda', 'indirizzo', 'tragitto',
             'data_creaz', 'data_upd', 'note', 'totale_spese', 'validation_level'
         ]
         read_only_fields = ['id', 'data_creaz', 'data_upd', 'validation_level']
@@ -276,15 +276,29 @@ class SpesaSerializer(serializers.ModelSerializer):
         model = Spesa
         fields = [
             'id', 'trasferta', 'trasferta_data', 'trasferta_azienda',
-            'type', 'type_display', 'importo', 'data_creaz', 'data_upd'
+            'type', 'type_display', 'importo', 'tragitto', 'data_creaz', 'data_upd'
         ]
         read_only_fields = ['id', 'data_creaz', 'data_upd']
 
     def validate_importo(self, value):
         if value < 0:
-            raise serializers.ValidationError("L'importo non può essere negativo.")
+            raise serializers.ValidationError("L'importo non puo essere negativo.")
         return value
-    
+
+    def validate(self, attrs):
+        tipo = attrs.get('type', getattr(self.instance, 'type', None))
+        tragitto = attrs.get('tragitto', getattr(self.instance, 'tragitto', [])) or []
+        tragitto_clean = [str(place).strip() for place in tragitto if str(place).strip()]
+
+        if tipo == Spesa.TrasfertaType.KM:
+            if not tragitto_clean:
+                raise serializers.ValidationError({'tragitto': 'Per Rimborso km il tragitto e obbligatorio.'})
+            attrs['tragitto'] = tragitto_clean
+        else:
+            attrs['tragitto'] = []
+
+        return attrs
+
 class AutomobileSerializer(serializers.ModelSerializer):
     class Meta:
         model = Automobile
@@ -328,4 +342,5 @@ class SignatureSerializer(serializers.ModelSerializer):
             payload = base64.b64encode(obj.svg.encode("utf-8")).decode("ascii")
             return f"data:image/svg+xml;base64,{payload}"
         return None
+
 

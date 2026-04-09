@@ -268,7 +268,7 @@ class Automobile(models.Model):
 
 class Trasferta(models.Model):
     """
-    Trasferta(T_ID, U_ID, A_ID, data, azienda, indirizzo,
+    Trasferta(T_ID, U_ID, A_ID, data, azienda, indirizzo, tragitto,
               data_creaz, data_upd, note, validation_level)
     """
 
@@ -296,6 +296,12 @@ class Trasferta(models.Model):
     data = models.DateField()
     azienda = models.CharField(max_length=255, blank=True)
     indirizzo = models.CharField(max_length=500, blank=True, null=True)
+    tragitto = ArrayField(
+        base_field=models.CharField(max_length=500),
+        default=list,
+        blank=True,
+        help_text="Lista tappe/indirizzi del tragitto",
+    )
     validation_level = models.IntegerField(
         choices=ValidationLevel.choices,
         default=ValidationLevel.VALIDATO_UTENTE,
@@ -334,7 +340,7 @@ class Trasferta(models.Model):
 
 class Spesa(models.Model):
     """
-    Spesa(S_ID, T_ID, type, importo, data_creaz, data_upd)
+    Spesa(S_ID, T_ID, type, importo, tragitto, data_creaz, data_upd)
     """
 
     class TrasfertaType(models.IntegerChoices):
@@ -357,6 +363,12 @@ class Spesa(models.Model):
 
     type = models.IntegerField(choices=TrasfertaType.choices)
     importo = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    tragitto = ArrayField(
+        base_field=models.CharField(max_length=500),
+        default=list,
+        blank=True,
+        help_text="Lista luoghi del tragitto associati alla spesa chilometrica",
+    )
 
     data_creaz = models.DateTimeField(default=timezone.now)
     data_upd = models.DateTimeField(auto_now=True)
