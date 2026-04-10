@@ -40,6 +40,8 @@
   let distanzaKm: number | null = null;
   let distanzaKmInput = '';
   let mapUnavailable = false;
+  const mapsApiKey = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? '').trim();
+  const hasMapsApiKey = mapsApiKey.length > 0;
   const DEFAULT_PARTENZA = 'Via Broseta 58, Bergamo';
   let partenza = DEFAULT_PARTENZA;
   let arrivo = '';
@@ -128,6 +130,27 @@
       if (idx >= 0) next.splice(idx, 1);
     }
     return next;
+  }
+
+  async function appendTragittoSegments(segments: string[]) {
+    if (!item) return;
+
+    const cleanSegments = segments.map((v) => String(v).trim()).filter(Boolean);
+    if (cleanSegments.length === 0) return;
+
+    const trasfertaId = item.id;
+    let tragittoCurrent = (item.tragitto ?? []).map((v) => String(v).trim()).filter(Boolean);
+
+    try {
+      const latest = (await getTrasferte()).find((t) => Number(t.id) === Number(trasfertaId));
+      if (latest) {
+        tragittoCurrent = (latest.tragitto ?? []).map((v) => String(v).trim()).filter(Boolean);
+      }
+    } catch {
+      // Fallback to local state if a refresh is temporarily unavailable.
+    }
+
+    item = await updateTrasferta(trasfertaId, { tragitto: [...tragittoCurrent, ...cleanSegments] });
   }
 
   async function handleCoefficienteChange(event: Event) {
@@ -309,12 +332,18 @@
   async function handleCreateSpesa(payload: SpesaFormSubmit) {
     if (!item || creatingSpesa || isLocked) return;
 
+    const spesaType = Number(payload.type);
+    if (!Number.isFinite(spesaType) || spesaType <= 0) {
+      createSpesaError = 'Tipo spesa non valido.';
+      return;
+    }
+
     creatingSpesa = true;
     createSpesaError = null;
-    const tragittoSegments = payload.type === 2 ? (payload.tragittoSegments ?? []) : [];
+    const tragittoSegments = spesaType === 2 ? (payload.tragittoSegments ?? []) : [];
 
     try {
-      if (payload.type === 2) {
+      if (spesaType === 2) {
         if (!selectedAutoId) {
           throw new Error('Seleziona prima una automobile per la spesa Rimborso km.');
         }
@@ -340,10 +369,16 @@
 
       const { addSpesa } = useCreateSpese({ tId: item.id });
       const created = await addSpesa({
-        type: payload.type,
+        type: spesaType,
         importo: payload.importo,
-        tragitto: payload.type === 2 ? tragittoSegments : []
+        tragitto: spesaType === 2 ? tragittoSegments : []
       });
+      if (spesaType === 2) {
+        const createdSegments = (created.payload.tragitto ?? []).map((v) => String(v).trim()).filter(Boolean);
+        if (createdSegments.length > 0) {
+          await appendTragittoSegments(createdSegments);
+        }
+      }
       spese = [created.payload, ...spese];
       showSpesaForm = false;
     } catch (e: any) {
@@ -373,6 +408,11 @@
 
   async function handleCalcolaDistanza() {
     if (isLocked) return;
+    if (!hasMapsApiKey) {
+      mapUnavailable = true;
+      kmError = 'Chiave Google Maps mancante: imposta VITE_GOOGLE_MAPS_API_KEY nel file .env';
+      return;
+    }
     const result = await mapRef?.calcolaDistanza(partenza, arrivo) ?? null;
     distanzaKm = result;
     mapUnavailable = !!mapRef?.hasError();
@@ -421,8 +461,7 @@
         : [partenzaClean, arrivoClean];
       const { addSpesa } = useCreateSpese({ tId: item.id });
       const created = await addSpesa({ type: 2, importo, tragitto });
-      const tragittoTrasfertaCurrent = item.tragitto ?? [];
-      item = await updateTrasferta(item.id, { tragitto: [...tragittoTrasfertaCurrent, ...tragitto] });
+      await appendTragittoSegments(tragitto);
       spese = [created.payload, ...spese];
     } catch (e: any) {
       kmError = e?.message || 'Errore creazione spesa chilometrica';
@@ -451,6 +490,9 @@
   }
 
   $: if (mapRef?.hasError()) {
+    mapUnavailable = true;
+  }
+  $: if (!hasMapsApiKey) {
     mapUnavailable = true;
   }
 
@@ -527,14 +569,20 @@
       </div>
       <div class="grid gap-2.5">
         <div class="map-corner relative z-0 mx-auto h-[320px] w-full overflow-hidden rounded-xl bg-white shadow-[0_14px_36px_rgba(0,0,0,0.22)] max-sm:h-[220px]">
-          <MapsPlugin bind:this={mapRef} />
+          {#if hasMapsApiKey}
+            <MapsPlugin bind:this={mapRef} />
+          {:else}
+            <div class="flex h-full items-center justify-center px-4 text-center text-sm text-red-700">
+              Chiave Google Maps mancante: imposta VITE_GOOGLE_MAPS_API_KEY nel file .env
+            </div>
+          {/if}
         </div>
         <div class="mx-auto mt-3 grid w-full max-w-[760px] gap-2.5 rounded-xl border border-gray-300 bg-white px-2.5 py-2">
           <div class="flex flex-nowrap items-center gap-2.5 max-sm:flex-wrap">
             <button
               class="cursor-pointer rounded-[10px] border border-gray-300 bg-white px-3 py-2 text-[0.9rem] font-semibold transition hover:bg-gray-50"
               on:click={handleCalcolaDistanza}
-              disabled={isLocked}
+              disabled={isLocked || !hasMapsApiKey}
             >
               Calcola
             </button>
@@ -598,7 +646,7 @@
                 aria-pressed={isKmBandieraRossa}
                 title="Andata e Ritorno"
                 on:click={() => (isKmBandieraRossa = !isKmBandieraRossa)}
-                disabled={isLocked}
+                disabled={creatingSpesa || isLocked}
               >
                 <FontAwesomeIcon icon={faFlag} />
               </button>
@@ -610,7 +658,7 @@
                 placeholder="Coeff. auto selezionata"
                 value={costoKmInput}
                 on:change={handleCoefficienteChange}
-                disabled={isLocked}
+                disabled={creatingSpesa || isLocked}
               />
               <button
                 class="min-w-[44px] cursor-pointer rounded-[10px] border border-gray-300 bg-white px-3 py-2 text-[1rem] font-bold transition hover:bg-gray-50"
@@ -631,7 +679,7 @@
                 placeholder="Inserisci partenza"
                 bind:value={partenza}
                 on:keydown={handleRouteInputsEnter}
-                disabled={isLocked}
+                disabled={creatingSpesa || isLocked}
               />
               <input
                 class="w-full rounded-[10px] border border-gray-300 bg-white px-3 py-2.5 text-[0.9rem] outline-none focus:border-gray-400 focus:shadow-[0_0_0_2px_rgba(156,163,175,0.18)]"
@@ -639,13 +687,13 @@
                 placeholder="Inserisci arrivo"
                 bind:value={arrivo}
                 on:keydown={handleRouteInputsEnter}
-                disabled={isLocked}
+                disabled={creatingSpesa || isLocked}
               />
               <button
                 class="inline-flex h-[42px] w-[42px] cursor-pointer items-center justify-center rounded-[10px] border border-gray-300 bg-white transition hover:bg-gray-50"
                 type="button"
                 on:click={handleClearRouteInputs}
-                disabled={isLocked}
+                disabled={creatingSpesa || isLocked}
                 aria-label="Pulisci partenza e arrivo"
                 title="Pulisci campi"
               >
@@ -666,7 +714,7 @@
 	                class="w-full rounded-[10px] border border-gray-300 bg-white px-3 py-2.5 text-[0.95rem] outline-none focus:border-gray-400 focus:shadow-[0_0_0_2px_rgba(156,163,175,0.18)]"
 	                bind:value={selectedAutoId}
 	                on:change={handleAutomobileChange}
-	                disabled={autoLoading || isLocked}
+	                disabled={creatingSpesa || autoLoading || isLocked}
 	              >
 	                <option value="">Nessuna automobile</option>
 	                {#each autoOptions as option (option.id)}

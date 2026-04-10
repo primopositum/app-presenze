@@ -272,6 +272,7 @@
     justify-content: space-between;
     padding: 14px 16px;
     min-height: 56px;
+    background: var(--color-auto-bg-soft);
     background: color-mix(in oklab, var(--color-auto-bg) 90%, white);
     color: var(--color-auto-text);
     border-bottom: 1px solid var(--color-auto-primary);
@@ -313,6 +314,7 @@
   .form-wrap {
     width: min(100%, 460px);
     justify-self: center;
+    background: var(--color-auto-panel-soft);
     background: color-mix(in oklab, var(--color-auto-panel) 88%, white);
     border: 1px solid var(--color-auto-border);
     border-radius: 14px;
@@ -430,6 +432,7 @@
     justify-self: center;
     justify-items: center;
     text-align: center;
+    background: var(--color-auto-panel-soft-2);
     background: color-mix(in oklab, var(--color-auto-panel) 82%, white);
     border-radius: 10px;
     padding: 10px;
@@ -453,6 +456,7 @@
   }
 
   .pdf-controls select:focus {
+    outline: 2px solid var(--color-auto-primary-focus);
     outline: 2px solid color-mix(in oklab, var(--color-auto-primary) 35%, transparent);
     outline-offset: 1px;
   }
@@ -471,6 +475,7 @@
   .modal-backdrop {
     position: fixed;
     inset: 0;
+    background: var(--color-auto-overlay);
     background: color-mix(in oklab, var(--color-auto-primary) 55%, transparent);
     display: grid;
     place-items: center;

@@ -40,6 +40,13 @@
   --color-auto-danger-50: #fef2f2;
   --color-auto-danger-200: #fecaca;
   --color-auto-danger-700: #b91c1c;
+
+  /* Cross-browser fallback tokens (avoid relying only on color-mix support) */
+  --color-auto-bg-soft: #f6f7f9;
+  --color-auto-panel-soft: #ffffff;
+  --color-auto-panel-soft-2: #ffffff;
+  --color-auto-primary-focus: rgba(31, 41, 55, 0.35);
+  --color-auto-overlay: rgba(31, 41, 55, 0.55);
 }
 
 @font-face {
@@ -76,6 +83,17 @@ body {
 	background-attachment: fixed;
 	background-color: var(--color-background);
 	min-height: 100vh;
+}
+
+/* Keep fallback tokens in sync when color-mix() is unavailable */
+@media (prefers-color-scheme: dark) {
+	:root {
+		--color-auto-bg-soft: #151922;
+		--color-auto-panel-soft: #1b2430;
+		--color-auto-panel-soft-2: #202b38;
+		--color-auto-primary-focus: rgb(248 250 252 / 0.35);
+		--color-auto-overlay: rgb(2 6 23 / 0.65);
+	}
 }
 
 h1,

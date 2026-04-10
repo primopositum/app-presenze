@@ -35,14 +35,13 @@
   let kmPercorsi = '';
   let coefficiente = '';
   let tragitto = '';
-  let coefficienteInitiale = '';
+  let coefficienteIniziale = '';
   let localError: string | null = null;
-
   $: if (type === 2) {
-    const current = coefficienteInitiale;
+    const current = coefficienteIniziale;
     const next = coefficienteAuto !== null && Number.isFinite(coefficienteAuto) ? String(coefficienteAuto) : '';
     if (!current || current !== next) {
-      coefficienteInitiale = next;
+      coefficienteIniziale = next;
       if (!coefficiente || coefficiente === current) {
         coefficiente = next;
       }
@@ -101,7 +100,7 @@
         importo: parsedImporto,
         kmPercorsi: parsedKm,
         coefficiente: parsedCoeff,
-        coefficienteChanged: parsedCoeff !== Number(coefficienteInitiale || 0),
+        coefficienteChanged: parsedCoeff !== Number(coefficienteIniziale || 0),
         tragittoSegments
       });
       return;
@@ -136,6 +135,7 @@
       <select
         class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"
         bind:value={type}
+        on:change={(e) => (type = Number((e.currentTarget as HTMLSelectElement).value))}
         disabled={saving}
       >
         {#each types as t}
