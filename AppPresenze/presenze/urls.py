@@ -70,6 +70,11 @@ api_urlpatterns = [
     path("automobili/<int:pk>/patch/",   views.AutomobilePatchView.as_view(),      name="automobili-patch"),
     path("automobili/<int:auto_id>/PDFauto/", views.pdf_auto_upload,               name="automobili-pdfauto-upload"),
     path("automobili/PDFauto/mese-corrente/", views.pdf_auto_current_month_list,   name="automobili-pdfauto-current-month"),
+
+    # -------------------------------------------------------------------------
+    # Utilities Bar (read-only)
+    # -------------------------------------------------------------------------
+    path("utilitiesbar/", views.UtilitiesBarListView.as_view(), name="utilitiesbar-list"),
 ]
 
 

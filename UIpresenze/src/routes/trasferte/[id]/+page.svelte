@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
@@ -860,6 +860,7 @@
     height: 100% !important;
   }
 </style>
+
 
 
 

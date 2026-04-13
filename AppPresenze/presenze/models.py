@@ -385,6 +385,45 @@ class Spesa(models.Model):
 
 
 # ---------------------------
+# UtilitiesBar
+# ---------------------------
+
+class UtilitiesBar(models.Model):
+    class IconName(models.TextChoices):
+        CONFLUENCE = "faConfluence", "Confluence"
+        JIRA = "faJira", "Jira"
+        CIRCLE = "faCircle", "Circle"
+        AMAZON = "faAmazon", "Amazon"
+        AWS = "faAws", "AWS"
+        DISCORD = "faDiscord", "Discord"
+        GITHUB = "faGithub", "GitHub"
+        GITLAB = "faGitlab", "GitLab"
+        LINKEDIN = "faLinkedin", "LinkedIn"
+        MICROSOFT = "faMicrosoft", "Microsoft"
+        NOTION = "faNotion", "Notion"
+        UBUNTU = "faUbuntu", "Ubuntu"
+
+    id = models.BigAutoField(primary_key=True, db_column="UB_ID")
+    link = models.URLField(max_length=500)
+    colore = models.CharField(max_length=20, help_text="Colore hex, esempio: #ffffff")
+    icon = models.CharField(
+        max_length=100,
+        choices=IconName.choices,
+        help_text="Nome icona Font Awesome consentita",
+    )
+    posizione = models.PositiveIntegerField(default=0, db_index=True)
+    data_creaz = models.DateTimeField(default=timezone.now)
+    data_upd = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "UtilitiesBar"
+        ordering = ["posizione", "id"]
+
+    def __str__(self):
+        return f"UtilitiesBar #{self.id} - pos {self.posizione}"
+
+
+# ---------------------------
 # Signature
 # ---------------------------
 

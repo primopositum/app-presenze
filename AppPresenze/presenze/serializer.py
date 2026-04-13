@@ -1,6 +1,6 @@
 from rest_framework import serializers
 import base64
-from .models import Utente, TimeEntry, Saldo, Contratto, Trasferta, Spesa, Automobile, Signature
+from .models import Utente, TimeEntry, Saldo, Contratto, Trasferta, Spesa, Automobile, Signature, UtilitiesBar
 from decimal import Decimal
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
@@ -342,5 +342,12 @@ class SignatureSerializer(serializers.ModelSerializer):
             payload = base64.b64encode(obj.svg.encode("utf-8")).decode("ascii")
             return f"data:image/svg+xml;base64,{payload}"
         return None
+
+
+class UtilitiesBarSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UtilitiesBar
+        fields = ["id", "link", "colore", "icon", "posizione"]
+        read_only_fields = ["id", "link", "colore", "icon", "posizione"]
 
 

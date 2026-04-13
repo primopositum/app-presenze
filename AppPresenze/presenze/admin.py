@@ -1,12 +1,13 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.contrib.auth import get_user_model
-from .models import TimeEntry, Saldo, Contratto, Automobile, Trasferta
+from .models import TimeEntry, Saldo, Contratto, Automobile, Trasferta, UtilitiesBar
 
 admin.site.register(TimeEntry)
 admin.site.register(Saldo)
 admin.site.register(Automobile)
 admin.site.register(Trasferta)
+admin.site.register(UtilitiesBar)
 
 
 User = get_user_model()
