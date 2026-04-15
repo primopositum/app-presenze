@@ -149,6 +149,9 @@ if all([Name, User, Psw]):
             'PASSWORD': Psw,
             'HOST': Host,
             'PORT': 5432,
+            'TEST': {
+                "NAME": "test_db_presenze",
+            }
         }
     }
 else:
@@ -246,5 +249,3 @@ LOGGING = {
         },
     },
 }
-
-
