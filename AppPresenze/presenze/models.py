@@ -108,6 +108,7 @@ class TimeEntry(models.Model):
         CONGEDO_MAT_PAT = 11, "Congedo maternità/paternità"
         SCIOPERO = 12, "Sciopero"
         FESTIVITA = 13, "Festività"
+        VISITEMEDICHE = 14, "Visite mediche L.106/25"
 
     class ValidationLevel(models.IntegerChoices):
         AUTO = 0, "Compilato automaticamente"
