@@ -130,3 +130,4 @@ build/
 playwright-report/
 playwright/.cache/
 
+AppPresenze/.example.env
