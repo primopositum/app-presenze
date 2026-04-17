@@ -4,7 +4,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework_simplejwt.tokens import RefreshToken, TokenError
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from ..serializer import UtenteSerializer
 
@@ -121,7 +121,7 @@ def api_logout(request):
     if refresh_token:
         try:
             RefreshToken(refresh_token).blacklist()
-        except TokenError:
+        except Exception:
             pass
     logout(request)
     response = Response({"message": "Logout effettuato"})
