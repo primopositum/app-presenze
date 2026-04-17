@@ -410,73 +410,80 @@ def timeentry_update_validation_level(request, te_id: int):
     - Se già a 2: non modificabile
     - Aggiorna SOLO saldo validato e SOLO quando diventa VALIDATO_ADMIN (2) su type 3/4
     """
-    try:
-        te = TimeEntry.objects.select_related("utente").get(pk=te_id)
-    except TimeEntry.DoesNotExist:
-        return Response({"errors": "TimeEntry non trovato."}, status=status.HTTP_404_NOT_FOUND)
-
-    serializer = TimeEntryValidationSerializer(te, data=request.data, partial=True)
+    # --- 1. Validazione del body
+    serializer = TimeEntryValidationSerializer(data=request.data, partial=True)
     serializer.is_valid(raise_exception=True)
-
     new_level = serializer.validated_data.get("validation_level")
     if new_level is None:
-        return Response({"errors": "validation_level è obbligatorio."}, status=status.HTTP_400_BAD_REQUEST)
-
-    old_level = te.validation_level
-
-    if old_level == TimeEntry.ValidationLevel.VALIDATO_ADMIN:
         return Response(
-            {"errors": "TimeEntry già validata dal superadmin: non modificabile."},
-            status=status.HTTP_403_FORBIDDEN,
+            {"errors": "validation_level è obbligatorio."},
+            status=status.HTTP_400_BAD_REQUEST,
         )
 
     is_super = request.user.is_superuser
-    is_owner = (te.utente_id == request.user.id)
 
-    if is_super:
-        if not (old_level == TimeEntry.ValidationLevel.VALIDATO_UTENTE and
-                new_level == TimeEntry.ValidationLevel.VALIDATO_ADMIN):
-            return Response(
-                {"errors": "Il superuser può solo validare da 1 a 2."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-    elif is_owner:
-        if not (old_level == TimeEntry.ValidationLevel.AUTO and
-                new_level == TimeEntry.ValidationLevel.VALIDATO_UTENTE):
-            return Response(
-                {"errors": "Puoi solo validare da 0 a 1 sulle tue TimeEntry."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-    else:
-        return Response(
-            {"errors": "Non puoi validare TimeEntry altrui"},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
+    # --- 2. Lettura, policy, scrittura sotto un unico lock ---
     with transaction.atomic():
-        te = TimeEntry.objects.select_for_update().select_related("utente").get(pk=te_id)
-        if te.validation_level == TimeEntry.ValidationLevel.VALIDATO_ADMIN:
+        try:
+            te = (
+                TimeEntry.objects
+                .select_for_update()
+                .select_related("utente")
+                .get(pk=te_id)
+            )
+        except TimeEntry.DoesNotExist:
+            return Response(
+                {"errors": "TimeEntry non trovato."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        old_level = te.validation_level
+        is_owner = (te.utente_id == request.user.id)
+
+        # --- 2a. Stato terminale ---
+        if old_level == TimeEntry.ValidationLevel.VALIDATO_ADMIN:
             return Response(
                 {"errors": "TimeEntry già validata dal superadmin: non modificabile."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        prev_level = te.validation_level
+        # --- 2b. Policy sulla transizione ---
+        if is_super:
+            if not (old_level == TimeEntry.ValidationLevel.VALIDATO_UTENTE and
+                    new_level == TimeEntry.ValidationLevel.VALIDATO_ADMIN):
+                return Response(
+                    {"errors": "Il superuser può solo validare da 1 a 2."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        elif is_owner:
+            if not (old_level == TimeEntry.ValidationLevel.AUTO and
+                    new_level == TimeEntry.ValidationLevel.VALIDATO_UTENTE):
+                return Response(
+                    {"errors": "Puoi solo validare da 0 a 1 sulle tue TimeEntry."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        else:
+            return Response(
+                {"errors": "Non puoi validare TimeEntry altrui"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # --- 2c. Scrittura ---
         te.validation_level = new_level
-        te.save(update_fields=["validation_level"])
+        te.save(update_fields=["validation_level", "data_upd"])
+
+        # --- 2d. Aggiornamento saldo (solo quando diventa VALIDATO_ADMIN
+        #         su versamento/prelievo banca ore) ---
         if (
-            prev_level != TimeEntry.ValidationLevel.VALIDATO_ADMIN
-            and new_level == TimeEntry.ValidationLevel.VALIDATO_ADMIN
+            new_level == TimeEntry.ValidationLevel.VALIDATO_ADMIN
             and te.type in (
                 TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
                 TimeEntry.EntryType.PRELIEVO_BANCA_ORE,
             )
         ):
             saldo = Saldo.objects.select_for_update().get(utente=te.utente)
-
             ore = Decimal(str(te.ore_tot))
             delta = ore if te.type == TimeEntry.EntryType.VERSAMENTO_BANCA_ORE else -ore
-
             saldo.valore_saldo_validato += delta
             saldo.save(update_fields=["valore_saldo_validato", "data_upd"])
 
