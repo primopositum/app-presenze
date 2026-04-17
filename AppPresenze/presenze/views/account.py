@@ -224,7 +224,10 @@ def user_profile(request):
                     {"saldo": "Formato non valido: atteso oggetto JSON."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            saldo_obj, _ = Saldo.objects.get_or_create(utente=target_user)
+            try:
+                saldo_obj = Saldo.objects.select_for_update().get(utente=target_user)
+            except Saldo.DoesNotExist:
+                saldo_obj = Saldo.objects.create(utente=target_user)
             saldo_serializer = SaldoMiniSerializer(saldo_obj, data=saldo_payload, partial=True)
             if not saldo_serializer.is_valid():
                 return Response({"saldo": saldo_serializer.errors}, status=status.HTTP_400_BAD_REQUEST)

@@ -29,6 +29,8 @@ URL_DELETE_ACCOUNT   = f"{BASE}/delete-account/"
 URL_TE_CREATE        = f"{BASE}/time-entries/"
 URL_TE_DETAIL        = lambda te_id: f"{BASE}/time-entries/{te_id}/"
 URL_TE_VALIDATION    = lambda te_id: f"{BASE}/time-entries/{te_id}/validation/"
+URL_TE_RANGE_OVERRIDE = f"{BASE}/time-entries/range-override/"
+URL_TE_BULK_VALIDATE  = f"{BASE}/time-entries/bulk-validate-month/"
 
 URL_TRASFERTA_CREATE = f"{BASE}/trasferte/create/"
 URL_TRASFERTA_UPDATE = lambda t_id: f"{BASE}/trasferte/{t_id}/"
@@ -808,3 +810,534 @@ class TestScontrinoDelete(TestCase):
         )
         self.assertEqual(res.status_code, 403)
         self.assertTrue(self.file_path.exists())
+
+class TestChangePasswordExtra(TestCase):
+    """Test per i controlli aggiunti dopo il fix #3 sul checkup."""
+ 
+    def setUp(self):
+        self.utente = make_utente(password="VecchiaPwd123!")
+ 
+    def test_nuova_password_vuota_restituisce_400(self):
+        res = auth_client(self.utente).post(URL_CHANGE_PASSWORD, {
+            "old_password": "VecchiaPwd123!",
+            "new_password": "",
+        }, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.utente.refresh_from_db()
+        self.assertTrue(self.utente.check_password("VecchiaPwd123!"))
+ 
+    def test_nuova_password_mancante_restituisce_400(self):
+        res = auth_client(self.utente).post(URL_CHANGE_PASSWORD, {
+            "old_password": "VecchiaPwd123!",
+        }, format="json")
+        self.assertEqual(res.status_code, 400)
+ 
+    def test_vecchia_password_mancante_restituisce_400(self):
+        res = auth_client(self.utente).post(URL_CHANGE_PASSWORD, {
+            "new_password": "NuovaPwd456!",
+        }, format="json")
+        self.assertEqual(res.status_code, 400)
+ 
+    def test_nuova_password_troppo_corta_restituisce_400(self):
+        """
+        Presuppone che AUTH_PASSWORD_VALIDATORS includa MinimumLengthValidator.
+        Se nei tuoi settings il minimo è diverso, adatta la stringa.
+        """
+        res = auth_client(self.utente).post(URL_CHANGE_PASSWORD, {
+            "old_password": "VecchiaPwd123!",
+            "new_password": "abc",
+        }, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.utente.refresh_from_db()
+        self.assertTrue(self.utente.check_password("VecchiaPwd123!"))
+ 
+    def test_nuova_password_uguale_alla_vecchia_restituisce_400(self):
+        res = auth_client(self.utente).post(URL_CHANGE_PASSWORD, {
+            "old_password": "VecchiaPwd123!",
+            "new_password": "VecchiaPwd123!",
+        }, format="json")
+        self.assertEqual(res.status_code, 400)
+ 
+ 
+# ===========================================================================
+# TimeEntry create — split automatico LAVORO -> VERSAMENTO + sync PRELIEVO
+# ===========================================================================
+ 
+class TestTimeEntryCreateSplit(TestCase):
+    """
+    Verifica il comportamento di TimeEntrySerializer.create():
+    - Se LAVORO_ORDINARIO supera le ore contrattuali del giorno, viene splittato:
+      una entry LAVORO_ORDINARIO con le ore contrattuali + una VERSAMENTO_BANCA_ORE
+      con l'eccedenza.
+    - Se LAVORO_ORDINARIO è inferiore alle ore contrattuali, viene creata
+      automaticamente una PRELIEVO_BANCA_ORE per coprire la differenza.
+    """
+ 
+    def setUp(self):
+        self.utente = make_utente()
+        make_saldo(self.utente)
+        # Contratto 8h lun-ven
+        make_contratto(self.utente, ore_sett=[8, 8, 8, 8, 8])
+        self.lunedi = "2025-01-06"  # è un lunedì
+ 
+    def test_lavoro_oltre_contratto_genera_versamento(self):
+        res = auth_client(self.utente).post(URL_TE_CREATE, {
+            "utente_id": self.utente.id,
+            "data": self.lunedi,
+            "type": TimeEntry.EntryType.LAVORO_ORDINARIO,
+            "ore_tot": "10.00",
+        }, format="json")
+        self.assertEqual(res.status_code, 201)
+ 
+        entries = TimeEntry.objects.filter(
+            utente=self.utente, data=date(2025, 1, 6)
+        ).order_by("type")
+        # Mi aspetto: 1 LAVORO da 8h + 1 VERSAMENTO da 2h
+        self.assertEqual(entries.count(), 2)
+ 
+        lavoro = entries.get(type=TimeEntry.EntryType.LAVORO_ORDINARIO)
+        versamento = entries.get(type=TimeEntry.EntryType.VERSAMENTO_BANCA_ORE)
+        self.assertEqual(lavoro.ore_tot, Decimal("8.00"))
+        self.assertEqual(versamento.ore_tot, Decimal("2.00"))
+ 
+    def test_lavoro_sotto_contratto_genera_prelievo(self):
+        res = auth_client(self.utente).post(URL_TE_CREATE, {
+            "utente_id": self.utente.id,
+            "data": self.lunedi,
+            "type": TimeEntry.EntryType.LAVORO_ORDINARIO,
+            "ore_tot": "5.00",
+        }, format="json")
+        self.assertEqual(res.status_code, 201)
+ 
+        entries = TimeEntry.objects.filter(
+            utente=self.utente, data=date(2025, 1, 6)
+        )
+        # Mi aspetto: 1 LAVORO da 5h + 1 PRELIEVO da 3h
+        self.assertEqual(entries.count(), 2)
+ 
+        lavoro = entries.get(type=TimeEntry.EntryType.LAVORO_ORDINARIO)
+        prelievo = entries.get(type=TimeEntry.EntryType.PRELIEVO_BANCA_ORE)
+        self.assertEqual(lavoro.ore_tot, Decimal("5.00"))
+        self.assertEqual(prelievo.ore_tot, Decimal("3.00"))
+ 
+    def test_lavoro_pari_a_contratto_non_crea_extra(self):
+        res = auth_client(self.utente).post(URL_TE_CREATE, {
+            "utente_id": self.utente.id,
+            "data": self.lunedi,
+            "type": TimeEntry.EntryType.LAVORO_ORDINARIO,
+            "ore_tot": "8.00",
+        }, format="json")
+        self.assertEqual(res.status_code, 201)
+ 
+        entries = TimeEntry.objects.filter(
+            utente=self.utente, data=date(2025, 1, 6)
+        )
+        self.assertEqual(entries.count(), 1)
+        self.assertEqual(entries.first().type, TimeEntry.EntryType.LAVORO_ORDINARIO)
+ 
+    def test_lavoro_nel_weekend_non_genera_split(self):
+        """Sabato (weekday=5): nessun contratto applicabile, nessuno split."""
+        sabato = "2025-01-11"
+        res = auth_client(self.utente).post(URL_TE_CREATE, {
+            "utente_id": self.utente.id,
+            "data": sabato,
+            "type": TimeEntry.EntryType.LAVORO_ORDINARIO,
+            "ore_tot": "6.00",
+        }, format="json")
+        self.assertEqual(res.status_code, 201)
+ 
+        entries = TimeEntry.objects.filter(
+            utente=self.utente, data=date(2025, 1, 11)
+        )
+        self.assertEqual(entries.count(), 1)
+        self.assertEqual(entries.first().ore_tot, Decimal("6.00"))
+ 
+ 
+# ===========================================================================
+# TimeEntry detail PUT — ricalcolo PRELIEVO/VERSAMENTO sull'update
+# ===========================================================================
+ 
+class TestTimeEntryDetailUpdateSync(TestCase):
+    """
+    Verifica che modificando le ore di una LAVORO_ORDINARIO via PUT,
+    il PRELIEVO o VERSAMENTO collegato venga ricalcolato correttamente.
+    """
+ 
+    def setUp(self):
+        self.utente = make_utente()
+        make_saldo(self.utente)
+        make_contratto(self.utente, ore_sett=[8, 8, 8, 8, 8])
+        self.giorno = date(2025, 1, 6)  # lunedì
+        # Crea LAVORO da 5h: il serializer aggiunge un PRELIEVO da 3h
+        self.lavoro = make_timeentry(
+            self.utente,
+            data=self.giorno,
+            type=TimeEntry.EntryType.LAVORO_ORDINARIO,
+            ore_tot=Decimal("5.00"),
+        )
+        # Simula il prelievo che il serializer avrebbe creato
+        self.prelievo = make_timeentry(
+            self.utente,
+            data=self.giorno,
+            type=TimeEntry.EntryType.PRELIEVO_BANCA_ORE,
+            ore_tot=Decimal("3.00"),
+        )
+ 
+    def test_aumento_ore_lavoro_riduce_prelievo(self):
+        res = auth_client(self.utente).put(URL_TE_DETAIL(self.lavoro.id), {
+            "utente_id": self.utente.id,
+            "data": self.giorno.isoformat(),
+            "type": TimeEntry.EntryType.LAVORO_ORDINARIO,
+            "ore_tot": "7.00",
+        }, format="json")
+        self.assertEqual(res.status_code, 200)
+ 
+        self.prelievo.refresh_from_db()
+        self.assertEqual(self.prelievo.ore_tot, Decimal("1.00"))
+ 
+    def test_lavoro_pari_a_contratto_elimina_prelievo(self):
+        res = auth_client(self.utente).put(URL_TE_DETAIL(self.lavoro.id), {
+            "utente_id": self.utente.id,
+            "data": self.giorno.isoformat(),
+            "type": TimeEntry.EntryType.LAVORO_ORDINARIO,
+            "ore_tot": "8.00",
+        }, format="json")
+        self.assertEqual(res.status_code, 200)
+ 
+        self.assertFalse(
+            TimeEntry.objects.filter(
+                utente=self.utente,
+                data=self.giorno,
+                type=TimeEntry.EntryType.PRELIEVO_BANCA_ORE,
+            ).exists()
+        )
+ 
+    def test_lavoro_oltre_contratto_genera_versamento(self):
+        # Elimino prima il prelievo per non avere conflitti
+        self.prelievo.delete()
+        res = auth_client(self.utente).put(URL_TE_DETAIL(self.lavoro.id), {
+            "utente_id": self.utente.id,
+            "data": self.giorno.isoformat(),
+            "type": TimeEntry.EntryType.LAVORO_ORDINARIO,
+            "ore_tot": "10.00",
+        }, format="json")
+        self.assertEqual(res.status_code, 200)
+ 
+        # LAVORO ridotto a 8h + nuovo VERSAMENTO da 2h
+        self.lavoro.refresh_from_db()
+        self.assertEqual(self.lavoro.ore_tot, Decimal("8.00"))
+        versamento = TimeEntry.objects.get(
+            utente=self.utente,
+            data=self.giorno,
+            type=TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
+        )
+        self.assertEqual(versamento.ore_tot, Decimal("2.00"))
+ 
+ 
+# ===========================================================================
+# TimeEntry range override
+# ===========================================================================
+ 
+class TestTimeEntryRangeOverride(TestCase):
+    """
+    Verifica timeentry_create_range_override:
+    - Crea/sostituisce una sola entry per giorno lavorativo nel range
+    - Salta sabato e domenica
+    - Usa ore_sett del contratto attivo
+    - Richiede contratto valido (ore_sett a 5 valori)
+    """
+ 
+    def setUp(self):
+        self.utente = make_utente()
+        self.altro = make_utente(email="altro@test.com")
+        self.admin = make_utente(email="admin@test.com",
+                                 is_superuser=True, is_staff=True)
+        make_contratto(self.utente, ore_sett=[8, 8, 8, 8, 8])
+ 
+    def test_crea_entry_per_giorni_lavorativi(self):
+        # Lun 6 gen 2025 - Ven 10 gen 2025 = 5 giorni lavorativi
+        res = auth_client(self.utente).post(URL_TE_RANGE_OVERRIDE, {
+            "utente_id": self.utente.id,
+            "dataS": "2025-01-06",
+            "dataE": "2025-01-10",
+            "type": TimeEntry.EntryType.FERIE,
+        }, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["created"], 5)
+        self.assertEqual(res.data["skipped_weekends"], 0)
+ 
+        entries = TimeEntry.objects.filter(utente=self.utente)
+        self.assertEqual(entries.count(), 5)
+        for te in entries:
+            self.assertEqual(te.type, TimeEntry.EntryType.FERIE)
+            self.assertEqual(te.ore_tot, Decimal("8.00"))
+ 
+    def test_salta_weekend(self):
+        # Sab 11 - Dom 12 gen 2025
+        res = auth_client(self.utente).post(URL_TE_RANGE_OVERRIDE, {
+            "utente_id": self.utente.id,
+            "dataS": "2025-01-11",
+            "dataE": "2025-01-12",
+            "type": TimeEntry.EntryType.FERIE,
+        }, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["created"], 0)
+        self.assertEqual(res.data["skipped_weekends"], 2)
+        self.assertEqual(TimeEntry.objects.filter(utente=self.utente).count(), 0)
+ 
+    def test_sostituisce_entry_esistenti(self):
+        # Esiste già una LAVORO_ORDINARIO il 6 gennaio
+        make_timeentry(
+            self.utente,
+            data=date(2025, 1, 6),
+            type=TimeEntry.EntryType.LAVORO_ORDINARIO,
+            ore_tot=Decimal("5.00"),
+        )
+        res = auth_client(self.utente).post(URL_TE_RANGE_OVERRIDE, {
+            "utente_id": self.utente.id,
+            "dataS": "2025-01-06",
+            "dataE": "2025-01-06",
+            "type": TimeEntry.EntryType.MALATTIA,
+        }, format="json")
+        self.assertEqual(res.status_code, 200)
+ 
+        entries = TimeEntry.objects.filter(utente=self.utente, data=date(2025, 1, 6))
+        self.assertEqual(entries.count(), 1)
+        self.assertEqual(entries.first().type, TimeEntry.EntryType.MALATTIA)
+        self.assertEqual(entries.first().ore_tot, Decimal("8.00"))
+ 
+    def test_utente_normale_non_puo_per_altri(self):
+        res = auth_client(self.altro).post(URL_TE_RANGE_OVERRIDE, {
+            "utente_id": self.utente.id,
+            "dataS": "2025-01-06",
+            "dataE": "2025-01-10",
+            "type": TimeEntry.EntryType.FERIE,
+        }, format="json")
+        self.assertEqual(res.status_code, 403)
+ 
+    def test_admin_puo_per_altri(self):
+        res = auth_client(self.admin).post(URL_TE_RANGE_OVERRIDE, {
+            "utente_id": self.utente.id,
+            "dataS": "2025-01-06",
+            "dataE": "2025-01-06",
+            "type": TimeEntry.EntryType.FERIE,
+        }, format="json")
+        self.assertEqual(res.status_code, 200)
+ 
+    def test_data_inversa_restituisce_400(self):
+        res = auth_client(self.utente).post(URL_TE_RANGE_OVERRIDE, {
+            "utente_id": self.utente.id,
+            "dataS": "2025-01-10",
+            "dataE": "2025-01-06",
+            "type": TimeEntry.EntryType.FERIE,
+        }, format="json")
+        self.assertEqual(res.status_code, 400)
+ 
+    def test_senza_contratto_restituisce_400(self):
+        senza_contratto = make_utente(email="nocontract@test.com")
+        res = auth_client(senza_contratto).post(URL_TE_RANGE_OVERRIDE, {
+            "utente_id": senza_contratto.id,
+            "dataS": "2025-01-06",
+            "dataE": "2025-01-10",
+            "type": TimeEntry.EntryType.FERIE,
+        }, format="json")
+        self.assertEqual(res.status_code, 400)
+ 
+ 
+# ===========================================================================
+# TimeEntry bulk validate month
+# ===========================================================================
+ 
+class TestTimeEntryBulkValidateMonth(TestCase):
+    """
+    Verifica timeentry_bulk_validate_month nei due casi:
+    - Caso utente normale: 0 -> 1 sulle proprie entry
+    - Caso superuser: 1 -> 2 sulle entry di un utente specifico, con
+      aggiornamento del saldo validato per VERSAMENTO/PRELIEVO
+    """
+ 
+    def setUp(self):
+        self.utente = make_utente()
+        self.admin = make_utente(email="admin@test.com",
+                                 is_superuser=True, is_staff=True)
+        make_saldo(self.utente)
+ 
+    # --- Caso utente normale (0 -> 1) ---
+ 
+    def test_utente_normale_valida_proprie_entry_da_0_a_1(self):
+        # Crea 3 entry AUTO nel mese di gennaio 2025
+        for d in [date(2025, 1, 6), date(2025, 1, 7), date(2025, 1, 8)]:
+            make_timeentry(
+                self.utente,
+                data=d,
+                validation_level=TimeEntry.ValidationLevel.AUTO,
+            )
+        res = auth_client(self.utente).patch(URL_TE_BULK_VALIDATE, {
+            "data": "2025-01-15",
+        }, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["count_updated"], 3)
+ 
+        entries = TimeEntry.objects.filter(utente=self.utente)
+        for te in entries:
+            self.assertEqual(te.validation_level,
+                             TimeEntry.ValidationLevel.VALIDATO_UTENTE)
+ 
+    def test_utente_normale_non_tocca_entry_gia_a_livello_1(self):
+        make_timeentry(
+            self.utente,
+            data=date(2025, 1, 6),
+            validation_level=TimeEntry.ValidationLevel.VALIDATO_UTENTE,
+        )
+        res = auth_client(self.utente).patch(URL_TE_BULK_VALIDATE, {
+            "data": "2025-01-15",
+        }, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["count_updated"], 0)
+ 
+    def test_utente_normale_non_passa_utente_id_altrui(self):
+        res = auth_client(self.utente).patch(URL_TE_BULK_VALIDATE, {
+            "data": "2025-01-15",
+            "utente_id": self.admin.id,
+        }, format="json")
+        self.assertEqual(res.status_code, 403)
+ 
+    def test_utente_normale_tocca_solo_il_mese_indicato(self):
+        # Una entry a gennaio, una a febbraio
+        make_timeentry(
+            self.utente,
+            data=date(2025, 1, 15),
+            validation_level=TimeEntry.ValidationLevel.AUTO,
+        )
+        make_timeentry(
+            self.utente,
+            data=date(2025, 2, 15),
+            validation_level=TimeEntry.ValidationLevel.AUTO,
+        )
+        res = auth_client(self.utente).patch(URL_TE_BULK_VALIDATE, {
+            "data": "2025-01-10",
+        }, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["count_updated"], 1)
+ 
+        gen = TimeEntry.objects.get(utente=self.utente, data=date(2025, 1, 15))
+        feb = TimeEntry.objects.get(utente=self.utente, data=date(2025, 2, 15))
+        self.assertEqual(gen.validation_level,
+                         TimeEntry.ValidationLevel.VALIDATO_UTENTE)
+        self.assertEqual(feb.validation_level,
+                         TimeEntry.ValidationLevel.AUTO)
+ 
+    # --- Caso superuser (1 -> 2 + aggiornamento saldo) ---
+ 
+    def test_superuser_valida_da_1_a_2(self):
+        for d in [date(2025, 1, 6), date(2025, 1, 7)]:
+            make_timeentry(
+                self.utente,
+                data=d,
+                validation_level=TimeEntry.ValidationLevel.VALIDATO_UTENTE,
+            )
+        res = auth_client(self.admin).patch(URL_TE_BULK_VALIDATE, {
+            "data": "2025-01-15",
+            "utente_id": self.utente.id,
+        }, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["count_updated"], 2)
+ 
+        for te in TimeEntry.objects.filter(utente=self.utente):
+            self.assertEqual(te.validation_level,
+                             TimeEntry.ValidationLevel.VALIDATO_ADMIN)
+ 
+    def test_superuser_aggiorna_saldo_per_versamento(self):
+        make_timeentry(
+            self.utente,
+            data=date(2025, 1, 6),
+            type=TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
+            ore_tot=Decimal("5.00"),
+            validation_level=TimeEntry.ValidationLevel.VALIDATO_UTENTE,
+        )
+        res = auth_client(self.admin).patch(URL_TE_BULK_VALIDATE, {
+            "data": "2025-01-15",
+            "utente_id": self.utente.id,
+        }, format="json")
+        self.assertEqual(res.status_code, 200)
+ 
+        saldo = Saldo.objects.get(utente=self.utente)
+        self.assertEqual(saldo.valore_saldo_validato, Decimal("5.00"))
+        self.assertEqual(res.data["delta_saldo_validato"], "5.00")
+ 
+    def test_superuser_aggiorna_saldo_per_prelievo_negativo(self):
+        make_timeentry(
+            self.utente,
+            data=date(2025, 1, 6),
+            type=TimeEntry.EntryType.PRELIEVO_BANCA_ORE,
+            ore_tot=Decimal("3.00"),
+            validation_level=TimeEntry.ValidationLevel.VALIDATO_UTENTE,
+        )
+        res = auth_client(self.admin).patch(URL_TE_BULK_VALIDATE, {
+            "data": "2025-01-15",
+            "utente_id": self.utente.id,
+        }, format="json")
+        self.assertEqual(res.status_code, 200)
+ 
+        saldo = Saldo.objects.get(utente=self.utente)
+        self.assertEqual(saldo.valore_saldo_validato, Decimal("-3.00"))
+ 
+    def test_superuser_saldo_netto_versamento_e_prelievo(self):
+        # 5h versamento + 2h prelievo = +3h netto
+        make_timeentry(
+            self.utente,
+            data=date(2025, 1, 6),
+            type=TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
+            ore_tot=Decimal("5.00"),
+            validation_level=TimeEntry.ValidationLevel.VALIDATO_UTENTE,
+        )
+        make_timeentry(
+            self.utente,
+            data=date(2025, 1, 7),
+            type=TimeEntry.EntryType.PRELIEVO_BANCA_ORE,
+            ore_tot=Decimal("2.00"),
+            validation_level=TimeEntry.ValidationLevel.VALIDATO_UTENTE,
+        )
+        auth_client(self.admin).patch(URL_TE_BULK_VALIDATE, {
+            "data": "2025-01-15",
+            "utente_id": self.utente.id,
+        }, format="json")
+ 
+        saldo = Saldo.objects.get(utente=self.utente)
+        self.assertEqual(saldo.valore_saldo_validato, Decimal("3.00"))
+ 
+    def test_superuser_non_tocca_entry_a_livello_0(self):
+        make_timeentry(
+            self.utente,
+            data=date(2025, 1, 6),
+            validation_level=TimeEntry.ValidationLevel.AUTO,
+        )
+        res = auth_client(self.admin).patch(URL_TE_BULK_VALIDATE, {
+            "data": "2025-01-15",
+            "utente_id": self.utente.id,
+        }, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["count_updated"], 0)
+ 
+        te = TimeEntry.objects.get(utente=self.utente)
+        self.assertEqual(te.validation_level, TimeEntry.ValidationLevel.AUTO)
+ 
+    # --- Validazione input ---
+ 
+    def test_data_mancante_restituisce_400(self):
+        res = auth_client(self.utente).patch(URL_TE_BULK_VALIDATE, {},
+                                             format="json")
+        self.assertEqual(res.status_code, 400)
+ 
+    def test_data_malformata_restituisce_400(self):
+        res = auth_client(self.utente).patch(URL_TE_BULK_VALIDATE, {
+            "data": "non-una-data",
+        }, format="json")
+        self.assertEqual(res.status_code, 400)
+ 
+    def test_superuser_utente_inesistente_restituisce_404(self):
+        res = auth_client(self.admin).patch(URL_TE_BULK_VALIDATE, {
+            "data": "2025-01-15",
+            "utente_id": 99999,
+        }, format="json")
+        self.assertEqual(res.status_code, 404)

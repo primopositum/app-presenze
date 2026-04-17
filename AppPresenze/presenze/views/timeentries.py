@@ -4,6 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 import calendar
 from django.db import transaction
+from django.utils import timezone
 from decimal import Decimal
 from datetime import date, timedelta
 from django.db.models import Q
@@ -330,50 +331,64 @@ def timeentry_create_range_override(request):
 @api_view(["GET", "PUT", "DELETE"])
 @permission_classes([IsAuthenticated])
 def timeentry_detail(request, te_id: int):
-    try:
-        te = TimeEntry.objects.select_related("utente").get(pk=te_id)
-    except TimeEntry.DoesNotExist:
-        return Response(
-            {"errors": "TimeEntry non trovato."}, 
-            status=status.HTTP_404_NOT_FOUND
-        )
-
-    is_owner = (te.utente_id == request.user.id)
-    is_super = request.user.is_superuser
-    
-    if not (is_owner or is_super):
-        return Response(
-            {"errors": "Non hai i permessi per questa operazione."},
-            status=status.HTTP_403_FORBIDDEN
-        )
-
-    # GET - Dettaglio
+    # GET: nessun lock, lettura semplice
     if request.method == "GET":
+        try:
+            te = TimeEntry.objects.select_related("utente").get(pk=te_id)
+        except TimeEntry.DoesNotExist:
+            return Response(
+                {"errors": "TimeEntry non trovato."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if not (te.utente_id == request.user.id or request.user.is_superuser):
+            return Response(
+                {"errors": "Non hai i permessi per questa operazione."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         return Response(TimeEntrySerializer(te).data, status=status.HTTP_200_OK)
 
-    # DELETE
-    elif request.method == "DELETE":
-        if te.validation_level == TimeEntry.ValidationLevel.VALIDATO_ADMIN:
-            return Response(
-                {"errors": "TimeEntry validata dall'admin: non può essere cancellata."},
-                status=status.HTTP_403_FORBIDDEN,
+    # PUT e DELETE: tutto sotto lock
+    with transaction.atomic():
+        try:
+            te = (
+                TimeEntry.objects
+                .select_for_update()
+                .select_related("utente")
+                .get(pk=te_id)
             )
-        te.delete()
-        return Response(
-            {"message": "TimeEntry cancellata con successo."},
-            status=status.HTTP_204_NO_CONTENT
-        )
-
-    # PUT
-    elif request.method == "PUT":
-        if te.validation_level == TimeEntry.ValidationLevel.VALIDATO_ADMIN:
+        except TimeEntry.DoesNotExist:
             return Response(
-                {"errors": "TimeEntry già validata dal superadmin: non modificabile."},
-                status=status.HTTP_403_FORBIDDEN,
+                {"errors": "TimeEntry non trovato."},
+                status=status.HTTP_404_NOT_FOUND,
             )
 
+        is_owner = (te.utente_id == request.user.id)
+        is_super = request.user.is_superuser
+
+        if not (is_owner or is_super):
+            return Response(
+                {"errors": "Non hai i permessi per questa operazione."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if te.validation_level == TimeEntry.ValidationLevel.VALIDATO_ADMIN:
+            msg = (
+                "TimeEntry validata dall'admin: non può essere cancellata."
+                if request.method == "DELETE"
+                else "TimeEntry già validata dal superadmin: non modificabile."
+            )
+            return Response({"errors": msg}, status=status.HTTP_403_FORBIDDEN)
+
+        if request.method == "DELETE":
+            te.delete()
+            return Response(
+                {"message": "TimeEntry cancellata con successo."},
+                status=status.HTTP_204_NO_CONTENT,
+            )
+
+        # PUT
         old_level = te.validation_level
-        serializer = TimeEntrySerializer(te, data=request.data)  
+        serializer = TimeEntrySerializer(te, data=request.data)
         serializer.is_valid(raise_exception=True)
 
         requested_level = serializer.validated_data.get("validation_level", old_level)
@@ -382,7 +397,6 @@ def timeentry_detail(request, te_id: int):
                 {"errors": "Non puoi validare a livello admin con PUT. Usa /validation/."},
                 status=status.HTTP_403_FORBIDDEN,
             )
-
         if requested_level < old_level:
             return Response(
                 {"errors": f"Downgrade: {old_level} -> {requested_level} non consentito."},
@@ -390,10 +404,11 @@ def timeentry_detail(request, te_id: int):
             )
 
         te = serializer.save()
-        if not is_super:
-            if te.validation_level == TimeEntry.ValidationLevel.AUTO:
-                te.validation_level = TimeEntry.ValidationLevel.VALIDATO_UTENTE
-                te.save(update_fields=["validation_level"])
+
+        # Promozione automatica AUTO -> VALIDATO_UTENTE per non-super
+        if not is_super and te.validation_level == TimeEntry.ValidationLevel.AUTO:
+            te.validation_level = TimeEntry.ValidationLevel.VALIDATO_UTENTE
+            te.save(update_fields=["validation_level", "data_upd"])
 
         return Response(TimeEntrySerializer(te).data, status=status.HTTP_200_OK)
 
@@ -504,68 +519,100 @@ def timeentry_bulk_validate_month(request):
 
     Caso 2 - Utente normale:
       Body: { "data": "2026-01-15" }
-      - Aggiorna validation_level da 0 a 1 (AUTO -> VALIDATO_UTENTE) per le proprie TimeEntry nel mese
+      - Aggiorna validation_level da 0 a 1 (AUTO -> VALIDATO_UTENTE)
+        per le proprie TimeEntry nel mese
       - NON aggiorna il saldo
     """
+    # --- 1. Validazione input (fuori dalla transazione) ---
     data_str = request.data.get("data")
     utente_id_param = request.data.get("utente_id")
 
     if not data_str:
-        return Response({"errors": "Il parametro 'data' è obbligatorio."},
-                        status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"errors": "Il parametro 'data' è obbligatorio."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     try:
         data_date = date.fromisoformat(data_str)
     except ValueError:
-        return Response({"errors": "Parametro 'data' non valido. Usa il formato YYYY-MM-DD."},
-                        status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"errors": "Parametro 'data' non valido. Usa il formato YYYY-MM-DD."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     is_super = request.user.is_superuser
+
+    # Permessi: utente normale non può passare utente_id
+    if utente_id_param is not None and not is_super:
+        return Response(
+            {"errors": "Solo i superuser possono validare le TimeEntry di altri utenti."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     year, month = data_date.year, data_date.month
     first_day = date(year, month, 1)
     last_day = date(year, month, calendar.monthrange(year, month)[1])
 
-
+    # --- 2. Caso superuser su utente specifico (1 -> 2, con saldo) ---
     if is_super and utente_id_param is not None:
         try:
             utente_id = int(utente_id_param)
         except (TypeError, ValueError):
-            return Response({"errors": "Parametro 'utente_id' non valido."},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"errors": "Parametro 'utente_id' non valido."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
+        # Esistenza utente: check fuori dalla transazione (immutabile per il
+        # nostro scopo: se viene cancellato dopo, le entry sono già cancellate
+        # in cascade e qs sarà vuoto)
         try:
             target_user = Utente.objects.get(pk=utente_id)
         except Utente.DoesNotExist:
-            return Response({"errors": f"Utente con id {utente_id} non trovato."},
-                            status=status.HTTP_404_NOT_FOUND)
-
-        qs = TimeEntry.objects.filter(
-            utente_id=utente_id,
-            data__gte=first_day,
-            data__lte=last_day,
-            validation_level=TimeEntry.ValidationLevel.VALIDATO_UTENTE
-        )
-
-        count_updated = qs.count()
+            return Response(
+                {"errors": f"Utente con id {utente_id} non trovato."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         with transaction.atomic():
-            saldo = Saldo.objects.select_for_update().get(utente_id=utente_id)
+            # 2a. Lock delle TimeEntry candidate (in ordine di id per evitare
+            #     deadlock con altre query che bloccano più righe)
+            locked_entries = list(
+                TimeEntry.objects
+                .select_for_update()
+                .filter(
+                    utente_id=utente_id,
+                    data__gte=first_day,
+                    data__lte=last_day,
+                    validation_level=TimeEntry.ValidationLevel.VALIDATO_UTENTE,
+                )
+                .order_by("id")
+                .values("id", "type", "ore_tot")
+            )
 
-            banca_qs = qs.filter(
-                type__in=[
-                    TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
-                    TimeEntry.EntryType.PRELIEVO_BANCA_ORE,
-                ]
-            ).values_list("type", "ore_tot")
+            count_updated = len(locked_entries)
 
+            # 2b. Calcolo delta sulle stesse righe lockate
             total_delta = Decimal("0.00")
-            for entry_type, ore_tot in banca_qs:
-                ore = Decimal(str(ore_tot))
-                total_delta += ore if entry_type == TimeEntry.EntryType.VERSAMENTO_BANCA_ORE else -ore
+            ids_to_update = []
+            for row in locked_entries:
+                ids_to_update.append(row["id"])
+                if row["type"] == TimeEntry.EntryType.VERSAMENTO_BANCA_ORE:
+                    total_delta += Decimal(str(row["ore_tot"]))
+                elif row["type"] == TimeEntry.EntryType.PRELIEVO_BANCA_ORE:
+                    total_delta -= Decimal(str(row["ore_tot"]))
 
-            qs.update(validation_level=TimeEntry.ValidationLevel.VALIDATO_ADMIN)
+            # 2c. Update sulle stesse righe lockate (per id, non per filtro)
+            if ids_to_update:
+                TimeEntry.objects.filter(id__in=ids_to_update).update(
+                    validation_level=TimeEntry.ValidationLevel.VALIDATO_ADMIN,
+                    data_upd=timezone.now(),
+                )
+
+            # 2d. Lock e aggiornamento saldo (sempre dopo le TimeEntry)
             if total_delta != Decimal("0.00"):
+                saldo = Saldo.objects.select_for_update().get(utente_id=utente_id)
                 saldo.valore_saldo_validato += total_delta
                 saldo.save(update_fields=["valore_saldo_validato", "data_upd"])
 
@@ -578,29 +625,35 @@ def timeentry_bulk_validate_month(request):
             "delta_saldo_validato": str(total_delta),
         }, status=status.HTTP_200_OK)
 
+    # --- 3. Caso utente normale (0 -> 1, senza saldo) ---
+    with transaction.atomic():
+        locked_ids = list(
+            TimeEntry.objects
+            .select_for_update()
+            .filter(
+                utente_id=request.user.id,
+                data__gte=first_day,
+                data__lte=last_day,
+                validation_level=TimeEntry.ValidationLevel.AUTO,
+            )
+            .order_by("id")
+            .values_list("id", flat=True)
+        )
 
-    if utente_id_param is not None and not is_super:
-        return Response({"errors": "Solo i superuser possono validare le TimeEntry di altri utenti."},
-                        status=status.HTTP_403_FORBIDDEN)
-
-    qs = TimeEntry.objects.filter(
-        utente_id=request.user.id,
-        data__gte=first_day,
-        data__lte=last_day,
-        validation_level=TimeEntry.ValidationLevel.AUTO
-    )
-
-    count_updated = qs.count()
-    qs.update(validation_level=TimeEntry.ValidationLevel.VALIDATO_UTENTE)
+        count_updated = len(locked_ids)
+        if locked_ids:
+            TimeEntry.objects.filter(id__in=locked_ids).update(
+                validation_level=TimeEntry.ValidationLevel.VALIDATO_UTENTE,
+                data_upd=timezone.now(),
+            )
 
     return Response({
         "message": f"Aggiornate {count_updated} TimeEntry da validation_level 0 a 1.",
         "utente_id": request.user.id,
         "utente_email": request.user.email,
         "mese": f"{year}-{month:02d}",
-        "count_updated": count_updated
+        "count_updated": count_updated,
     }, status=status.HTTP_200_OK)
-
 def presenze_mese_scorso_pdf(request):
     return PresenzeMeseScorsoPDFView.as_view()(request)
 

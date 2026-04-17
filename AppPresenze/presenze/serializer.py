@@ -57,7 +57,6 @@ class UtenteSerializer(serializers.ModelSerializer):
         qs = obj.contratti.order_by("-data_ass", "-id")
         return ContrattoMiniSerializer(qs, many=True).data
 
-
 class TimeEntrySerializer(serializers.ModelSerializer):
     utente_id = serializers.IntegerField(write_only=True)
     utente = serializers.StringRelatedField(read_only=True)
@@ -101,23 +100,35 @@ class TimeEntrySerializer(serializers.ModelSerializer):
         if expected_hours is None:
             return
 
-        covered_hours = TimeEntry.objects.filter(
-            utente_id=lavoro_entry.utente_id,
-            data=lavoro_entry.data,
-        ).exclude(
-            type__in=[
+        # Lock di TUTTE le TimeEntry dell'utente per quel giorno (in ordine di id
+        # per consistenza con altri lock e prevenzione deadlock).
+        # Include anche eventuali PRELIEVO/VERSAMENTO esistenti, così nessun altro
+        # processo può modificarli mentre ricalcoliamo.
+        day_entries = list(
+            TimeEntry.objects
+            .select_for_update()
+            .filter(utente_id=lavoro_entry.utente_id, data=lavoro_entry.data)
+            .order_by("id")
+        )
+
+        # Calcolo covered_total escludendo banca ore
+        covered_total = sum(
+            (Decimal(str(te.ore_tot)) for te in day_entries
+            if te.type not in (
                 TimeEntry.EntryType.PRELIEVO_BANCA_ORE,
                 TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
-            ]
+            )),
+            Decimal("0.00"),
         )
-        covered_total = sum((Decimal(str(te.ore_tot)) for te in covered_hours), Decimal("0.00"))
         delta = expected_hours - covered_total
 
-        prelievo_entry = TimeEntry.objects.filter(
-            utente_id=lavoro_entry.utente_id,
-            data=lavoro_entry.data,
-            type=TimeEntry.EntryType.PRELIEVO_BANCA_ORE
-        ).exclude(pk=lavoro_entry.pk).first()
+        # Cerca prelievo esistente nelle entry già lockate
+        prelievo_entry = next(
+            (te for te in day_entries
+            if te.type == TimeEntry.EntryType.PRELIEVO_BANCA_ORE
+            and te.pk != lavoro_entry.pk),
+            None,
+        )
 
         if delta > 0:
             if prelievo_entry:
@@ -176,63 +187,65 @@ class TimeEntrySerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def update(self, instance, validated_data):
-        # utente_id non lo facciamo cambiare con PUT
         validated_data.pop("utente_id", None)
-        
-        # Gestiamo lo split solo se è lavoro ordinario
+
         entry_type = validated_data.get('type', instance.type)
         ore_tot = validated_data.get('ore_tot', instance.ore_tot)
         target_date = validated_data.get('data', instance.data)
         expected_hours = self._get_contract_day_hours(instance.utente_id, target_date)
-        
+
         if entry_type == TimeEntry.EntryType.LAVORO_ORDINARIO:
-            # Cerca se esiste già un'entry banca ore collegata
-            banca_entry = TimeEntry.objects.filter(
-                utente=instance.utente,
-                data=validated_data.get('data', instance.data),
-                type=TimeEntry.EntryType.VERSAMENTO_BANCA_ORE
-            ).exclude(pk=instance.pk).first()
-            
+            # Lock di tutte le TimeEntry dell'utente per quel giorno
+            day_entries = list(
+                TimeEntry.objects
+                .select_for_update()
+                .filter(utente_id=instance.utente_id, data=target_date)
+                .order_by("id")
+            )
+
+            # Cerca la banca_entry esistente nelle entry lockate (esclusa l'istanza corrente)
+            banca_entry = next(
+                (te for te in day_entries
+                if te.type == TimeEntry.EntryType.VERSAMENTO_BANCA_ORE
+                and te.pk != instance.pk),
+                None,
+            )
+
             if expected_hours is not None and ore_tot > expected_hours:
-                # Caso: dobbiamo splittare (o aggiornare lo split esistente)
+                # Split: lavoro al massimo delle ore contrattuali, eccedenza in banca ore
                 ore_lavoro = expected_hours
                 ore_banca = ore_tot - ore_lavoro
-                
+
                 validated_data['ore_tot'] = ore_lavoro
                 instance = super().update(instance, validated_data)
-                
+
                 if banca_entry:
-                    # Aggiorna l'entry banca ore esistente
                     banca_entry.ore_tot = ore_banca
                     banca_entry.validation_level = validated_data.get(
-                        'validation_level', 
-                        instance.validation_level
+                        'validation_level', instance.validation_level
                     )
-                    banca_entry.save()
+                    banca_entry.save(update_fields=["ore_tot", "validation_level", "data_upd"])
                 else:
-                    # Crea nuova entry banca ore
                     TimeEntry.objects.create(
                         utente=instance.utente,
                         data=instance.data,
                         type=TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
                         ore_tot=ore_banca,
                         validation_level=validated_data.get(
-                            'validation_level',
-                            instance.validation_level
-                        )
+                            'validation_level', instance.validation_level
+                        ),
                     )
                 self._sync_prelievo_under_contract(instance)
                 return instance
-            
-            else:
-                # Caso: ore <= ore contrattuali (o nessun contratto valido), eliminiamo l'entry banca ore se esiste
-                if banca_entry:
-                    banca_entry.delete()
-                instance = super().update(instance, validated_data)
-                self._sync_prelievo_under_contract(instance)
-                return instance
-        
-        # Se non è lavoro ordinario, comportamento normale
+
+            # Caso: ore <= contrattuali, eliminiamo eventuale banca_entry residua
+            if banca_entry:
+                banca_entry.delete()
+            instance = super().update(instance, validated_data)
+            self._sync_prelievo_under_contract(instance)
+            return instance
+
+        # Non è lavoro ordinario: comportamento normale
         return super().update(instance, validated_data)
 
 class TrasfertaSerializer(serializers.ModelSerializer):
