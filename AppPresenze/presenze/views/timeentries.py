@@ -72,8 +72,6 @@ def time_entries_from_month_to_previous(request):
     # --- controlli permessi ---
     # solo utente_id
     if utente_id is not None and data_date is None:
-        print(f"is_super: {is_super}")
-        print(f"is_owner: {is_owner}")
         if not (is_super or is_owner):
             return Response(
                 {"errors": "Non hai i permessi per vedere le TimeEntry di questo utente."},
@@ -598,4 +596,5 @@ def timeentry_bulk_validate_month(request):
 
 def presenze_mese_scorso_pdf(request):
     return PresenzeMeseScorsoPDFView.as_view()(request)
+
 
