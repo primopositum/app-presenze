@@ -167,6 +167,11 @@ def _scontrino_get_or_delete_logic(request, t_id: int, filename: str, delete: bo
             {"errors": "Non hai i permessi per accedere agli scontrini di questa trasferta."},
             status=status.HTTP_403_FORBIDDEN,
         )
+    if delete and trasferta.validation_level == Trasferta.ValidationLevel.VALIDATO_ADMIN:
+        return Response(
+            {"errors": "Non è possibile eliminare scontrini di una trasferta validata dall'admin."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     safe_filename = Path(filename).name
     if not safe_filename or safe_filename != filename:

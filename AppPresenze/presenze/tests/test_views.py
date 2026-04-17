@@ -11,6 +11,8 @@ from .helpers import (
     make_utente, make_saldo, make_contratto, make_timeentry,
     make_trasferta, make_spesa, auth_client,
 )
+from pathlib import Path
+from django.conf import settings
 
 # ---------------------------------------------------------------------------
 # URL constants  (prefisso: /presenze/api/)
@@ -35,6 +37,9 @@ URL_TRASFERTA_DELETE = lambda t_id: f"{BASE}/trasferte/{t_id}/delete/"
 
 URL_SPESA_CREATE     = lambda t_id: f"{BASE}/trasferte/{t_id}/spese/create/"
 URL_SPESA_MANAGE     = lambda s_id: f"{BASE}/spese/{s_id}/"
+
+URL_SCONTRINI_LIST   = lambda t_id: f"{BASE}/trasferte/{t_id}/scontrini/"
+URL_SCONTRINO_DELETE = lambda t_id, filename: f"{BASE}/trasferte/{t_id}/scontrini/{filename}/delete/"
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +245,30 @@ class TestChangePassword(TestCase):
         }, format="json")
         self.assertEqual(res.status_code, 400)
 
+class TestUsersList(TestCase):
+
+    def setUp(self):
+        self.user = make_utente(email="user@test.com")
+        self.admin = make_utente(
+            email="admin@test.com",
+            is_superuser=True,
+            is_staff=True,
+        )
+
+    def test_utente_normale_non_puo_vedere_lista_utenti(self):
+        res = auth_client(self.user).get(f"{BASE}/users/")
+        self.assertEqual(res.status_code, 403)
+
+    def test_admin_puo_vedere_lista_utenti(self):
+        res = auth_client(self.admin).get(f"{BASE}/users/")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("count", res.data)
+        self.assertIn("results", res.data)
+
+    def test_non_autenticato_restituisce_401(self):
+        res = APIClient().get(f"{BASE}/users/")
+        self.assertEqual(res.status_code, 401)
+    
 
 # ---------------------------------------------------------------------------
 # TimeEntry views
@@ -430,6 +459,29 @@ class TestTimeEntryValidation(TestCase):
         )
         saldo = Saldo.objects.get(utente=self.utente)
         self.assertEqual(saldo.valore_saldo_validato, Decimal("4.00"))
+    def test_validazione_admin_sposta_da_sospeso_a_validato(self):
+        saldo = Saldo.objects.get(utente=self.utente)
+        saldo.valore_saldo_sospeso = Decimal("4.00")
+        saldo.valore_saldo_validato = Decimal("0.00")
+        saldo.save()
+
+        te = make_timeentry(
+            self.utente,
+            type=TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
+            ore_tot=Decimal("4.00"),
+            validation_level=TimeEntry.ValidationLevel.VALIDATO_UTENTE,
+        )
+
+        res = auth_client(self.admin).patch(
+            URL_TE_VALIDATION(te.id),
+            {"validation_level": TimeEntry.ValidationLevel.VALIDATO_ADMIN},
+            format="json"
+        )
+        self.assertEqual(res.status_code, 200)
+
+        saldo.refresh_from_db()
+        self.assertEqual(saldo.valore_saldo_sospeso, Decimal("0.00"))
+        self.assertEqual(saldo.valore_saldo_validato, Decimal("4.00"))
 
 
 # ---------------------------------------------------------------------------
@@ -517,6 +569,31 @@ class TestTrasfertaUpdate(TestCase):
             format="json"
         )
         self.assertEqual(res.status_code, 403)
+    def test_owner_non_puo_cambiare_proprietario_trasferta(self):
+        altro = make_utente(email="altro@test.com")
+
+        res = auth_client(self.utente).put(
+            URL_TRASFERTA_UPDATE(self.trasferta.id),
+            {"utente": altro.id},
+            format="json"
+        )
+        self.assertEqual(res.status_code, 200)
+
+        self.trasferta.refresh_from_db()
+        self.assertEqual(self.trasferta.utente_id, self.utente.id)
+
+    def test_admin_puo_cambiare_proprietario_trasferta(self):
+        altro = make_utente(email="altro@test.com")
+
+        res = auth_client(self.admin).put(
+            URL_TRASFERTA_UPDATE(self.trasferta.id),
+            {"utente": altro.id},
+            format="json"
+        )
+        self.assertEqual(res.status_code, 200)
+
+        self.trasferta.refresh_from_db()
+        self.assertEqual(self.trasferta.utente_id, altro.id)
 
 
 class TestTrasfertaValidation(TestCase):
@@ -681,3 +758,53 @@ class TestSpesaUpdateDelete(TestCase):
         spesa = make_spesa(trasferta_validata)
         res = auth_client(self.utente).delete(URL_SPESA_MANAGE(spesa.id))
         self.assertEqual(res.status_code, 403)
+
+
+class TestScontrinoDelete(TestCase):
+
+    def setUp(self):
+        self.utente = make_utente()
+        self.altro = make_utente(email="altro@test.com")
+        self.admin = make_utente(email="admin@test.com", is_superuser=True, is_staff=True)
+        self.trasferta = make_trasferta(self.utente)
+
+        folder = Path(settings.SCONTRINI_ROOT) / f"{self.trasferta.data.strftime('%Y-%m-%d')}_{self.trasferta.id}"
+        folder.mkdir(parents=True, exist_ok=True)
+
+        self.filename = "test.png"
+        self.file_path = folder / self.filename
+        self.file_path.write_bytes(b"fake-image-content")
+
+    def test_owner_puo_eliminare_scontrino_se_trasferta_non_validata_admin(self):
+        res = auth_client(self.utente).delete(
+            URL_SCONTRINO_DELETE(self.trasferta.id, self.filename)
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(self.file_path.exists())
+
+    def test_owner_non_puo_eliminare_scontrino_se_trasferta_validata_admin(self):
+        self.trasferta.validation_level = Trasferta.ValidationLevel.VALIDATO_ADMIN
+        self.trasferta.save(update_fields=["validation_level"])
+
+        res = auth_client(self.utente).delete(
+            URL_SCONTRINO_DELETE(self.trasferta.id, self.filename)
+        )
+        self.assertEqual(res.status_code, 403)
+        self.assertTrue(self.file_path.exists())
+
+    def test_altro_utente_non_puo_eliminare_scontrino(self):
+        res = auth_client(self.altro).delete(
+            URL_SCONTRINO_DELETE(self.trasferta.id, self.filename)
+        )
+        self.assertEqual(res.status_code, 403)
+        self.assertTrue(self.file_path.exists())
+
+    def test_admin_non_puo_eliminare_scontrino_se_trasferta_validata_admin(self):
+        self.trasferta.validation_level = Trasferta.ValidationLevel.VALIDATO_ADMIN
+        self.trasferta.save(update_fields=["validation_level"])
+
+        res = auth_client(self.admin).delete(
+            URL_SCONTRINO_DELETE(self.trasferta.id, self.filename)
+        )
+        self.assertEqual(res.status_code, 403)
+        self.assertTrue(self.file_path.exists())

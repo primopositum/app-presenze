@@ -118,6 +118,8 @@ def trasferta_update(request, t_id: int):
         )
 
     data = request.data.copy()
+    if not is_super and "utente" in data:
+        data.pop("utente")
 
     serializer = TrasfertaSerializer(trasferta, data=data, partial=True)
     

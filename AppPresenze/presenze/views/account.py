@@ -332,11 +332,11 @@ def create_account(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def users_list(request):
-    # if not _is_staff_or_super(request.user):
-    #     return Response(
-    #         {"errors": "Non hai i permessi per vedere questi utenti."},
-    #         status=status.HTTP_403_FORBIDDEN,
-    #     )
+    if not _is_staff_or_super(request.user):
+        return Response(
+            {"errors": "Non hai i permessi per vedere questi utenti."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     qs = Utente.objects.all().order_by("email")
     serializer = UtenteSerializer(qs, many=True)
