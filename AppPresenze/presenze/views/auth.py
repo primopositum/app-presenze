@@ -79,7 +79,7 @@ def _issue_token_response(request):
     if user is None or not user.is_active:
         return Response(
             {"error": "Credenziali non valide"},
-            status=status.HTTP_400_BAD_REQUEST,
+            status=status.HTTP_401_UNAUTHORIZED,
         )
 
     refresh = RefreshToken.for_user(user)
