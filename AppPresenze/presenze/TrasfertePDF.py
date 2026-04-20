@@ -5,7 +5,7 @@ import hashlib
 import uuid
 from dataclasses import dataclass
 from datetime import date, timedelta
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from io import BytesIO
 from pathlib import Path
 import subprocess
@@ -189,6 +189,7 @@ def _month_totals_init() -> Dict[int, Decimal]:
 class TrasfertaRow:
     date: str
     tragitto: str
+    azienda: str
     km: Decimal
     calc: Decimal
     park: Decimal
@@ -205,7 +206,7 @@ class TrasfertaRow:
         return {
             "#Date": self.date,
             "#Tragitto": self.tragitto,
-            "#Azienda": self.tragitto,
+            "#Azienda": self.azienda,
             "#Km": _format_decimal(self.km) if self.km > 0 else "",
             "#Calc": _format_money(self.calc) if self.calc > 0 else "",
             "#Park": _format_money(self.park) if self.park > 0 else "",
@@ -228,19 +229,21 @@ def _build_rows_and_totals(trasferte: List[Trasferta]) -> Tuple[List[TrasfertaRo
             grouped.setdefault(spesa.type, Decimal("0.00"))
             grouped[spesa.type] += Decimal(str(spesa.importo))
 
-        km_total = grouped.get(Spesa.TrasfertaType.KM, Decimal("0.00"))
-        coeff = Decimal("0.00")
-        if tr.automobile:
-            coeff = Decimal(str(tr.automobile.coefficiente or Decimal("0.00")))
-        calc_total = (km_total * coeff).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        calc_total = grouped.get(Spesa.TrasfertaType.KM, Decimal("0.00"))
+        coeff = Decimal(str(tr.automobile.coefficiente or Decimal("0.00"))) if tr.automobile else Decimal("0.00")
+        if coeff > 0:
+            km_total = (calc_total / coeff).quantize(Decimal("1"), rounding=ROUND_DOWN)
+        else:
+            km_total = Decimal("0.00")
         tragitto_value = " / ".join([str(p).strip() for p in (tr.tragitto or []) if str(p).strip()])
 
         row = TrasfertaRow(
             date=tr.data.strftime("%d/%m/%Y"),
             tragitto=tragitto_value,
+            azienda=(tr.azienda or "").strip(),
             km=km_total,
             calc=calc_total,
-            park=grouped.get(Spesa.TrasfertaType.PARCHEGGI, Decimal("0.00")),
+            park=grouped.get(Spesa.TrasfertaType.PARCHEGGI, Decimal("0.00")), 
             rist=grouped.get(Spesa.TrasfertaType.RISTORANTI, Decimal("0.00")),
             hote=grouped.get(Spesa.TrasfertaType.HOTEL, Decimal("0.00")),
             other=(
@@ -304,7 +307,10 @@ def _fill_docx(
             for row_obj, data in zip(row_objs, rows):
                 _replace_text_in_row(row_obj, data.to_placeholders())
         else:
-            _replace_text_in_row(row_objs[0], TrasfertaRow("", "", Decimal("0"), Decimal("0"), Decimal("0"), Decimal("0"), Decimal("0"), Decimal("0"), Decimal("0")).to_placeholders())
+            _replace_text_in_row(
+                row_objs[0],
+                TrasfertaRow("", "", "", Decimal("0"), Decimal("0"), Decimal("0"), Decimal("0"), Decimal("0"), Decimal("0"), Decimal("0")).to_placeholders(),
+            )
 
         for row in table.rows:
             if row not in row_objs:
@@ -591,4 +597,5 @@ class TrasfertePDFView(APIView):
         response["X-Firma-Status"] = firma_status
         response["Access-Control-Expose-Headers"] = "X-Firma-Status"
         return response
+
 

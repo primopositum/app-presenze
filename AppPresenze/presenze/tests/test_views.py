@@ -66,7 +66,7 @@ class TestApiLogin(TestCase):
         res = self.client.post(URL_LOGIN, {
             "email": "test@test.com", "password": "sbagliata"
         }, format="json")
-        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.status_code, 401)
 
     def test_login_senza_credenziali(self):
         res = self.client.post(URL_LOGIN, {}, format="json")
@@ -78,7 +78,7 @@ class TestApiLogin(TestCase):
         res = self.client.post(URL_LOGIN, {
             "email": "test@test.com", "password": "pass123"
         }, format="json")
-        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.status_code, 401)
 
 
 class TestApiLogout(TestCase):
@@ -108,7 +108,7 @@ class TestCreateAccount(TestCase):
     def test_superuser_crea_account(self):
         res = self.admin_client.post(URL_CREATE_ACCOUNT, {
             "email": "nuovo@test.com",
-            "password": "pass123",
+            "password": "Password123!",
             "nome": "Luca",
             "cognome": "Verdi",
         }, format="json")
@@ -118,7 +118,7 @@ class TestCreateAccount(TestCase):
     def test_crea_account_crea_anche_saldo(self):
         self.admin_client.post(URL_CREATE_ACCOUNT, {
             "email": "nuovo@test.com",
-            "password": "pass123",
+            "password": "Password123!",
         }, format="json")
         utente = Utente.objects.get(email="nuovo@test.com")
         self.assertTrue(Saldo.objects.filter(utente=utente).exists())
