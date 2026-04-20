@@ -66,6 +66,7 @@
     if (t === 11) return 'Congedo di maternita';
     if (t === 12) return 'Sciopero';
     if (t === 13) return 'Festivita';
+    if (t === 14) return 'Visite mediche L.106/25';
     return `Tipo ${t}`;
   }
 

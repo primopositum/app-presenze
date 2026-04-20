@@ -98,6 +98,7 @@
       10: 'bg-orange-500 text-white',        // Permesso ROL
       11: 'bg-violet-500 text-white',        // Congedo mat/pat
       12: 'bg-gray-600 text-white',          // Sciopero
+      14: 'bg-cyan-600 text-white',          // Visite mediche L.106/25
       13: 'bg-emerald-500 text-white',       // Festività
     };
     return colors[type] || 'bg-gray-400 text-white';
@@ -118,6 +119,7 @@
       10: 'ROL',
       11: 'MAT',
       12: 'SCI',
+      14: 'VMD',
       13: 'FES',
     };
     return labels[type] || 'N/A';
