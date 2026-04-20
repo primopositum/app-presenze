@@ -1143,7 +1143,118 @@ class TestTimeEntryRangeOverride(TestCase):
         }, format="json")
         self.assertEqual(res.status_code, 400)
  
- 
+    def test_blocca_se_giorno_ha_entry_validato_admin(self):
+        # Esiste una entry VALIDATO_ADMIN il 6 gennaio: tutto il range va bloccato
+        make_timeentry(
+            self.utente,
+            data=date(2025, 1, 6),
+            type=TimeEntry.EntryType.LAVORO_ORDINARIO,
+            ore_tot=Decimal("8.00"),
+            validation_level=TimeEntry.ValidationLevel.VALIDATO_ADMIN,
+        )
+        res = auth_client(self.utente).post(URL_TE_RANGE_OVERRIDE, {
+            "utente_id": self.utente.id,
+            "dataS": "2025-01-06",
+            "dataE": "2025-01-10",
+            "type": TimeEntry.EntryType.FERIE,
+        }, format="json")
+        self.assertEqual(res.status_code, 403)
+        self.assertIn("errors", res.data)
+
+    def test_blocca_non_modifica_nulla_anche_su_altri_giorni(self):
+        # Il 6 gen è VALIDATO_ADMIN. Il 7 gen ha una entry AUTO che NON deve essere toccata.
+        admin_entry = make_timeentry(
+            self.utente,
+            data=date(2025, 1, 6),
+            type=TimeEntry.EntryType.LAVORO_ORDINARIO,
+            ore_tot=Decimal("8.00"),
+            validation_level=TimeEntry.ValidationLevel.VALIDATO_ADMIN,
+        )
+        auto_entry = make_timeentry(
+            self.utente,
+            data=date(2025, 1, 7),
+            type=TimeEntry.EntryType.LAVORO_ORDINARIO,
+            ore_tot=Decimal("6.00"),
+            validation_level=TimeEntry.ValidationLevel.AUTO,
+        )
+        res = auth_client(self.utente).post(URL_TE_RANGE_OVERRIDE, {
+            "utente_id": self.utente.id,
+            "dataS": "2025-01-06",
+            "dataE": "2025-01-10",
+            "type": TimeEntry.EntryType.FERIE,
+        }, format="json")
+        self.assertEqual(res.status_code, 403)
+        # Verifica che entrambe le entry preesistenti siano intatte
+        admin_entry.refresh_from_db()
+        self.assertEqual(admin_entry.type, TimeEntry.EntryType.LAVORO_ORDINARIO)
+        self.assertEqual(admin_entry.ore_tot, Decimal("8.00"))
+        self.assertEqual(admin_entry.validation_level, TimeEntry.ValidationLevel.VALIDATO_ADMIN)
+        auto_entry.refresh_from_db()
+        self.assertEqual(auto_entry.type, TimeEntry.EntryType.LAVORO_ORDINARIO)
+        self.assertEqual(auto_entry.ore_tot, Decimal("6.00"))
+        # Nessuna entry nuova creata
+        self.assertEqual(TimeEntry.objects.filter(utente=self.utente).count(), 2)
+
+    def test_blocca_anche_superuser(self):
+        # Nemmeno il super può sovrascrivere una entry VALIDATO_ADMIN via range-override
+        make_timeentry(
+            self.utente,
+            data=date(2025, 1, 6),
+            type=TimeEntry.EntryType.LAVORO_ORDINARIO,
+            ore_tot=Decimal("8.00"),
+            validation_level=TimeEntry.ValidationLevel.VALIDATO_ADMIN,
+        )
+        res = auth_client(self.admin).post(URL_TE_RANGE_OVERRIDE, {
+            "utente_id": self.utente.id,
+            "dataS": "2025-01-06",
+            "dataE": "2025-01-06",
+            "type": TimeEntry.EntryType.FERIE,
+        }, format="json")
+        self.assertEqual(res.status_code, 403)
+
+    def test_messaggio_errore_elenca_date_bloccanti(self):
+        # Verifica che la response contenga le date coinvolte, così il frontend può mostrarle
+        make_timeentry(
+            self.utente,
+            data=date(2025, 1, 6),
+            type=TimeEntry.EntryType.LAVORO_ORDINARIO,
+            validation_level=TimeEntry.ValidationLevel.VALIDATO_ADMIN,
+        )
+        make_timeentry(
+            self.utente,
+            data=date(2025, 1, 8),
+            type=TimeEntry.EntryType.LAVORO_ORDINARIO,
+            validation_level=TimeEntry.ValidationLevel.VALIDATO_ADMIN,
+        )
+        res = auth_client(self.utente).post(URL_TE_RANGE_OVERRIDE, {
+            "utente_id": self.utente.id,
+            "dataS": "2025-01-06",
+            "dataE": "2025-01-10",
+            "type": TimeEntry.EntryType.FERIE,
+        }, format="json")
+        self.assertEqual(res.status_code, 403)
+        err = res.data["errors"]
+        self.assertIn("2025-01-06", err)
+        self.assertIn("2025-01-08", err)
+
+    def test_consente_modifica_se_tutte_le_entry_sono_sotto_validato_admin(self):
+        # Entry VALIDATO_UTENTE (1) può essere sovrascritta
+        make_timeentry(
+            self.utente,
+            data=date(2025, 1, 6),
+            type=TimeEntry.EntryType.LAVORO_ORDINARIO,
+            ore_tot=Decimal("8.00"),
+            validation_level=TimeEntry.ValidationLevel.VALIDATO_UTENTE,
+        )
+        res = auth_client(self.utente).post(URL_TE_RANGE_OVERRIDE, {
+            "utente_id": self.utente.id,
+            "dataS": "2025-01-06",
+            "dataE": "2025-01-06",
+            "type": TimeEntry.EntryType.FERIE,
+        }, format="json")
+        self.assertEqual(res.status_code, 200)
+        entry = TimeEntry.objects.get(utente=self.utente, data=date(2025, 1, 6))
+        self.assertEqual(entry.type, TimeEntry.EntryType.FERIE)
 # ===========================================================================
 # TimeEntry bulk validate month
 # ===========================================================================
