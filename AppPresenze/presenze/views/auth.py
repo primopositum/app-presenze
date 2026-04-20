@@ -4,7 +4,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework_simplejwt.tokens import RefreshToken, TokenError
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from ..serializer import UtenteSerializer
 
@@ -79,7 +79,7 @@ def _issue_token_response(request):
     if user is None or not user.is_active:
         return Response(
             {"error": "Credenziali non valide"},
-            status=status.HTTP_400_BAD_REQUEST,
+            status=status.HTTP_401_UNAUTHORIZED,
         )
 
     refresh = RefreshToken.for_user(user)
@@ -121,7 +121,7 @@ def api_logout(request):
     if refresh_token:
         try:
             RefreshToken(refresh_token).blacklist()
-        except TokenError:
+        except Exception:
             pass
     logout(request)
     response = Response({"message": "Logout effettuato"})

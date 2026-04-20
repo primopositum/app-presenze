@@ -1,4 +1,6 @@
 from django.contrib.auth import update_session_auth_hash
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
@@ -111,8 +113,41 @@ def change_password(request):
     old_password = request.data.get("old_password")
     new_password = request.data.get("new_password")
 
+    # 1. Vecchia password obbligatoria e corretta
+    if not old_password:
+        return Response(
+            {"error": "Vecchia password obbligatoria"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
     if not request.user.check_password(old_password):
-        return Response({"error": "Vecchia password errata"}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"error": "Vecchia password errata"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # 2. Nuova password obbligatoria e non vuota
+    if not new_password or not str(new_password).strip():
+        return Response(
+            {"error": "Nuova password obbligatoria"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # 3. Nuova password deve passare i validatori configurati in settings.py
+    #    (lunghezza minima, non solo numeri, non troppo simile a email, ecc.)
+    try:
+        validate_password(new_password, user=request.user)
+    except DjangoValidationError as e:
+        return Response(
+            {"error": list(e.messages)},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # 4. Vietato riusare la stessa password
+    if request.user.check_password(new_password):
+        return Response(
+            {"error": "La nuova password deve essere diversa dalla vecchia"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
     request.user.set_password(new_password)
     request.user.save()
@@ -189,7 +224,10 @@ def user_profile(request):
                     {"saldo": "Formato non valido: atteso oggetto JSON."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            saldo_obj, _ = Saldo.objects.get_or_create(utente=target_user)
+            try:
+                saldo_obj = Saldo.objects.select_for_update().get(utente=target_user)
+            except Saldo.DoesNotExist:
+                saldo_obj = Saldo.objects.create(utente=target_user)
             saldo_serializer = SaldoMiniSerializer(saldo_obj, data=saldo_payload, partial=True)
             if not saldo_serializer.is_valid():
                 return Response({"saldo": saldo_serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
@@ -288,6 +326,10 @@ def create_account(request):
 
     if not password or not str(password).strip():
         return Response({"errors": "Campo password obbligatorio."}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        validate_password(str(password))
+    except DjangoValidationError as e:
+        return Response({"errors": list(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
 
     payload = {
         "email": email,
@@ -332,11 +374,11 @@ def create_account(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def users_list(request):
-    # if not _is_staff_or_super(request.user):
-    #     return Response(
-    #         {"errors": "Non hai i permessi per vedere questi utenti."},
-    #         status=status.HTTP_403_FORBIDDEN,
-    #     )
+    if not _is_staff_or_super(request.user):
+        return Response(
+            {"errors": "Non hai i permessi per vedere questi utenti."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     qs = Utente.objects.all().order_by("email")
     serializer = UtenteSerializer(qs, many=True)
