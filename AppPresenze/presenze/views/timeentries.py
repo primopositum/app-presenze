@@ -248,6 +248,30 @@ def timeentry_create_range_override(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    # --- Check preliminare: nessun giorno del range può contenere entry VALIDATO_ADMIN ---
+    blocking_dates = list(
+        TimeEntry.objects
+        .filter(
+            utente_id=utente_id,
+            data__gte=data_start,
+            data__lte=data_end,
+            validation_level=TimeEntry.ValidationLevel.VALIDATO_ADMIN,
+        )
+        .values_list("data", flat=True)
+        .distinct()
+    )
+    if blocking_dates:
+        dates_str = ", ".join(sorted(d.isoformat() for d in blocking_dates))
+        return Response(
+            {
+                "errors": (
+                    f"I giorni {dates_str} contengono TimeEntry già validate "
+                    f"dall'admin: non modificabili. Nessuna modifica applicata."
+                )
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
     day_count = (data_end - data_start).days + 1
     giorni = [data_start + timedelta(days=i) for i in range(day_count)]
 
@@ -405,7 +429,9 @@ def timeentry_detail(request, te_id: int):
 
         te = serializer.save()
 
-        # Promozione automatica AUTO -> VALIDATO_UTENTE per non-super
+        # Se un utente normale tocca una TimeEntry ancora in stato AUTO
+        # (cioè generata dal sistema, non da lui), la modifica equivale
+        # a una validazione: la promuoviamo a VALIDATO_UTENTE.
         if not is_super and te.validation_level == TimeEntry.ValidationLevel.AUTO:
             te.validation_level = TimeEntry.ValidationLevel.VALIDATO_UTENTE
             te.save(update_fields=["validation_level", "data_upd"])
