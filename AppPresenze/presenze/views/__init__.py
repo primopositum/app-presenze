@@ -22,6 +22,7 @@ from .scontrini import (
     scontrino_get,
     scontrino_delete,
     pdf_auto_upload,
+    pdf_auto_delete,
     pdf_auto_current_month_list,
 )
 from .automobili import (AutomobileListCreateView, AutomobileDetailView, AutomobileDeleteView, AutomobilePatchView)

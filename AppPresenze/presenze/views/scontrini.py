@@ -30,7 +30,7 @@ def _folder_name(trasferta: Trasferta) -> str:
 def _scontrino_upload_logic(request, t_id: int):
     """
     POST /presenze/api/trasferte/<t_id>/scontrini/
-    Carica uno scontrino (.jpeg o .png) associato a una trasferta.
+    Carica uno scontrino (.jpeg, .png o .pdf) associato a una trasferta.
     I file vengono salvati in SCONTRINI_ROOT/{data_inizio}_{t_id}/.
     Non è possibile caricare scontrini su trasferte validate dall'admin.
     """
@@ -64,15 +64,19 @@ def _scontrino_upload_logic(request, t_id: int):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png"}
+    ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "application/pdf"}
     if file_obj.content_type not in ALLOWED_CONTENT_TYPES:
         return Response(
-            {"errors": "Formato non supportato. Sono accettati solo .jpeg e .png."},
+            {"errors": "Formato non supportato. Sono accettati solo .jpeg, .png e .pdf."},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
     first_letter = request.user.nome[0].upper() if request.user.nome else "X"
-    ext = "jpg" if file_obj.content_type == "image/jpeg" else "png"
+    ext = {
+        "image/jpeg": "jpg",
+        "image/png": "png",
+        "application/pdf": "pdf",
+    }[file_obj.content_type]
     trasferta_date = trasferta.data.strftime("%Y-%m-%d")
     dest_dir = SCONTRINI_ROOT / _folder_name(trasferta)
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -81,7 +85,7 @@ def _scontrino_upload_logic(request, t_id: int):
     while True:
         unique_id = uuid.uuid4().hex[:12]
         filename = (
-            f"scontrino_{unique_id}_{first_letter}_{request.user.cognome}_"
+            f"giustificativo_{unique_id}_{first_letter}_{request.user.cognome}_"
             f"{trasferta_date}.{ext}"
         )
         dest_path = dest_dir / filename
@@ -255,14 +259,6 @@ def pdf_auto_upload(request, auto_id: int):
             status=status.HTTP_404_NOT_FOUND,
         )
 
-    is_super = request.user.is_superuser
-    is_owner = auto.trasferte.filter(utente_id=request.user.id).exists()
-    if not (is_super or is_owner):
-        return Response(
-            {"errors": "Non hai i permessi per caricare PDF su questa automobile."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
     file_obj = request.FILES.get("file")
     if not file_obj:
         return Response(
@@ -309,6 +305,54 @@ def pdf_auto_upload(request, auto_id: int):
     )
 
 
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def pdf_auto_delete(request, auto_id: int):
+    """
+    DELETE /presenze/api/automobili/<auto_id>/PDFauto/delete/
+    Elimina il PDF dell'automobile per il mese indicato.
+
+    Parametro opzionale:
+    - mese_anno: formato MM_YYYY (default: mese corrente)
+    """
+    try:
+        Automobile.objects.get(pk=auto_id)
+    except Automobile.DoesNotExist:
+        return Response(
+            {"errors": "Automobile non trovata."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    mese_anno = (request.data.get("mese_anno") or request.query_params.get("mese_anno") or "").strip()
+    if not mese_anno:
+        mese_anno = timezone.localdate().strftime("%m_%Y")
+
+    if not re.fullmatch(r"\d{2}_\d{4}", mese_anno):
+        return Response(
+            {"errors": "Formato mese_anno non valido. Usa MM_YYYY (es. 03_2026)."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    file_path = TPDF_ROOT / mese_anno / f"{auto_id}.pdf"
+    if not file_path.exists() or not file_path.is_file():
+        return Response(
+            {"errors": "PDF non trovato."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    file_path.unlink()
+
+    return Response(
+        {
+            "message": "PDF eliminato con successo.",
+            "filename": file_path.name,
+            "auto_id": auto_id,
+            "mese_anno": mese_anno,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def pdf_auto_current_month_list(request):
@@ -317,8 +361,7 @@ def pdf_auto_current_month_list(request):
     Ritorna i PDF presenti nella cartella del mese corrente:
     TPDF_ROOT/<MM_YYYY>/
 
-    - Admin: vede tutti i PDF del mese.
-    - Utente normale: vede solo i PDF delle auto associate alle sue trasferte.
+    Tutti gli utenti autenticati vedono tutti i PDF del mese.
     """
     mese_anno = timezone.localdate().strftime("%m_%Y")
     month_dir = TPDF_ROOT / mese_anno
@@ -332,14 +375,6 @@ def pdf_auto_current_month_list(request):
             status=status.HTTP_200_OK,
         )
 
-    allowed_auto_ids = None
-    if not request.user.is_superuser:
-        allowed_auto_ids = set(
-            Automobile.objects.filter(trasferte__utente_id=request.user.id)
-            .values_list("id", flat=True)
-            .distinct()
-        )
-
     files = []
     for entry in sorted(month_dir.iterdir()):
         if not entry.is_file() or entry.suffix.lower() != ".pdf":
@@ -350,8 +385,6 @@ def pdf_auto_current_month_list(request):
             continue
 
         auto_id = int(auto_id_str)
-        if allowed_auto_ids is not None and auto_id not in allowed_auto_ids:
-            continue
 
         st = entry.stat()
         files.append(

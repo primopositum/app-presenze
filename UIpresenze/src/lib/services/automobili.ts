@@ -109,6 +109,15 @@ export function uploadPDFauto(auto_id: number | string, file: File, mese_anno?: 
   return request(`/automobili/${auto_id}/PDFauto/`, { method: 'POST', body: form }) as Promise<any>;
 }
 
+export function deletePDFauto(auto_id: number | string, mese_anno?: string) {
+  const qs = new URLSearchParams();
+  if (mese_anno) qs.set('mese_anno', mese_anno);
+  const tail = qs.toString();
+  return request(`/automobili/${auto_id}/PDFauto/delete/${tail ? `?${tail}` : ''}`, {
+    method: 'DELETE',
+  }) as Promise<any>;
+}
+
 export function getPDFautoCurrentMonthList() {
   return request('/automobili/PDFauto/mese-corrente/') as Promise<AutoPdfCurrentMonthItem[]>;
 }

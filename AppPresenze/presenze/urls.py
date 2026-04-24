@@ -69,6 +69,7 @@ api_urlpatterns = [
     path("automobili/<int:pk>/delete/",  views.AutomobileDeleteView.as_view(),     name="automobili-delete"),
     path("automobili/<int:pk>/patch/",   views.AutomobilePatchView.as_view(),      name="automobili-patch"),
     path("automobili/<int:auto_id>/PDFauto/", views.pdf_auto_upload,               name="automobili-pdfauto-upload"),
+    path("automobili/<int:auto_id>/PDFauto/delete/", views.pdf_auto_delete,        name="automobili-pdfauto-delete"),
     path("automobili/PDFauto/mese-corrente/", views.pdf_auto_current_month_list,   name="automobili-pdfauto-current-month"),
 
     # -------------------------------------------------------------------------
