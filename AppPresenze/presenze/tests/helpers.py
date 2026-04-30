@@ -102,7 +102,7 @@ def make_automobile(marca="Fiat", alimentazione="Benzina",
 # ---------------------------------------------------------------------------
 
 def make_trasferta(utente, data=None, azienda="Acme", automobile=None,
-                   validation_level=Trasferta.ValidationLevel.VALIDATO_UTENTE):
+                   validation_level=Trasferta.ValidationLevel.AUTO):
     return Trasferta.objects.create(
         utente=utente,
         data=data or timezone.localdate(),

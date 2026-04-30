@@ -592,7 +592,7 @@ class TrasfertePDFView(APIView):
             )
 
         pdf_stream = BytesIO(pdf_bytes)
-        filename = f"trasferte_{user.id}_{start_prev_month.strftime('%Y_%m')}.pdf"
+        filename = f"trasferte_{user.nome}_{user.cognome}_{start_prev_month.strftime('%Y_%m')}.pdf"
         response = FileResponse(pdf_stream, as_attachment=True, filename=filename)
         response["X-Firma-Status"] = firma_status
         response["Access-Control-Expose-Headers"] = "X-Firma-Status"

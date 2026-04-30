@@ -1,4 +1,4 @@
-from decimal import Decimal
+﻿from decimal import Decimal
 from datetime import date
 
 from django.test import TestCase
@@ -502,6 +502,8 @@ class TestTrasfertaCreate(TestCase):
             "azienda": "Acme",
         }, format="json")
         self.assertEqual(res.status_code, 201)
+        created = Trasferta.objects.latest("id")
+        self.assertEqual(created.validation_level, Trasferta.ValidationLevel.AUTO)
 
     def test_dati_mancanti_restituiscono_400(self):
         res = auth_client(self.utente).post(URL_TRASFERTA_CREATE, {
@@ -605,7 +607,34 @@ class TestTrasfertaValidation(TestCase):
         self.admin = make_utente(email="admin@test.com", is_superuser=True)
         self.trasferta = make_trasferta(self.utente)
 
-    def test_admin_valida_trasferta(self):
+    def test_owner_valida_trasferta_da_0_a_1(self):
+        res = auth_client(self.utente).patch(
+            URL_TRASFERTA_VALID(self.trasferta.id), format="json"
+        )
+        self.assertEqual(res.status_code, 200)
+        self.trasferta.refresh_from_db()
+        self.assertEqual(
+            self.trasferta.validation_level,
+            Trasferta.ValidationLevel.VALIDATO_UTENTE
+        )
+
+    def test_admin_non_puo_validare_da_0_a_1(self):
+        res = auth_client(self.admin).patch(
+            URL_TRASFERTA_VALID(self.trasferta.id), format="json"
+        )
+        self.assertEqual(res.status_code, 403)
+
+    def test_owner_non_puo_validare_da_1_a_2_su_endpoint_admin(self):
+        self.trasferta.validation_level = Trasferta.ValidationLevel.VALIDATO_UTENTE
+        self.trasferta.save(update_fields=["validation_level"])
+        res = auth_client(self.utente).patch(
+            URL_TRASFERTA_VALID(self.trasferta.id), format="json"
+        )
+        self.assertEqual(res.status_code, 403)
+
+    def test_admin_valida_trasferta_da_1_a_2(self):
+        self.trasferta.validation_level = Trasferta.ValidationLevel.VALIDATO_UTENTE
+        self.trasferta.save(update_fields=["validation_level"])
         res = auth_client(self.admin).patch(
             URL_TRASFERTA_VALID(self.trasferta.id), format="json"
         )
@@ -616,8 +645,8 @@ class TestTrasfertaValidation(TestCase):
             Trasferta.ValidationLevel.VALIDATO_ADMIN
         )
 
-    def test_utente_normale_non_valida_trasferta(self):
-        res = auth_client(self.utente).patch(
+    def test_admin_non_valida_trasferta_da_0_a_2(self):
+        res = auth_client(self.admin).patch(
             URL_TRASFERTA_VALID(self.trasferta.id), format="json"
         )
         self.assertEqual(res.status_code, 403)
@@ -841,7 +870,7 @@ class TestChangePasswordExtra(TestCase):
     def test_nuova_password_troppo_corta_restituisce_400(self):
         """
         Presuppone che AUTH_PASSWORD_VALIDATORS includa MinimumLengthValidator.
-        Se nei tuoi settings il minimo è diverso, adatta la stringa.
+        Se nei tuoi settings il minimo Ã¨ diverso, adatta la stringa.
         """
         res = auth_client(self.utente).post(URL_CHANGE_PASSWORD, {
             "old_password": "VecchiaPwd123!",
@@ -860,7 +889,7 @@ class TestChangePasswordExtra(TestCase):
  
  
 # ===========================================================================
-# TimeEntry create — split automatico LAVORO -> VERSAMENTO + sync PRELIEVO
+# TimeEntry create â€” split automatico LAVORO -> VERSAMENTO + sync PRELIEVO
 # ===========================================================================
  
 class TestTimeEntryCreateSplit(TestCase):
@@ -869,7 +898,7 @@ class TestTimeEntryCreateSplit(TestCase):
     - Se LAVORO_ORDINARIO supera le ore contrattuali del giorno, viene splittato:
       una entry LAVORO_ORDINARIO con le ore contrattuali + una VERSAMENTO_BANCA_ORE
       con l'eccedenza.
-    - Se LAVORO_ORDINARIO è inferiore alle ore contrattuali, viene creata
+    - Se LAVORO_ORDINARIO Ã¨ inferiore alle ore contrattuali, viene creata
       automaticamente una PRELIEVO_BANCA_ORE per coprire la differenza.
     """
  
@@ -878,7 +907,7 @@ class TestTimeEntryCreateSplit(TestCase):
         make_saldo(self.utente)
         # Contratto 8h lun-ven
         make_contratto(self.utente, ore_sett=[8, 8, 8, 8, 8])
-        self.lunedi = "2025-01-06"  # è un lunedì
+        self.lunedi = "2025-01-06"  # Ã¨ un lunedÃ¬
  
     def test_lavoro_oltre_contratto_genera_versamento(self):
         res = auth_client(self.utente).post(URL_TE_CREATE, {
@@ -954,7 +983,7 @@ class TestTimeEntryCreateSplit(TestCase):
  
  
 # ===========================================================================
-# TimeEntry detail PUT — ricalcolo PRELIEVO/VERSAMENTO sull'update
+# TimeEntry detail PUT â€” ricalcolo PRELIEVO/VERSAMENTO sull'update
 # ===========================================================================
  
 class TestTimeEntryDetailUpdateSync(TestCase):
@@ -967,7 +996,7 @@ class TestTimeEntryDetailUpdateSync(TestCase):
         self.utente = make_utente()
         make_saldo(self.utente)
         make_contratto(self.utente, ore_sett=[8, 8, 8, 8, 8])
-        self.giorno = date(2025, 1, 6)  # lunedì
+        self.giorno = date(2025, 1, 6)  # lunedÃ¬
         # Crea LAVORO da 5h: il serializer aggiunge un PRELIEVO da 3h
         self.lavoro = make_timeentry(
             self.utente,
@@ -1086,7 +1115,7 @@ class TestTimeEntryRangeOverride(TestCase):
         self.assertEqual(TimeEntry.objects.filter(utente=self.utente).count(), 0)
  
     def test_sostituisce_entry_esistenti(self):
-        # Esiste già una LAVORO_ORDINARIO il 6 gennaio
+        # Esiste giÃ  una LAVORO_ORDINARIO il 6 gennaio
         make_timeentry(
             self.utente,
             data=date(2025, 1, 6),
@@ -1162,7 +1191,7 @@ class TestTimeEntryRangeOverride(TestCase):
         self.assertIn("errors", res.data)
 
     def test_blocca_non_modifica_nulla_anche_su_altri_giorni(self):
-        # Il 6 gen è VALIDATO_ADMIN. Il 7 gen ha una entry AUTO che NON deve essere toccata.
+        # Il 6 gen Ã¨ VALIDATO_ADMIN. Il 7 gen ha una entry AUTO che NON deve essere toccata.
         admin_entry = make_timeentry(
             self.utente,
             data=date(2025, 1, 6),
@@ -1196,7 +1225,7 @@ class TestTimeEntryRangeOverride(TestCase):
         self.assertEqual(TimeEntry.objects.filter(utente=self.utente).count(), 2)
 
     def test_blocca_anche_superuser(self):
-        # Nemmeno il super può sovrascrivere una entry VALIDATO_ADMIN via range-override
+        # Nemmeno il super puÃ² sovrascrivere una entry VALIDATO_ADMIN via range-override
         make_timeentry(
             self.utente,
             data=date(2025, 1, 6),
@@ -1213,7 +1242,7 @@ class TestTimeEntryRangeOverride(TestCase):
         self.assertEqual(res.status_code, 403)
 
     def test_messaggio_errore_elenca_date_bloccanti(self):
-        # Verifica che la response contenga le date coinvolte, così il frontend può mostrarle
+        # Verifica che la response contenga le date coinvolte, cosÃ¬ il frontend puÃ² mostrarle
         make_timeentry(
             self.utente,
             data=date(2025, 1, 6),
@@ -1238,7 +1267,7 @@ class TestTimeEntryRangeOverride(TestCase):
         self.assertIn("2025-01-08", err)
 
     def test_consente_modifica_se_tutte_le_entry_sono_sotto_validato_admin(self):
-        # Entry VALIDATO_UTENTE (1) può essere sovrascritta
+        # Entry VALIDATO_UTENTE (1) puÃ² essere sovrascritta
         make_timeentry(
             self.utente,
             data=date(2025, 1, 6),
@@ -1452,3 +1481,5 @@ class TestTimeEntryBulkValidateMonth(TestCase):
             "utente_id": 99999,
         }, format="json")
         self.assertEqual(res.status_code, 404)
+
+

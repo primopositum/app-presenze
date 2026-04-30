@@ -291,6 +291,7 @@ class Trasferta(models.Model):
     )
     
     class ValidationLevel(models.IntegerChoices):
+        AUTO = 0, "Compilato automaticamente"
         VALIDATO_UTENTE = 1, "Validato dall'utente"
         VALIDATO_ADMIN = 2, "Validato dall'amministratore"
 
@@ -305,7 +306,7 @@ class Trasferta(models.Model):
     )
     validation_level = models.IntegerField(
         choices=ValidationLevel.choices,
-        default=ValidationLevel.VALIDATO_UTENTE,
+        default=ValidationLevel.AUTO,
     )
     data_creaz = models.DateTimeField(default=timezone.now)
     data_upd = models.DateTimeField(auto_now=True)

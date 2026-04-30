@@ -81,7 +81,7 @@ def _scontrino_upload_logic(request, t_id: int):
     dest_dir = SCONTRINI_ROOT / _folder_name(trasferta)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    # Usa un id univoco nel nome e rigenera solo in caso di collisione reale.
+    # Usa un id univoco nel nome e rigenera solo in caso di collisione reale. 
     while True:
         unique_id = uuid.uuid4().hex[:12]
         filename = (

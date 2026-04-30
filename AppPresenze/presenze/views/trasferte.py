@@ -1,4 +1,4 @@
-import zipfile
+﻿import zipfile
 import tempfile
 import uuid
 import hashlib
@@ -31,7 +31,7 @@ def trasferta_create(request):
     """
     POST api/presenze/trasferte/
     Crea una nuova trasferta. Richiede: data e azienda.
-    L'indirizzo è opzionale.
+    L'indirizzo Ã¨ opzionale.
     """
     data_str = request.data.get("data")
     azienda = request.data.get("azienda")
@@ -40,20 +40,20 @@ def trasferta_create(request):
 
     if not data_str:
         return Response(
-            {"errors": "La data è obbligatoria."}, 
+            {"errors": "La data Ã¨ obbligatoria."}, 
             status=status.HTTP_400_BAD_REQUEST
         )
     
     if not azienda:
         return Response(
-            {"errors": "Il nome azienda è obbligatorio."}, 
+            {"errors": "Il nome azienda Ã¨ obbligatorio."}, 
             status=status.HTTP_400_BAD_REQUEST
         )
 
     data = {
         "data": data_str,
         "azienda": azienda,
-        "validation_level": 1
+        "validation_level": Trasferta.ValidationLevel.AUTO
     }
     
     if "indirizzo" in request.data:
@@ -92,7 +92,7 @@ def trasferta_update(request, t_id: int):
     """
     PUT /api/presenze/trasferte/<t_id>/
     Permette di modificare i campi (note, automobile, data, azienda, indirizzo).
-    L'utente normale non può cambiare il proprietario (utente).
+    L'utente normale non puÃ² cambiare il proprietario (utente).
     """
     try:
         trasferta = Trasferta.objects.get(pk=t_id)
@@ -104,7 +104,7 @@ def trasferta_update(request, t_id: int):
     
     if trasferta.validation_level == Trasferta.ValidationLevel.VALIDATO_ADMIN:
         return Response(
-            {"errors": "Trasferta già validata dal superadmin: non modificabile."},
+            {"errors": "Trasferta giÃ  validata dal superadmin: non modificabile."},
             status=status.HTTP_403_FORBIDDEN,
         )
     
@@ -137,17 +137,23 @@ def trasferta_update(request, t_id: int):
 def trasferte_validation_level(request, tr_id: int):
     """
     PATCH /api/presenze/trasferte/<tr_id>/validation/
-    Valida una trasferta da livello 1 a 2 (solo superadmin).
+
+    Policy:
+    - Owner non-superuser: validazione automatica 0 -> 1 sulla propria trasferta
+    - Superuser: validazione automatica 1 -> 2
+    - Se già a 2: non modificabile
     """
     try:
         tr = Trasferta.objects.select_related("utente").get(pk=tr_id)
     except Trasferta.DoesNotExist:
         return Response(
-            {"errors": "Trasferta non trovata."}, 
+            {"errors": "Trasferta non trovata."},
             status=status.HTTP_404_NOT_FOUND
         )
 
     old_level = tr.validation_level
+    is_super = request.user.is_superuser
+    is_owner = tr.utente_id == request.user.id
 
     if old_level == Trasferta.ValidationLevel.VALIDATO_ADMIN:
         return Response(
@@ -155,21 +161,27 @@ def trasferte_validation_level(request, tr_id: int):
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    is_super = request.user.is_superuser
-
-    if not is_super:
+    if is_super:
+        if old_level != Trasferta.ValidationLevel.VALIDATO_UTENTE:
+            return Response(
+                {"errors": "Il superuser può solo validare da 1 a 2."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        new_level = Trasferta.ValidationLevel.VALIDATO_ADMIN
+    elif is_owner:
+        if old_level != Trasferta.ValidationLevel.AUTO:
+            return Response(
+                {"errors": "Puoi solo validare da 0 a 1 sulle tue trasferte."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        new_level = Trasferta.ValidationLevel.VALIDATO_UTENTE
+    else:
         return Response(
-            {"errors": "Le trasferte sono validate solo da admin."},
+            {"errors": "Non puoi validare trasferte altrui."},
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    if old_level != Trasferta.ValidationLevel.VALIDATO_UTENTE:
-        return Response(
-            {"errors": "Solo le trasferte a livello 1 possono essere validate a 2."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
-    tr.validation_level = Trasferta.ValidationLevel.VALIDATO_ADMIN
+    tr.validation_level = new_level
     tr.save(update_fields=["validation_level"])
     return Response(TrasfertaSerializer(tr).data, status=status.HTTP_200_OK)
 
@@ -182,7 +194,7 @@ def trasferta_list(request):
     - limit (int): numero massimo di record da restituire
     - date (string YYYY-MM-DD): filtra trasferte dalla data specificata in poi
     - uId (int): filtra per ID utente
-    - validation (int): filtra per validation_level (1 o 2)
+    - validation (int): filtra per validation_level (0, 1 o 2)
     - azienda (string): filtra per nome azienda (case-insensitive, parziale)
     - tId (int): filtra per ID trasferta
     
@@ -229,9 +241,9 @@ def trasferta_list(request):
     if validation_param:
         try:
             validation_level = int(validation_param)
-            if validation_level not in [1, 2]:
+            if validation_level not in [0, 1, 2]:
                 return Response(
-                    {"errors": "Il parametro 'validation' deve essere 1 o 2."}, 
+                    {"errors": "Il parametro 'validation' deve essere 0, 1 o 2."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             queryset = queryset.filter(validation_level=validation_level)
@@ -246,7 +258,7 @@ def trasferta_list(request):
     if azienda_param:
         queryset = queryset.filter(azienda__icontains=azienda_param)
     
-    # Ordinamento per data (dalla più recente)
+    # Ordinamento per data (dalla piÃ¹ recente)
     queryset = queryset.order_by('-data')
     
     # Limite risultati
@@ -274,8 +286,8 @@ def trasferta_list(request):
 def trasferta_delete(request, t_id: int):
     """
     DELETE api/presenze/trasferte/<t_id>/
-    Elimina una trasferta solo se validation_level non è 2.
-    Solo il proprietario o un superadmin può eliminare.
+    Elimina una trasferta solo se validation_level non Ã¨ 2.
+    Solo il proprietario o un superadmin puÃ² eliminare.
     """
     try:
         trasferta = Trasferta.objects.get(pk=t_id)
@@ -400,7 +412,7 @@ def trasferta_dossier(request, u_id: int, data: str):
             )
             signature_applied = firma_enabled
         except ValidationError:
-            # Fallback: se la firma non è utilizzabile (es. SVG non supportato in docx),
+            # Fallback: se la firma non Ã¨ utilizzabile (es. SVG non supportato in docx),
             # genera comunque il dossier senza firma.
             firma_status = "firma mancante"
             signature_applied = False
@@ -511,4 +523,6 @@ def trasferta_dossier(request, u_id: int, data: str):
         "X-Dossier-Data-Audit, X-Firma-Status"
     )
     return response
+
+
 
