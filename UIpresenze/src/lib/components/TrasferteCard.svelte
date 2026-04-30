@@ -32,6 +32,7 @@
     }
     
   function validationBg(level: number | undefined) {
+    if (level === 0) return 'is-auto';
     if (level === 1) return 'is-sent';
     if (level === 2) return 'is-validated';
     return '';
@@ -90,8 +91,14 @@
         transition: transform 0.15s ease, box-shadow 0.15s ease;
     }
 
-    .card.is-sent {
+    .card.is-auto {
         background: #fee2e2;
+        border-color: #fecaca;
+    }
+
+    .card.is-sent {
+        background: #fef9c3;
+        border-color: #fde68a;
     }
 
     .card.is-validated {
@@ -135,6 +142,14 @@
 
     .head.is-validated .title {
         color: #166534;
+    }
+
+    .head.is-auto .title {
+        color: #991b1b;
+    }
+
+    .head.is-sent .title {
+        color: #854d0e;
     }
 
     .trash {

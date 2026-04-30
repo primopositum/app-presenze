@@ -16,7 +16,7 @@
     type: string;
     preview: string | null;
   }
-
+ 
   const dispatch = createEventDispatcher<{ upload: UploadedFile[] }>();
 
   export let mode: 'trasferta' | 'auto' = 'trasferta';
@@ -42,8 +42,8 @@
   let autoPdfByCurrentMonth: AutoPdfCurrentMonthItem[] = [];
   let visibleFiles: Array<ScontrinoFile | AutoPdfCurrentMonthItem> = [];
 
-  $: acceptedTypes = mode === 'auto' ? ['application/pdf'] : ['image/jpeg', 'image/png'];
-  $: acceptAttr = mode === 'auto' ? '.pdf,application/pdf' : '.jpg,.jpeg,.png';
+  $: acceptedTypes = mode === 'auto' ? ['application/pdf'] : ['image/jpeg', 'image/png', 'application/pdf'];
+  $: acceptAttr = mode === 'auto' ? '.pdf,application/pdf' : '.jpg,.jpeg,.png,.pdf,application/pdf';
   $: savedTitle = mode === 'auto' ? 'PDF auto salvati (mese corrente)' : 'Scontrini salvati';
   $: emptyMessage = mode === 'auto'
     ? 'Nessun PDF auto presente per il mese corrente.'
@@ -122,7 +122,12 @@
   }
 
   function renameFile(file: File, index: number): File {
-    const ext = file.type === 'image/png' ? 'png' : 'jpg';
+    const extByType: Record<string, string> = {
+      'image/png': 'png',
+      'image/jpeg': 'jpg',
+      'application/pdf': 'pdf'
+    };
+    const ext = extByType[file.type] ?? 'bin';
     const idChunk = resolvedUserId;
     const userName = ($timeEntryUser.user?.nome ?? 'utente')
       .toLowerCase()
@@ -333,7 +338,7 @@
         </span>
         o trascina qui
       </p>
-      <p class="text-xs text-gray-400">{mode === 'auto' ? 'PDF' : 'JPG, PNG'}</p>
+      <p class="text-xs text-gray-400">{mode === 'auto' ? 'PDF' : 'JPG, PNG, PDF'}</p>
     {/if}
   </div>
 
