@@ -264,7 +264,8 @@
       const validate = useValidateTrasferta({ tId: item.id });
       const res = await validate();
       item = res.payload;
-      await loadDetail();
+      // Forza refresh completo pagina: ricalcola stato e nasconde il bottone.
+      window.location.reload();
     } catch (e: any) {
       error = e?.message || 'Errore validazione trasferta';
     } finally {
@@ -497,6 +498,10 @@
   }
 
   $: isLocked = item?.validation_level === 2;
+  $: canShowValidateButton = !!item && (
+    (isSuperuser && item.validation_level === 1) ||
+    (!isSuperuser && item.validation_level === 0)
+  );
   $: if (isLocked && showSpesaForm) {
     showSpesaForm = false;
   }
@@ -541,7 +546,7 @@
         />
       </button>
 
-      {#if isSuperuser}
+      {#if canShowValidateButton}
         <button type="button" on:click={handleValidateAction} aria-label="Valida mese corrente">
           <FontAwesomeIcon
             icon={faCheck}

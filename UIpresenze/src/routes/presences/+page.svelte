@@ -47,6 +47,7 @@
   let dayHours: DayHours[] = [];
   let selectedDate: string | null = null;
   let selectedEntries: TimeEntry[] = [];
+  let selectedDayForbidType3 = false;
   let updatingValidation = false;
   let confirmValidateOpen = false;
   let updateValidationLevel = useUpdateValidationLevel({ date: '' });
@@ -199,12 +200,14 @@ export const loadData = async () => {
   function prevMonth() {
     if (month === 1) { month = 12; year -= 1; } else { month -= 1; }
     selectedDate = null;
+    selectedDayForbidType3 = false;
     loadData();
   }
 
   function nextMonth() {
     if (month === 12) { month = 1; year += 1; } else { month += 1; }
     selectedDate = null;
+    selectedDayForbidType3 = false;
     loadData();
   }
 
@@ -369,10 +372,8 @@ export const loadData = async () => {
     const { y, m } = splitYmd(entry.data);
     if (y !== year || m !== month) return acc;
     const hours = Number(entry.ore_tot) || 0;
-    if(entry.validation_level !== 2){
-      if (entry.type === 3) return acc + hours;
-      if (entry.type === 4) return acc - hours;
-    }
+    if (entry.type === 3) return acc + hours;
+    if (entry.type === 4) return acc - hours;
     return acc;
   }, 0);
 
@@ -385,7 +386,7 @@ export const loadData = async () => {
   $: saldoTimeEntryVisuale = $timeEntryUser.user?.saldo?.valore_saldo_validato ?? null;
   $: saldoPersistenteVisuale = $auth.user?.is_superuser ? saldoTimeEntryVisuale : saldoValidatoOrig;
   $: saldoValidatoVisuale = toNumber(saldoPersistenteVisuale);
-  $: saldoVisuale = toNumber(saldoPersistenteVisuale) + toNumber(saldoPeriodo);
+  $: saldoVisuale = toNumber(saldoPeriodo);
 
   $: totalMonthHours = entries.reduce((acc, entry) => {
     const { y, m } = splitYmd(entry.data);
@@ -515,12 +516,17 @@ export const loadData = async () => {
         maxVisibleEntries={2}
         on:selectDay={(e) => {
           selectedDate = e.detail.date;
+          selectedDayForbidType3 = !!e.detail.forbidType3;
         }}
       />
     </div>
     <div class="w-full lg:w-[320px] lg:flex-shrink-0">
       {#if selectedDate}
-        <TimeEntryCard timeEntries={selectedEntries} dateParam={selectedDate} />
+        <TimeEntryCard
+          timeEntries={selectedEntries}
+          dateParam={selectedDate}
+          forbidType3={selectedDayForbidType3}
+        />
         {#if selectedEntries.length > 0}
           <div class="mt-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition-all duration-200">
           <div class="mb-1 flex items-center justify-between gap-2">

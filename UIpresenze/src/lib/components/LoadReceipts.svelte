@@ -32,6 +32,7 @@
 
   let isDragging = false;
   let fileInput: HTMLInputElement;
+  let autoDateInput: HTMLInputElement;
   let allFiles: Array<ScontrinoFile | AutoPdfCurrentMonthItem> = [];
   let fileCounter = 1;
   let loadingFiles = false;
@@ -41,12 +42,49 @@
   let scontriniByTrasferta: ScontrinoFile[] = [];
   let autoPdfByCurrentMonth: AutoPdfCurrentMonthItem[] = [];
   let visibleFiles: Array<ScontrinoFile | AutoPdfCurrentMonthItem> = [];
+  let selectedAutoDate = '';
+
+  function todayIsoDate(): string {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  function meseAnnoToIsoDate(value?: string): string {
+    const safe = (value || '').trim();
+    if (!/^\d{2}_\d{4}$/.test(safe)) return '';
+    const [mm, yyyy] = safe.split('_');
+    return `${yyyy}-${mm}-01`;
+  }
+
+  function isoDateToMeseAnno(value: string): string {
+    const safe = (value || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(safe)) return '';
+    const [yyyy, mm] = safe.split('-');
+    return `${mm}_${yyyy}`;
+  }
+
+  function isoDateToMonthLabel(value: string): string {
+    const safe = (value || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(safe)) return '';
+    const [yyyy, mm] = safe.split('-');
+    return `${mm}/${yyyy}`;
+  }
+
+  $: autoDateDefault = meseAnnoToIsoDate(meseAnno) || todayIsoDate();
+  $: if (mode === 'auto' && !selectedAutoDate) {
+    selectedAutoDate = autoDateDefault;
+  }
+  $: selectedAutoMeseAnno = isoDateToMeseAnno(selectedAutoDate) || isoDateToMeseAnno(todayIsoDate());
+  $: selectedAutoMonthLabel = isoDateToMonthLabel(selectedAutoDate) || isoDateToMonthLabel(todayIsoDate());
 
   $: acceptedTypes = mode === 'auto' ? ['application/pdf'] : ['image/jpeg', 'image/png', 'application/pdf'];
   $: acceptAttr = mode === 'auto' ? '.pdf,application/pdf' : '.jpg,.jpeg,.png,.pdf,application/pdf';
-  $: savedTitle = mode === 'auto' ? 'PDF auto salvati (mese corrente)' : 'Scontrini salvati';
+  $: savedTitle = mode === 'auto' ? `PDF auto salvati (${selectedAutoMonthLabel})` : 'Scontrini salvati';
   $: emptyMessage = mode === 'auto'
-    ? 'Nessun PDF auto presente per il mese corrente.'
+    ? `Nessun PDF auto presente per ${selectedAutoMonthLabel}.`
     : 'Nessun file presente per questa trasferta.';
   $: loadingMessage = mode === 'auto'
     ? 'Aggiornamento lista PDF auto...'
@@ -64,7 +102,7 @@
   }
 
   $: visibleFiles = mode === 'auto' ? autoPdfByCurrentMonth : scontriniByTrasferta;
-  $: loadKey = `${mode}:${tId ?? 'null'}:${autoId ?? 'null'}`;
+  $: loadKey = `${mode}:${tId ?? 'null'}:${autoId ?? 'null'}:${mode === 'auto' ? selectedAutoDate : '-'}`;
   $: if (browser && loadKey !== lastLoadKey) {
     lastLoadKey = loadKey;
     void loadFiles();
@@ -88,7 +126,7 @@
     uploadError = null;
     try {
       if (mode === 'auto') {
-        const listPdf = usePdfAutoCurrentMonthList();
+        const listPdf = usePdfAutoCurrentMonthList(selectedAutoDate);
         const result = await listPdf();
         const payload = result.payload;
         allFiles = Array.isArray(payload)
@@ -183,9 +221,7 @@
           uploadError = 'Automobile non disponibile per il caricamento.';
           return;
         }
-        const now = new Date();
-        const currentMmYyyy = `${String(now.getMonth() + 1).padStart(2, '0')}_${now.getFullYear()}`;
-        const effectiveMeseAnno = meseAnno ?? currentMmYyyy;
+        const effectiveMeseAnno = selectedAutoMeseAnno;
         const uploadPdf = useUploadPdfAuto({ auto_id: autoId });
         for (const file of processed) {
           await uploadPdf(file.file, effectiveMeseAnno);
@@ -214,6 +250,20 @@
 
   function handleClick(): void {
     fileInput.click();
+  }
+
+  function openAutoCalendar(): void {
+    if (!autoDateInput) return;
+    if (typeof autoDateInput.showPicker === 'function') {
+      autoDateInput.showPicker();
+      return;
+    }
+    autoDateInput.click();
+  }
+
+  function handleAutoDateChange(e: Event): void {
+    const input = e.target as HTMLInputElement;
+    selectedAutoDate = input.value || todayIsoDate();
   }
 
   function handleFileInput(e: Event): void {
@@ -294,6 +344,34 @@
 </script>
 
 <div class="mx-auto flex w-full max-w-[360px] flex-col gap-2.5 font-sans">
+  {#if mode === 'auto'}
+    <div class="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-3 py-2">
+      <span class="text-xs font-medium text-gray-600">{selectedAutoMonthLabel}</span>
+      <button
+        type="button"
+        class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition hover:bg-gray-50"
+        on:click={openAutoCalendar}
+        aria-label="Seleziona data PDF auto"
+        title="Seleziona data PDF auto"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="16" y1="2" x2="16" y2="6"></line>
+          <line x1="8" y1="2" x2="8" y2="6"></line>
+          <line x1="3" y1="10" x2="21" y2="10"></line>
+        </svg>
+      </button>
+      <input
+        bind:this={autoDateInput}
+        type="date"
+        bind:value={selectedAutoDate}
+        on:change={handleAutoDateChange}
+        class="pointer-events-none absolute opacity-0"
+        tabindex="-1"
+        aria-hidden="true"
+      />
+    </div>
+  {/if}
 
   <!-- svelte-ignore a11y-click-events-have-key-events -->
   <!-- svelte-ignore a11y-no-static-element-interactions -->

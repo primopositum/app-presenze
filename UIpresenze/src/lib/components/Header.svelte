@@ -22,6 +22,7 @@
 
   $: extra = $hourBalanceExtra ?? null;
   $: canShowExtra = !!extra && extra.saldo !== undefined && extra.saldo !== null;
+  $: canUseExtra = isPresencesRoute && canShowExtra;
   let mode: 'persistente' | 'extra' = 'extra';
   let open = false;
   let successMessage: string | null = null;
@@ -60,7 +61,7 @@
   }
     // $: showProfileButton = page.url.pathname !== '/profilo';
   function toggle() {
-    if (!canShowExtra) return;
+    if (!canUseExtra) return;
     mode = mode === 'persistente' ? 'extra' : 'persistente';
   }
 
@@ -71,13 +72,18 @@
     successTimer = setTimeout(() => (successMessage = null), 3000);
   }
 
+  $: if (!canUseExtra && mode !== 'persistente') {
+    mode = 'persistente';
+  }
+
   $: hbTitle =
-    mode === 'extra' && extra?.title ? extra.title : 'saldo persistente';
+    mode === 'extra' && canUseExtra && extra?.title ? extra.title : 'saldo persistente';
   $: hbSaldo =
-    mode === 'extra' && extra?.saldo !== undefined && extra?.saldo !== null
-      ? toNumber(extra.saldo) + toNumber(saldoToShow)
+    mode === 'extra' && canUseExtra && extra?.saldo !== undefined && extra?.saldo !== null
+      ? toNumber(extra.saldo)
       : saldoToShow;
-  $: hbColor = mode === 'extra' && extra?.color ? extra.color : undefined;
+  $: hbColor = mode === 'extra' && canUseExtra && extra?.color ? extra.color : undefined;
+  $: hbSaldoDaChiamataUtente = mode === 'persistente';
 </script>
 
 <nav class="flex items-center justify-between px-8 py-4 bg-white-200">
@@ -159,8 +165,13 @@
 
 
   {#if showSaldo}
-    <div class={`hide-mobile-saldo ${canShowExtra ? 'cursor-pointer' : 'cursor-default'}`} on:click={toggle}>
-      <HourBalance title={hbTitle} saldo={hbSaldo} color={hbColor}/>
+    <div class={`hide-mobile-saldo ${canUseExtra ? 'cursor-pointer' : 'cursor-default'}`} on:click={toggle}>
+      <HourBalance
+        title={hbTitle}
+        saldo={hbSaldo}
+        color={hbColor}
+        saldoDaChiamataUtente={hbSaldoDaChiamataUtente}
+      />
     </div>
   {/if}
 </nav>

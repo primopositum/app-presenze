@@ -26,7 +26,7 @@
   export let maxVisibleEntries: number = 2; // Numero massimo di entries da mostrare
 
   const dispatch = createEventDispatcher<{
-    selectDay: { date: string; locked: boolean };
+    selectDay: { date: string; locked: boolean; forbidType3: boolean };
   }>();
 
   $: first = new Date(year, month - 1, 1);
@@ -74,6 +74,11 @@
 
   function isLockedByValidation(dateStr: string) {
     return byValidation[dateStr] === 2;
+  }
+
+  function hasType5Entry(dateStr: string) {
+    const entries = byEntries[dateStr] || [];
+    return entries.some((entry) => entry.type === 5);
   }
 
   function validationBg(level: number | undefined) {
@@ -128,8 +133,9 @@
   function handleDay(day: number) {
     const isoDate = iso(year, month, day);
     const locked = isLockedByValidation(isoDate);
+    const forbidType3 = hasType5Entry(isoDate);
 
-    dispatch('selectDay', { date: isoDate, locked });
+    dispatch('selectDay', { date: isoDate, locked, forbidType3 });
   }
 </script>
 

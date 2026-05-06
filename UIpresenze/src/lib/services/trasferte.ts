@@ -26,7 +26,7 @@ async function request(path: string, opts: Opts = {}) {
 }
 
 
-export type ValidationLevel = 1 | 2;
+export type ValidationLevel = 0 | 1 | 2;
 
 export type Trasferta = {
   id: number;
@@ -105,7 +105,7 @@ export type TrasferteListParams = {
   limit?: number;
   date?: string; // YYYY-MM-DD
   uId?: number;
-  validation?: number; // 1 | 2
+  validation?: ValidationLevel;
   azienda?: string;
 };
 

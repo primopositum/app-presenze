@@ -3,7 +3,6 @@
   import { auth } from '$lib/stores/auth';
   import LoaderOverlay from '$lib/components/loader/LoaderOverlay.svelte';
   import AutoCard from '$lib/components/AutoCard.svelte';
-  import LoadReceipts from '$lib/components/LoadReceipts.svelte';
   import {
     useAutomobiliList,
     useCreateAutomobile,
@@ -19,10 +18,8 @@
   let error: string | null = null;
   let isEdit = false;
   let selectedId: number | string | null = null;
-  let pdfAutoId: number | string | null = null;
   let bootstrapped = false;
   let isAuthed = false;
-  let mese = '';
 
   let marca = '';
   let alimentazione = '';
@@ -73,14 +70,6 @@
       const list = useAutomobiliList();
       const res = await list();
       items = res.payload;
-      if (items.length > 0) {
-        const currentExists = pdfAutoId !== null && items.some((a) => String(getAutoId(a)) === String(pdfAutoId));
-        if (!currentExists) {
-          pdfAutoId = getAutoId(items[0]);
-        }
-      } else {
-        pdfAutoId = null;
-      }
     } catch (e: any) {
       error = e?.message || 'Errore caricamento automobili';
     } finally {
@@ -144,10 +133,6 @@
     }
   }
 
-  function updateMese() {
-    mese = new Intl.DateTimeFormat('it-IT', { month: 'long' }).format(new Date());
-  }
-
   $: isAuthed = $auth.isAuthed;
   $: if (isAuthed && !bootstrapped) {
     bootstrapped = true;
@@ -162,7 +147,6 @@
   }
 
   onMount(() => {
-    updateMese();
     if (isAuthed && !bootstrapped) {
       bootstrapped = true;
       void loadAutomobili();
@@ -199,35 +183,13 @@
     {:else if items.length === 0}
       <p class="state">Nessuna automobile trovata</p>
     {:else}
-      <div class="split-layout">
-        <section class="cars-pane">
-          <ul class="list">
-            {#each items as item, idx (`${item.id ?? item.a_id ?? item.A_ID ?? idx}`)}
-              <AutoCard automobile={item} onDelete={handleDelete} onEdit={openEdit} />
-            {/each}
-          </ul>
-        </section>
-
-        <section class="pdf-wrap">
-          <div class="pdf-controls">
-            <label for="pdf-auto-select">Automobile per upload</label>
-            <select id="pdf-auto-select" bind:value={pdfAutoId}>
-              {#each items as item, idx (`pdf-${item.id ?? item.a_id ?? item.A_ID ?? idx}`)}
-                {@const id = getAutoId(item)}
-                {#if id !== null}
-                  <option value={id}>{item.marca} - {item.alimentazione}</option>
-                {/if}
-              {/each}
-            </select>
-            <p class="pdf-hint">Scegli l'auto e carica i PDF del mese corrente.</p>
-          </div>
-          {#if pdfAutoId !== null}
-            <div class="pdf-receipts">
-              <LoadReceipts mode="auto" autoId={pdfAutoId} />
-            </div>
-          {/if}
-        </section>
-      </div>
+      <section class="cars-pane">
+        <ul class="list">
+          {#each items as item, idx (`${item.id ?? item.a_id ?? item.A_ID ?? idx}`)}
+            <AutoCard automobile={item} onDelete={handleDelete} onEdit={openEdit} />
+          {/each}
+        </ul>
+      </section>
     {/if}
   </main>
 </div>
@@ -366,14 +328,6 @@
     padding: 8px;
   }
 
-  .split-layout {
-    display: grid;
-    grid-template-columns: minmax(320px, 1.15fr) minmax(320px, 0.95fr);
-    gap: 14px;
-    align-items: stretch;
-    min-height: calc(100vh - 240px);
-  }
-
   .cars-pane {
     display: flex;
     flex-direction: column;
@@ -395,81 +349,13 @@
     list-style: none;
     margin: 0;
     padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 12px;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
     padding-right: 4px;
-  }
-
-  .pdf-wrap {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-    padding: 12px;
-    width: 100%;
-    height: 100%;
-    text-align: center;
-    border: 1px solid var(--color-auto-border);
-    border-radius: 12px;
-    background: var(--color-auto-panel);
-    overflow: hidden;
-  }
-
-  .pdf-wrap h2 {
-    margin: 0;
-    font-size: 1rem;
-    color: var(--color-auto-text);
-  }
-
-  .pdf-controls {
-    display: grid;
-    gap: 6px;
-    width: min(100%, 420px);
-    justify-self: center;
-    justify-items: center;
-    text-align: center;
-    background: var(--color-auto-panel-soft-2);
-    background: color-mix(in oklab, var(--color-auto-panel) 82%, white);
-    border-radius: 10px;
-    padding: 10px;
-  }
-
-  .pdf-controls label {
-    font-size: 0.9rem;
-    color: var(--color-auto-muted);
-    font-weight: 600;
-  }
-
-  .pdf-controls select {
-    border: 1px solid var(--color-auto-border);
-    border-radius: 10px;
-    padding: 9px 10px;
-    font-size: 0.9rem;
-    width: 100%;
-    background: #fff;
-    color: var(--color-auto-text);
-    text-align: left;
-  }
-
-  .pdf-controls select:focus {
-    outline: 2px solid var(--color-auto-primary-focus);
-    outline: 2px solid color-mix(in oklab, var(--color-auto-primary) 35%, transparent);
-    outline-offset: 1px;
-  }
-
-  .pdf-hint {
-    margin: 0;
-    font-size: 0.8rem;
-    color: var(--color-auto-muted);
-  }
-
-  .pdf-receipts {
-    width: min(100%, 420px);
-    justify-self: center;
   }
 
   .modal-backdrop {
@@ -491,18 +377,16 @@
   }
 
   @media (max-width: 980px) {
-    .split-layout {
-      grid-template-columns: 1fr;
-      min-height: 0;
-    }
-
     .list {
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
       max-height: 52vh;
       flex: unset;
     }
+  }
 
-    .pdf-receipts {
-      justify-self: center;
+  @media (max-width: 520px) {
+    .list {
+      grid-template-columns: 1fr;
     }
   }
 

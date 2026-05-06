@@ -18,6 +18,7 @@
 
   let mode: 'create' | 'update' = 'create';
   let teId: number | null = null;
+  let forbiddenTypes: number[] = [];
   let rangeOverride = false;
   let dataS = '';
   let dataE = '';
@@ -40,6 +41,10 @@
     { value: 12, label: 'Sciopero' },
     { value: 14, label: 'Visite mediche L.106/25' }
   ];
+  $: visibleTypeOptions =
+    mode === 'create'
+      ? typeOptions.filter((option) => !forbiddenTypes.includes(option.value))
+      : typeOptions;
 
   $: if ($state.open && $state.args) {
     const key = [
@@ -49,7 +54,8 @@
       $state.args.oreTot,
       $state.args.type,
       $state.args.note ?? '',
-      $state.args.utenteId ?? ''
+      $state.args.utenteId ?? '',
+      ($state.args.forbiddenTypes ?? []).join(',')
     ].join('|');
 
     if (key !== lastArgsKey) {
@@ -61,6 +67,9 @@
       type = $state.args.type;
       note = $state.args.note ?? '';
       utenteId = $state.args.utenteId ?? null;
+      forbiddenTypes = Array.isArray($state.args.forbiddenTypes)
+        ? $state.args.forbiddenTypes.filter((v) => Number.isFinite(v))
+        : [];
       dataS = $state.args.date;
       dataE = $state.args.date;
       dataSDate = toDateOrNull(dataS);
@@ -71,6 +80,7 @@
     }
   } else {
     lastArgsKey = '';
+    forbiddenTypes = [];
   }
 
   function handleClose() {
@@ -95,10 +105,17 @@
 
   $: dataS = toIsoDateOrEmpty(dataSDate);
   $: dataE = toIsoDateOrEmpty(dataEDate);
+  $: if (mode === 'create' && forbiddenTypes.includes(type)) {
+    const fallback = typeOptions.find((option) => !forbiddenTypes.includes(option.value));
+    if (fallback) type = fallback.value;
+  }
 
   function validate(): string | null {
     if (utenteId == null) return 'Utente non disponibile';
     if (type == null || Number.isNaN(type)) return 'Tipo non valido';
+    if (mode === 'create' && forbiddenTypes.includes(type)) {
+      return 'Non puoi inserire "Versamento Banca Ore" (tipo 3) in un giorno con "Malattia" (tipo 5).';
+    }
     if (rangeOverride) {
       if (mode === 'update') return 'Range override non disponibile in modifica';
       if (!dataS || !dataE) return 'Date range obbligatorie';
@@ -201,11 +218,19 @@
           <div class="field">
             <i class="fa-solid fa-tag input-icon-fa"></i>
             <select class="input-field" bind:value={type}>
-              {#each typeOptions as option}
-                <option value={option.value}>{option.label}</option>
+              {#each visibleTypeOptions as option}
+                <option value={option.value}>
+                  {option.label}
+                </option>
               {/each}
             </select>
           </div>
+
+          {#if mode === 'create' && forbiddenTypes.includes(3)}
+            <p class="error-text">
+              Non puoi inserire "Versamento Banca Ore" (tipo 3) in un giorno con "Malattia" (tipo 5).
+            </p>
+          {/if}
 
           <div class="field note-field">
             <i class="fa-solid fa-note-sticky input-icon-fa"></i>

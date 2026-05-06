@@ -286,8 +286,8 @@
     const r  = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const dx = (e.clientX - r.left) / r.width;
     const dy = (e.clientY - r.top)  / r.height;
-    rotateY  =  (dx - 0.5) * 12;
-    rotateX  = -(dy - 0.5) * 12;
+    rotateY  =  (dx - 0.5) * 6;
+    rotateX  = -(dy - 0.5) * 6;
     glowX    = dx * 100;
     glowY    = dy * 100;
   }
@@ -319,7 +319,7 @@
   on:change={onSignatureFileSelected}
 />
 
-<div style="perspective: 900px;" class="w-full">
+<div style="perspective: 900px;" class="mx-auto w-full max-w-[420px]">
   <Motion
     initial={{ opacity: 0, y: 32, scale: 0.94 }}
     animate={{ opacity: 1, y: 0,  scale: 1    }}
@@ -330,7 +330,7 @@
       use:motion
       style="
         transform: rotateX({rotateX}deg) rotateY({rotateY}deg);
-        transition: transform {isHover ? '0.07s' : '0.5s'} cubic-bezier(0.22,1,0.36,1);
+        transition: transform {isHover ? '0.14s' : '0.5s'} cubic-bezier(0.22,1,0.36,1);
         transform-style: preserve-3d;
         will-change: transform;
       "
@@ -348,7 +348,7 @@
 
         <div
           class="absolute inset-0 pointer-events-none z-10 rounded-2xl overflow-hidden"
-          style="background: radial-gradient(circle at {glowX}% {glowY}%, rgba(251,146,60,.07) 0%, transparent 65%);"
+          style="background: radial-gradient(circle at {glowX}% {glowY}%, rgba(251,146,60,.035) 0%, transparent 65%);"
         ></div>
 
         <!-- ── BANNER ──────────────────────────────────────── -->
@@ -751,8 +751,8 @@
     border: 1px solid rgba(255,255,255,.35); color: #fff;
     cursor: pointer; transition: background .18s, transform .12s;
   }
-  .pencil-btn:hover { background: rgba(255,255,255,.38); transform: scale(1.08); }
-  .pencil-btn:active { transform: scale(.95); }
+  .pencil-btn:hover { background: rgba(255,255,255,.3); transform: scale(1.03); }
+  .pencil-btn:active { transform: scale(.98); }
   .pencil-btn--active { background: rgba(255,255,255,.15); cursor: default; opacity: .55; }
   .pen-btn, .view-sign-btn {
     display: flex; align-items: center; justify-content: center;
@@ -761,8 +761,8 @@
     border: 1px solid rgba(255,255,255,.35); color: #fff;
     cursor: pointer; transition: background .18s, transform .12s;
   }
-  .pen-btn:hover, .view-sign-btn:hover { background: rgba(255,255,255,.38); transform: scale(1.08); }
-  .pen-btn:active, .view-sign-btn:active { transform: scale(.95); }
+  .pen-btn:hover, .view-sign-btn:hover { background: rgba(255,255,255,.3); transform: scale(1.03); }
+  .pen-btn:active, .view-sign-btn:active { transform: scale(.98); }
   .view-sign-btn--active { opacity: .7; cursor: default; }
   .trash-btn {
     display: flex; align-items: center; justify-content: center;
@@ -771,8 +771,8 @@
     border: 1px solid rgba(255,255,255,.35); color: #fff;
     cursor: pointer; transition: background .18s, transform .12s;
   }
-  .trash-btn:hover { background: rgba(248,113,113,.45); transform: scale(1.08); }
-  .trash-btn:active { transform: scale(.95); }
+  .trash-btn:hover { background: rgba(248,113,113,.35); transform: scale(1.03); }
+  .trash-btn:active { transform: scale(.98); }
   .trash-btn--active { background: rgba(248,113,113,.25); cursor: default; opacity: .65; }
 
   .action-buttons {

@@ -87,9 +87,9 @@ export function useUploadPdfAuto(params: { auto_id: string | number }) {
   };
 }
 
-export function usePdfAutoCurrentMonthList() {
+export function usePdfAutoCurrentMonthList(data?: string) {
   return async (): Promise<{ ok: true; payload: AutoPdfCurrentMonthItem[] }> => {
-    const list = await getPDFautoCurrentMonthList();
+    const list = await getPDFautoCurrentMonthList(data);
     return { ok: true, payload: list };
   };
 }

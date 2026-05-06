@@ -118,6 +118,9 @@ export function deletePDFauto(auto_id: number | string, mese_anno?: string) {
   }) as Promise<any>;
 }
 
-export function getPDFautoCurrentMonthList() {
-  return request('/automobili/PDFauto/mese-corrente/') as Promise<AutoPdfCurrentMonthItem[]>;
+export function getPDFautoCurrentMonthList(data?: string) {
+  const qs = new URLSearchParams();
+  if (data) qs.set('data', data);
+  const tail = qs.toString();
+  return request(`/automobili/PDFauto/by-date/${tail ? `?${tail}` : ''}`) as Promise<AutoPdfCurrentMonthItem[]>;
 }

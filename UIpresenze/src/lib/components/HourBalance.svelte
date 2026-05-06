@@ -3,19 +3,18 @@
   export let title: string;
   export let color: [string, string] | undefined;
   export let saldoDaChiamataUtente = false;
-  // normalizzo sempre a number (NaN se non valido)
-  $: saldoNum = saldo === null || saldo === undefined ? NaN : Number(saldo);
-  $: phrases =
-    Number.isNaN(saldoNum)
-      ? "Saldo non disponibile"
-      : saldoNum > 0
-        ? "Saldo positivo, ottimo lavoro!"
-        : saldoNum < 0
-          ? "Saldo negativo, non stiamo lavorando abbastanza!"
-          : "Saldo in pari ðŸ‘Œ";
 
-  // testo da mostrare (evita 'NaNh')
+  // Normalizzo sempre a number (NaN se non valido)
+  $: saldoNum = saldo === null || saldo === undefined ? NaN : Number(saldo);
+
+  // Testo da mostrare (evita "NaNh")
   $: saldoLabel = Number.isNaN(saldoNum) ? "--" : String(saldoNum);
+  $: phrases =
+    saldoLabel === "--"
+      ? "Saldo non disponibile"
+      : saldoDaChiamataUtente
+        ? "Saldo ore complessivo di ore validate"
+        : "Saldo ore relativo del mese corrente";
 </script>
 
 <div
@@ -26,7 +25,7 @@
 
   <div class="default-label">
     {#if saldoDaChiamataUtente}
-      Saldo VALIDATO: {saldoLabel}h
+      Saldo V: {saldoLabel}h
     {:else}
       Saldo: {saldoLabel}h
     {/if}
@@ -45,7 +44,6 @@
 </div>
 
 <style>
-  /* il tuo CSS invariato */
   .card {
     position: fixed;
     bottom: 16px;
