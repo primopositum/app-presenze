@@ -362,7 +362,7 @@ def trasferta_dossier(request, u_id: int, data: str):
         monthrange(reference_date.year, reference_date.month)[1],
     )
 
-    trasferte_mese = list(
+    trasferte_mese = list( 
         Trasferta.objects.filter(
             utente_id=u_id,
             data__range=(month_start, month_end),

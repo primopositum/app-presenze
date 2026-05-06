@@ -1404,7 +1404,33 @@ class TestTimeEntryBulkValidateMonth(TestCase):
         saldo = Saldo.objects.get(utente=self.utente)
         self.assertEqual(saldo.valore_saldo_validato, Decimal("5.00"))
         self.assertEqual(res.data["delta_saldo_validato"], "5.00")
- 
+
+    def test_superuser_seconda_chiamata_non_riapplica_delta(self):
+        make_timeentry(
+            self.utente,
+            data=date(2025, 1, 6),
+            type=TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
+            ore_tot=Decimal("5.00"),
+            validation_level=TimeEntry.ValidationLevel.VALIDATO_UTENTE,
+        )
+        body = {
+            "data": "2025-01-15",
+            "utente_id": self.utente.id,
+        }
+
+        res1 = auth_client(self.admin).patch(URL_TE_BULK_VALIDATE, body, format="json")
+        res2 = auth_client(self.admin).patch(URL_TE_BULK_VALIDATE, body, format="json")
+
+        self.assertEqual(res1.status_code, 200)
+        self.assertEqual(res2.status_code, 200)
+        self.assertEqual(res1.data["count_updated"], 1)
+        self.assertEqual(res2.data["count_updated"], 0)
+        self.assertEqual(res1.data["delta_saldo_validato"], "5.00")
+        self.assertEqual(res2.data["delta_saldo_validato"], "0.00")
+
+        saldo = Saldo.objects.get(utente=self.utente)
+        self.assertEqual(saldo.valore_saldo_validato, Decimal("5.00"))
+
     def test_superuser_aggiorna_saldo_per_prelievo_negativo(self):
         make_timeentry(
             self.utente,

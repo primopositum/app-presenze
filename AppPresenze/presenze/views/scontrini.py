@@ -2,6 +2,7 @@ import os
 import re
 import uuid
 import mimetypes
+from datetime import date
 from pathlib import Path
     
 
@@ -357,13 +358,31 @@ def pdf_auto_delete(request, auto_id: int):
 @permission_classes([IsAuthenticated])
 def pdf_auto_current_month_list(request):
     """
-    GET /presenze/api/automobili/PDFauto/mese-corrente/
-    Ritorna i PDF presenti nella cartella del mese corrente:
+    GET /presenze/api/automobili/PDFauto/by-date/?data=YYYY-MM-DD
+    Ritorna i PDF presenti nella cartella del mese ricavato dalla data:
     TPDF_ROOT/<MM_YYYY>/
 
-    Tutti gli utenti autenticati vedono tutti i PDF del mese.
+    Parametro opzionale:
+    - data: formato YYYY-MM-DD oppure YYYY-MM (default: data odierna)
+
+    Tutti gli utenti autenticati vedono tutti i PDF del mese selezionato.
     """
-    mese_anno = timezone.localdate().strftime("%m_%Y")
+    data_param = (request.query_params.get("data") or "").strip()
+    if not data_param:
+        reference_date = timezone.localdate()
+    else:
+        normalized = data_param
+        if re.fullmatch(r"\d{4}-\d{2}", normalized):
+            normalized = f"{normalized}-01"
+        try:
+            reference_date = date.fromisoformat(normalized)
+        except ValueError:
+            return Response(
+                {"errors": "Formato data non valido. Usa YYYY-MM-DD o YYYY-MM (es. 2026-04-01)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    mese_anno = reference_date.strftime("%m_%Y")
     month_dir = TPDF_ROOT / mese_anno
 
     if not month_dir.exists():
