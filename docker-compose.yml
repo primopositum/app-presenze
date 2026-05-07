@@ -28,8 +28,6 @@ services:
     build:
       context: ./UIpresenze
       dockerfile: Dockerfile
-      args:
-        VITE_GOOGLE_MAPS_API_KEY: ${VITE_GOOGLE_MAPS_API_KEY}
     volumes:
       - static_files:/usr/share/nginx/static
     ports:
@@ -62,3 +60,4 @@ networks:
     driver: bridge
 volumes:
   static_files:
+
