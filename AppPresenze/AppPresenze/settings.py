@@ -27,6 +27,9 @@ User = os.getenv('DB_USER')
 Host = os.getenv('DB_HOST')
 Psw = os.getenv('DB_PASSWORD')
 Port = os.getenv('PORT')
+JIRA_DOMAIN = os.getenv("JIRA_DOMAIN", "")
+JIRA_EMAIL = os.getenv("JIRA_EMAIL", "")
+JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "")
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 

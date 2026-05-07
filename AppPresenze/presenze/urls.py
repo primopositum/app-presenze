@@ -77,6 +77,8 @@ api_urlpatterns = [
     # Utilities Bar (read-only)
     # -------------------------------------------------------------------------
     path("utilitiesbar/", views.UtilitiesBarListView.as_view(), name="utilitiesbar-list"),
+    path("jira/search/", views.JiraProxyView.as_view(), name="jira-search"),
+    path("jira/timesheet/", views.JiraWorklogsTodayView.as_view(), name="jira-timesheet"),
 ]
 
 

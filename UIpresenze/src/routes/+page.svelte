@@ -10,6 +10,10 @@
   $: isAuthed = $auth.isAuthed;
   
    const redirect = (route : string) => {
+    if (route === 'buisness') {
+      goto('/buisness', { state: { route } });
+      return;
+    }
     if (user?.is_superuser){goto(`/preMenu`, {state : {route}});}
     else{goto(`/${route}`, {state : {route}});}
   }
@@ -34,11 +38,18 @@
     imageSrc="/trasferte.png"
        />
   <CardImage
+    caption="Accedi all'area delle task"
+    alt="Task"
+    on:click = {()=>{redirect('buisness')}}
+    imageSrc="/buisness.png"
+     />
+  <CardImage
     caption="Accedi all'area delle presenze"
     alt="presenze"
     on:click = {()=>{redirect('presences')}}
     imageSrc="/presence.png"
      />
+   
 </div>
 <div >
   <IconLinkBar></IconLinkBar>

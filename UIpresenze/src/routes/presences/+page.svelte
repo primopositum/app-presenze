@@ -33,6 +33,7 @@
 	import PreSetWeek from '$lib/components/PreSetWeek.svelte';
   import TimeEntryFormProvider from '$lib/components/ctx/TimeEntryFormProvider.svelte';
   import ErrorCard from '$lib/components/ErrorCard.svelte';
+  import Useractivity from '$lib/components/Useractivity.svelte';
   import { hourBalanceExtra } from '$lib/stores/hourBalanceExtra';
   import { useOneUserApi } from '$lib/hooks/useUserApi.js';
   let loading = false;
@@ -47,6 +48,7 @@
   let dayHours: DayHours[] = [];
   let selectedDate: string | null = null;
   let selectedEntries: TimeEntry[] = [];
+  let selectedDayWorkedHours = 0;
   let selectedDayForbidType3 = false;
   let updatingValidation = false;
   let confirmValidateOpen = false;
@@ -341,6 +343,13 @@ export const loadData = async () => {
   } else {
     selectedEntries = [];
   }
+  $: selectedDayWorkedHours = selectedEntries.reduce((acc, entry) => {
+    const hours = Number(entry.ore_tot) || 0;
+    if (entry.type === 1) return acc + hours;
+    if (entry.type === 3) return acc + hours;
+    if (entry.type === 4) return acc - hours;
+    return acc;
+  }, 0);
 
   $: editableNoteEntries = selectedEntries.filter((entry) => entry.validation_level !== 2);
   $: canEditSelectedNotes = editableNoteEntries.length > 0;
@@ -615,7 +624,10 @@ export const loadData = async () => {
     </div>
   </div>
   </div>
-    <div><PreSetWeek/>   </div>
+    {#if $auth.user?.is_superuser}
+      <div><PreSetWeek/></div>
+    {/if}
+    <Useractivity day={selectedDate} ore={selectedDayWorkedHours} />
   {/key}
 </TimeEntryFormProvider>
 

@@ -235,7 +235,6 @@
     padding: 14px 16px;
     min-height: 56px;
     background: var(--color-auto-bg-soft);
-    background: color-mix(in oklab, var(--color-auto-bg) 90%, white);
     color: var(--color-auto-text);
     border-bottom: 1px solid var(--color-auto-primary);
   }
@@ -277,7 +276,6 @@
     width: min(100%, 460px);
     justify-self: center;
     background: var(--color-auto-panel-soft);
-    background: color-mix(in oklab, var(--color-auto-panel) 88%, white);
     border: 1px solid var(--color-auto-border);
     border-radius: 14px;
     padding: 14px;
@@ -362,7 +360,6 @@
     position: fixed;
     inset: 0;
     background: var(--color-auto-overlay);
-    background: color-mix(in oklab, var(--color-auto-primary) 55%, transparent);
     display: grid;
     place-items: center;
     padding: 16px;

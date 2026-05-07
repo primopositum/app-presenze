@@ -82,9 +82,9 @@
   }
 
   function validationBg(level: number | undefined) {
-    if (level === 0) return 'bg-red-100';
-    if (level === 1) return 'bg-yellow-100';
-    if (level === 2) return 'bg-green-100';
+    if (level === 0) return 'bg-[#fecaca]';
+    if (level === 1) return 'bg-[#fef08a]';
+    if (level === 2) return 'bg-[#bbf7d0]';
     return '';
   }
 
@@ -177,7 +177,7 @@
         class={`flex flex-col items-center border-2 gap-0.5 sm:gap-1 h-20 sm:h-24 overflow-hidden rounded-md p-1 sm:p-1.5
           relative
           transition-colors
-          ${isDisabled ? `${vBg || 'bg-gray-50'} opacity-60` : `cursor-pointer ${vBg || (weekendEmpty ? 'bg-blue-100' : weekend ? 'bg-gray-50' : 'bg-gray-100')} hover:opacity-90`}
+          ${isDisabled ? `${vBg || 'bg-[#e5e7eb]'} text-gray-700` : `cursor-pointer ${vBg || (weekendEmpty ? 'bg-[#dbeafe]' : weekend ? 'bg-[#e5e7eb]' : 'bg-[#d1d5db]')} hover:brightness-95`}
           ${isToday ? 'outline outline-2 outline-green-500 border-none' : 'border-gray-400'}
         `}
         on:click={() => handleDay(day)}

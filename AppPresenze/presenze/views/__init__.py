@@ -28,3 +28,4 @@ from .scontrini import (
 from .automobili import (AutomobileListCreateView, AutomobileDetailView, AutomobileDeleteView, AutomobilePatchView)
 from .signatures import signature_create, signature_latest
 from .utilitiesbar import UtilitiesBarListView
+from .jira import JiraProxyView, JiraWorklogsTodayView
