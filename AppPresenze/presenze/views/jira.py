@@ -217,3 +217,4 @@ class JiraWorklogsTodayView(APIView):
             return Response(detail, status=e.response.status_code)
         except requests.exceptions.RequestException as e:
             return Response({"error": str(e)}, status=502)
+
