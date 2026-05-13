@@ -234,7 +234,6 @@
     justify-content: space-between;
     padding: 14px 16px;
     min-height: 56px;
-    background: var(--color-auto-bg-soft);
     color: var(--color-auto-text);
     border-bottom: 1px solid var(--color-auto-primary);
   }

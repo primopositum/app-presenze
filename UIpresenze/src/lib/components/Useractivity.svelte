@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { jiraTimesheet, type JiraTimesheetActivity } from '$lib/services/jira';
+  import { jiraTimesheet, jiraDeleteWorklog, type JiraTimesheetActivity } from '$lib/services/jira';
+  import JiraWorklogCard from '$lib/components/JiraWorklogCard.svelte';
+  import ConfirmCard from '$lib/components/ConfirmCard.svelte';
+  import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
+  import { faTrash } from '@fortawesome/free-solid-svg-icons';
 
   export let day: string | null = null;
   export let ore: number | string | null = null;
@@ -8,6 +12,9 @@
   let error = '';
   let activities: JiraTimesheetActivity[] = [];
   let lastLoadedDay = '';
+  let deletingWorklogId = '';
+  let worklogActionError = '';
+  let deleteConfirmTarget: { issueKey: string; worklogId: string } | null = null;
 
   function toNumber(value: unknown) {
     const n = Number(value);
@@ -76,13 +83,53 @@
     error = '';
   }
 
+  async function refreshAfterWorklogCreate() {
+    lastLoadedDay = '';
+    await load();
+  }
+
+  async function removeWorklog(issueKey: string, worklogId: string) {
+    if (!issueKey || !worklogId || deletingWorklogId) return;
+    deletingWorklogId = worklogId;
+    worklogActionError = '';
+    try {
+      await jiraDeleteWorklog(issueKey, worklogId);
+      await refreshAfterWorklogCreate();
+    } catch (e: any) {
+      worklogActionError = String(e?.message || e || 'Errore rimozione worklog');
+    } finally {
+      deletingWorklogId = '';
+    }
+  }
+
+  function askDeleteWorklog(issueKey: string, worklogId: string) {
+    if (!issueKey || !worklogId || deletingWorklogId) return;
+    deleteConfirmTarget = { issueKey, worklogId };
+  }
+
+  function closeDeleteConfirm() {
+    if (deletingWorklogId) return;
+    deleteConfirmTarget = null;
+  }
+
+  async function confirmDeleteWorklog() {
+    if (!deleteConfirmTarget) return;
+    const target = deleteConfirmTarget;
+    deleteConfirmTarget = null;
+    await removeWorklog(target.issueKey, target.worklogId);
+  }
+
   let expectedHours = 0;
   let expectedSeconds = 0;
   let totalActivitySeconds = 0;
   let denominatorSeconds = 0;
   let progressPercent = 0;
+  let rawCoveragePercent = 0;
+  let worklogCreationBlocked = false;
+  let worklogBlockReason = '';
   let segments: Array<{
     key: string;
+    worklogId: string;
     widthPct: number;
     color: string;
     issueKey: string;
@@ -98,12 +145,18 @@
   $: expectedSeconds = expectedHours * 3600;
   $: totalActivitySeconds = activities.reduce((acc, item) => acc + activitySeconds(item), 0);
   $: denominatorSeconds = expectedSeconds > 0 ? expectedSeconds : totalActivitySeconds;
+  $: rawCoveragePercent = denominatorSeconds > 0 ? (totalActivitySeconds / denominatorSeconds) * 100 : 0;
   $: progressPercent = denominatorSeconds > 0 ? Math.min(100, (totalActivitySeconds / denominatorSeconds) * 100) : 0;
+  $: worklogCreationBlocked = expectedSeconds > 0 && rawCoveragePercent >= 100;
+  $: worklogBlockReason = worklogCreationBlocked
+    ? `Copertura Jira gia al ${rawCoveragePercent.toFixed(1)}%: inserimento bloccato.`
+    : '';
   $: segments = activities.map((item, idx) => {
     const seconds = activitySeconds(item);
     const widthPct = denominatorSeconds > 0 ? (seconds / denominatorSeconds) * 100 : 0;
     return {
       key: item.worklog_id ?? `${item.issue_key}-${item.started}-${idx}`,
+      worklogId: String(item.worklog_id || ''),
       widthPct: Math.max(0, widthPct),
       color: `hsl(${(idx * 47) % 360} 72% 52%)`,
       issueKey: item.issue_key || '-',
@@ -115,6 +168,7 @@
       comment: item.comment || ''
     };
   });
+
 </script>
 
 <section class="useractivity">
@@ -126,6 +180,13 @@
     <span class="target-hours">Target: {expectedHours.toFixed(2)}h</span>
   </div>
 
+  <JiraWorklogCard
+    {day}
+    blocked={worklogCreationBlocked}
+    blockedReason={worklogBlockReason}
+    on:created={refreshAfterWorklogCreate}
+  />
+
   {#if !day}
     <p class="state">Seleziona un giorno nel calendario per vedere le attivita Jira.</p>
   {:else if loading}
@@ -135,6 +196,9 @@
   {:else if activities.length === 0}
     <p class="state">Nessuna attivita trovata per il giorno selezionato.</p>
   {:else}
+    {#if worklogActionError}
+      <p class="state error">{worklogActionError}</p>
+    {/if}
     <div class="progress-wrap">
       <div class="progress-meta">
         <span>Ore Jira: {formatHours(totalActivitySeconds)}h</span>
@@ -148,7 +212,19 @@
             <div class="segment-tooltip">
               <div class="tooltip-head">
                 <code>{segment.issueKey}</code>
-                <span>{segment.timeSpent}</span>
+                <div class="tooltip-head-right">
+                  <span>{segment.timeSpent}</span>
+                  <button
+                    type="button"
+                    class="delete-worklog-btn"
+                    title="Rimuovi worklog"
+                    aria-label="Rimuovi worklog"
+                    disabled={!segment.worklogId || deletingWorklogId === segment.worklogId}
+                    on:click|stopPropagation={() => askDeleteWorklog(segment.issueKey, segment.worklogId)}
+                  >
+                    <FontAwesomeIcon icon={faTrash} />
+                  </button>
+                </div>
               </div>
               <p class="tooltip-summary">{segment.summary}</p>
               <div class="tooltip-meta">
@@ -166,6 +242,23 @@
     </div>
   {/if}
 </section>
+
+{#if deleteConfirmTarget}
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+    on:click={closeDeleteConfirm}
+  >
+    <div on:click|stopPropagation>
+      <ConfirmCard
+        title="Conferma eliminazione"
+        message="Vuoi davvero eliminare questo worklog Jira?"
+        confirmLabel={deletingWorklogId ? 'Eliminazione...' : 'Elimina'}
+        onConfirm={() => void confirmDeleteWorklog()}
+        onCancel={closeDeleteConfirm}
+      />
+    </div>
+  </div>
+{/if}
 
 <style>
   .useractivity {
@@ -293,12 +386,14 @@
     padding: 0.55rem 0.6rem;
     opacity: 0;
     visibility: hidden;
-    pointer-events: none;
+    pointer-events: auto;
     transition: opacity 140ms ease, transform 140ms ease;
   }
 
   .progress-segment:hover .segment-tooltip,
-  .progress-segment:focus .segment-tooltip {
+  .progress-segment:focus .segment-tooltip,
+  .segment-tooltip:hover,
+  .segment-tooltip:focus-within {
     opacity: 1;
     visibility: visible;
     transform: translateX(-50%) translateY(0);
@@ -326,6 +421,34 @@
     font-weight: 700;
   }
 
+  .tooltip-head-right {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  .delete-worklog-btn {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    border: 1px solid #fecaca;
+    background: #fff;
+    color: #b91c1c;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+
+  .delete-worklog-btn:hover {
+    background: #fef2f2;
+  }
+
+  .delete-worklog-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
   .tooltip-summary {
     margin: 0;
     font-size: 0.78rem;
@@ -350,5 +473,13 @@
     border-top: 1px dashed #dbe4ef;
     padding-top: 0.28rem;
     white-space: pre-wrap;
+  }
+
+  @media (max-width: 860px) {
+    .head {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
   }
 </style>

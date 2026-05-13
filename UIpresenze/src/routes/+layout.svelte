@@ -27,6 +27,23 @@
 {/if}
 
 <!-- CONTENUTO PRINCIPALE -->
-<main class="p-4 max-w-7xl mx-auto">
+<main class="layout-shell">
 	<slot/>
 </main>
+
+<style>
+	.layout-shell {
+		width: 80%;
+		max-width: 80%;
+		margin: 0 auto;
+		padding: 1rem;
+	}
+
+	@media (max-width: 900px) {
+		.layout-shell {
+			width: 100%;
+			max-width: 100%;
+			padding: 0.75rem;
+		}
+	}
+</style>

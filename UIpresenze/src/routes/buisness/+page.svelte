@@ -1,12 +1,26 @@
 <script lang="ts">
-  import { useJiraSearch } from '$lib/hooks/useJira';
+  import {
+    useJiraSearch,
+    useJiraFiltersGet,
+    useJiraFiltersPost,
+    parseScopePreset,
+    type JiraScopeType
+  } from '$lib/hooks/useJira';
+  import JiraScopeModal from '$lib/components/JiraScopeModal.svelte';
   import JiraCompletedSidebar from '$lib/components/JiraCompletedSidebar.svelte';
+  import JiraWorklogCard from '$lib/components/JiraWorklogCard.svelte';
   import { onMount } from 'svelte';
 
   const DOMAIN = (import.meta.env.PUBLIC_JIRA_DOMAIN ?? 'primopositum.atlassian.net').trim();
 
-  let scopeType: 'project' | 'filter' = 'filter';
-  let scopeValue = 'Progetti E3 attivi';
+  let scopeValue = '';
+  let scopePresets: string[] = [];
+  let scopeFiltersLoading = false;
+  let scopeFiltersError = '';
+  let showScopeModal = false;
+  let scopeModalType: JiraScopeType = 'filter';
+  let scopeModalValue = '';
+  let selectedScopePreset: { raw: string; type: JiraScopeType; value: string } | null = null;
 
   type JiraIssue = {
     key: string;
@@ -19,6 +33,16 @@
       updated?: string;
       issuetype?: { name?: string };
       project?: { key?: string; name?: string };
+      timespent?: number | null;
+      aggregatetimespent?: number | null;
+      timeestimate?: number | null;
+      aggregatetimeestimate?: number | null;
+      timeoriginalestimate?: number | null;
+      aggregatetimeoriginalestimate?: number | null;
+      timetracking?: {
+        timeSpentSeconds?: number;
+        originalEstimateSeconds?: number;
+      } | null;
     };
   };
 
@@ -28,6 +52,7 @@
   let error = '';
   let loaded = false;
   let lastUpdate = '';
+  let showBackToTop = false;
 
   // Searchbar state
   let searchQuery = '';
@@ -50,13 +75,47 @@
     Lowest: 'vv'
   };
 
-  const PRIORITY_COLOR: Record<string, string> = {
-    Highest: '#ef4444',
-    High: '#f97316',
-    Medium: '#eab308',
-    Low: '#22c55e',
-    Lowest: '#6b7280'
+  const PRIORITY_THEME: Record<string, { accent: string; soft: string; ink: string; badgeText: string }> = {
+     Highest: {
+    accent: '#DC2626',     // red-600
+    soft: '#FEE2E2',       // red-100
+    ink: '#7F1D1D',        // red-900
+    badgeText: '#FFFFFF'
+  },
+
+  High: {
+    accent: '#EA580C',     // orange-600
+    soft: '#FFEDD5',       // orange-100
+    ink: '#9A3412',        // orange-900
+    badgeText: '#FFFFFF'
+  },
+
+  Medium: {
+    accent: '#CA8A04',     // yellow-600
+    soft: '#FEF9C3',       // yellow-100
+    ink: '#713F12',        // amber-900
+    badgeText: '#111827'
+  },
+
+  Low: {
+    accent: '#0891B2',     // cyan-600
+    soft: '#CFFAFE',       // cyan-100
+    ink: '#164E63',        // cyan-900
+    badgeText: '#FFFFFF'
+  },
+
+  Lowest: {
+    accent: '#4F46E5',     // indigo-600
+    soft: '#E0E7FF',       // indigo-100
+    ink: '#312E81',        // indigo-900
+    badgeText: '#FFFFFF'
+  }
   };
+
+  function priorityTheme(name?: string) {
+    if (!name) return PRIORITY_THEME.Medium;
+    return PRIORITY_THEME[name] || PRIORITY_THEME.Medium;
+  }
 
   $: statuses = [...new Set(issues.map((i) => i.fields?.status?.name).filter(Boolean) as string[])];
 
@@ -68,16 +127,24 @@
   }, {});
 
   $: normalizedQuery = searchQuery.trim().toLowerCase();
+  $: parsedScopePresets = scopePresets
+    .map((raw) => parseScopePreset(raw))
+    .filter((preset): preset is { raw: string; type: JiraScopeType; value: string } => !!preset);
+  $: selectedScopePreset = parseScopePreset(scopeValue);
   $: filtered = issues.filter((i) => {
     const statusName = i.fields?.status?.name || '';
     const assigneeName = i.fields?.assignee?.displayName || '';
     const summary = i.fields?.summary || '';
+    const projectName = i.fields?.project?.name || '';
+    const projectKey = i.fields?.project?.key || '';
     const matchStatus = activeStatus === 'all' || statusName === activeStatus;
     const matchSearch =
       !normalizedQuery ||
       i.key.toLowerCase().includes(normalizedQuery) ||
       summary.toLowerCase().includes(normalizedQuery) ||
-      assigneeName.toLowerCase().includes(normalizedQuery);
+      assigneeName.toLowerCase().includes(normalizedQuery) ||
+      projectName.toLowerCase().includes(normalizedQuery) ||
+      projectKey.toLowerCase().includes(normalizedQuery);
     return matchStatus && matchSearch;
   });
 
@@ -96,6 +163,32 @@
     return new Date(iso).toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: '2-digit' });
   }
 
+  function taskTotalSeconds(fields?: JiraIssue['fields']) {
+    if (!fields) return 0;
+    return (
+      fields.aggregatetimespent ??
+      fields.timespent ??
+      fields.timetracking?.timeSpentSeconds ??
+      fields.aggregatetimeestimate ??
+      fields.timeestimate ??
+      fields.aggregatetimeoriginalestimate ??
+      fields.timeoriginalestimate ??
+      fields.timetracking?.originalEstimateSeconds ??
+      0
+    );
+  }
+
+  function fmtHours(seconds?: number | null) {
+    const safeSeconds = Number(seconds ?? 0);
+    if (!Number.isFinite(safeSeconds) || safeSeconds <= 0) return '0h';
+    const hours = safeSeconds / 3600;
+    const rounded = Math.round(hours * 10) / 10;
+    const label = Number.isInteger(rounded)
+      ? rounded.toFixed(0)
+      : rounded.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    return `${label}h`;
+  }
+
   function statusMeta(s?: string) {
     if (!s) return { accent: '#64748b', text: '#334155' };
     return STATUS_META[s] || { accent: '#64748b', text: '#334155' };
@@ -105,6 +198,94 @@
     window.open(`https://${DOMAIN}/browse/${key}`, '_blank', 'noopener,noreferrer');
   }
 
+  function scopeTypeLabel(type: JiraScopeType) {
+    if (type === 'project') return 'Progetto';
+    if (type === 'labels') return 'Label';
+    return 'Filtro';
+  }
+
+  function handleWindowScroll() {
+    showBackToTop = window.scrollY > 260;
+  }
+
+  function scrollToTop() {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function loadScopePresets(initial = false) {
+    scopeFiltersError = '';
+    scopeFiltersLoading = true;
+    try {
+      const data = await useJiraFiltersGet();
+      scopePresets = Array.isArray(data?.filters) ? data.filters : [];
+      if (initial && scopePresets.length > 0) {
+        const first = parseScopePreset(scopePresets[0]);
+        if (first) {
+          scopeValue = first.raw;
+        }
+      }
+    } catch (e) {
+      scopeFiltersError = e instanceof Error ? e.message : 'Errore caricamento filtri Jira';
+    } finally {
+      scopeFiltersLoading = false;
+    }
+  }
+
+  async function addScopePreset() {
+    const value = String(scopeModalValue || '').trim();
+    if (!value) return;
+    scopeFiltersError = '';
+    scopeFiltersLoading = true;
+    try {
+      const data = await useJiraFiltersPost(scopeModalType, value, true);
+      scopePresets = Array.isArray(data?.filters) ? data.filters : [];
+      const preset = scopePresets.find((item) => {
+        const parsed = parseScopePreset(item);
+        return parsed?.type === scopeModalType && parsed?.value === value;
+      });
+      scopeValue = preset || scopeValue;
+      showScopeModal = false;
+      scopeModalValue = '';
+    } catch (e) {
+      scopeFiltersError = e instanceof Error ? e.message : 'Errore salvataggio filtro Jira';
+    } finally {
+      scopeFiltersLoading = false;
+    }
+  }
+
+  async function removeCurrentScopePreset() {
+    const selected = parseScopePreset(scopeValue);
+    if (!selected) return;
+    scopeFiltersError = '';
+    scopeFiltersLoading = true;
+    try {
+      const data = await useJiraFiltersPost(selected.type, selected.value, false);
+      scopePresets = Array.isArray(data?.filters) ? data.filters : [];
+      if (scopePresets.length === 0) {
+        scopeValue = '';
+      } else if (!scopePresets.includes(scopeValue)) {
+        const first = parseScopePreset(scopePresets[0]);
+        scopeValue = first ? first.raw : scopePresets[0];
+      }
+    } catch (e) {
+      scopeFiltersError = e instanceof Error ? e.message : 'Errore rimozione filtro Jira';
+    } finally {
+      scopeFiltersLoading = false;
+    }
+  }
+
+  function openScopeModal() {
+    if (scopeFiltersLoading) return;
+    scopeModalType = 'filter';
+    scopeModalValue = '';
+    showScopeModal = true;
+  }
+
+  function closeScopeModal() {
+    if (scopeFiltersLoading) return;
+    showScopeModal = false;
+  }
+
   async function fetchTasks() {
     error = '';
     loading = true;
@@ -112,7 +293,6 @@
 
     try {
       const data = await useJiraSearch({
-        scopeType,
         scopeValue,
         assigneeFilter,
         maxResults
@@ -133,11 +313,15 @@
     }
   }
 
-  onMount(() => {
+  onMount(async () => {
+    await loadScopePresets(true);
     fetchTasks();
+    handleWindowScroll();
   });
 
 </script>
+
+<svelte:window on:scroll={handleWindowScroll} />
 
 <main class="page-shell">
   <section class="board">
@@ -145,12 +329,12 @@
     <div class="header-left">
       <span class="logo-mark">J</span>
       <span class="logo-text">Jira Board</span>
-      <code class="project-badge">{scopeType === 'project' ? `PRJ:${scopeValue}` : `FLT:${scopeValue}`}</code>
+      <code class="project-badge">{scopeValue || 'SCOPE N/D'}</code>
     </div>
     <div class="header-right">
       <button class="btn-primary" on:click={fetchTasks} disabled={loading}>
         {#if loading}<span class="spinner"></span>{/if}
-        {loading ? 'Caricamento...' : 'Carica task'}
+        {loading ? 'Caricamento...' : 'Scarica task'}
       </button>
     </div>
   </div>
@@ -160,19 +344,35 @@
   {/if}
 
   <div class="searchbar">
-    <select class="search-select" bind:value={scopeType}>
-      <option value="project">Progetto</option>
-      <option value="filter">Filtro Jira</option>
-    </select>
-
-    <div class="search-input-wrap">
-      <span class="search-icon">#</span>
-      <input
-        class="search-input"
-        bind:value={scopeValue}
-        placeholder={scopeType === 'project' ? 'Project key (es. ENG)' : 'Filter ID o nome filtro'}
-        type="text"
-      />
+    <div class="scope-value-wrap">
+      <div class="search-input-wrap">
+        <span class="search-icon">#</span>
+        <select class="search-input scope-dropdown" bind:value={scopeValue}>
+          {#if parsedScopePresets.length === 0}
+            <option value="">Nessun filtro disponibile</option>
+          {:else}
+            {#each parsedScopePresets as preset}
+              <option value={preset.raw}>{scopeTypeLabel(preset.type)}: {preset.value}</option>
+            {/each}
+          {/if}
+        </select>
+      </div>
+      <button
+        class="scope-add-btn"
+        on:click={openScopeModal}
+        disabled={scopeFiltersLoading}
+        title="Aggiungi filtro/progetto"
+      >
+        +
+      </button>
+      <button
+        class="scope-remove-btn"
+        on:click={removeCurrentScopePreset}
+        disabled={scopeFiltersLoading || !selectedScopePreset}
+        title="Rimuovi filtro corrente"
+      >
+        X
+      </button>
     </div>
 
     <div class="search-input-wrap">
@@ -200,6 +400,9 @@
       <option value={100}>100 risultati</option>
     </select>
   </div>
+  {#if scopeFiltersError}
+    <div class="scope-error">{scopeFiltersError}</div>
+  {/if}
 
   {#if loaded}
     <div class="board-meta">
@@ -234,10 +437,12 @@
           {@const f = issue.fields || {}}
           {@const status = f.status?.name || 'Unknown'}
           {@const priority = f.priority?.name || 'Medium'}
+          {@const totalSeconds = taskTotalSeconds(f)}
           {@const meta = statusMeta(status)}
+          {@const pmeta = priorityTheme(priority)}
           <article
             class="card"
-            style={`--card-accent: ${meta.accent}; --card-text: ${meta.text};`}
+            style={`--card-text: ${meta.text}; --priority-accent: ${pmeta.accent}; --priority-soft: ${pmeta.soft}; --priority-ink: ${pmeta.ink}; --priority-badge-text: ${pmeta.badgeText};`}
             role="button"
             tabindex="0"
             on:click={() => openIssue(issue.key)}
@@ -245,14 +450,24 @@
           >
             <div class="card-top">
               <code class="issue-key">{f.project?.name || '-'}</code>
-              <span class="priority" style={`color: ${PRIORITY_COLOR[priority] || '#888'};`} title={priority}>
-                {PRIORITY_ICON[priority] || 'o'}
+              <span class="priority" title={priority}>
+                {PRIORITY_ICON[priority] || 'o'} {priority}
               </span>
             </div>
             <p class="summary">{f.summary || '-'}</p>
+            <div class="worklog-slot">
+              <JiraWorklogCard
+                issueKey={issue.key}
+                projectCode={f.project?.key || issue.key.split('-')[0] || ''}
+                issueSummary={f.summary || ''}
+              />
+            </div>
             <div class="card-bottom">
               <span class="status-pill">{status}</span>
               <div class="meta-right">
+                <span class="task-hours" title={`Tempo totale task: ${Math.max(totalSeconds, 0)}s`}>
+                  Ore {fmtHours(totalSeconds)}
+                </span>
                 {#if f.assignee?.displayName}
                   <div class="avatar" title={f.assignee.displayName}>
                     {initials(f.assignee.displayName)}
@@ -270,39 +485,56 @@
   {/if}
   </section>
 
-  <aside class="right-rail">
-    <JiraCompletedSidebar />
-  </aside>
+
 </main>
+
+<JiraScopeModal
+  open={showScopeModal}
+  loading={scopeFiltersLoading}
+  defaultType={scopeModalType}
+  defaultValue={scopeModalValue}
+  on:close={closeScopeModal}
+  on:submit={(e) => {
+    scopeModalType = e.detail.type;
+    scopeModalValue = e.detail.value;
+    addScopePreset();
+  }}
+/>
+
+<button
+  class="mobile-back-top"
+  class:visible={showBackToTop}
+  type="button"
+  on:click={scrollToTop}
+  aria-label="Torna in cima"
+  title="Torna in cima"
+>
+  ˄
+</button>
 
 <style>
   .page-shell {
-    max-width: 1100px;
+    max-width: 100%;
     margin: 0 auto;
-    padding: 1.25rem 1rem 2.5rem;
+    padding: 1.25rem 0 2.5rem;
     color: #1f2937;
   }
 
   .board {
     min-width: 0;
+    width: 100%;
+    max-width: 1456px;
+    margin: 0 auto;
   }
-
   .right-rail {
     position: fixed;
     top: 9.5rem;
-    left: calc(50% + 560px + 1rem);
-    width: 340px;
+    left: auto;
+    right: 1rem;
+    width: 320px;
     max-height: calc(100vh - 6rem);
     overflow: auto;
     z-index: 20;
-  }
-
-  @media (max-width: 1680px) {
-    .right-rail {
-      left: auto;
-      right: 1rem;
-      width: 320px;
-    }
   }
 
   @media (max-width: 1400px) {
@@ -504,6 +736,62 @@
     border-color: #fb923c;
     box-shadow: 0 0 0 2px rgba(251, 146, 60, 0.18);
   }
+  .scope-dropdown {
+    appearance: none;
+    cursor: pointer;
+    padding-right: 30px;
+  }
+  .scope-value-wrap {
+    flex: 1.2;
+    min-width: 300px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .scope-add-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #0f172a;
+    font-size: 18px;
+    line-height: 1;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .scope-add-btn:hover {
+    border-color: #94a3b8;
+    background: #f8fafc;
+  }
+  .scope-remove-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    border: 1px solid #fecaca;
+    background: #fff;
+    color: #b91c1c;
+    font-size: 14px;
+    line-height: 1;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .scope-remove-btn:hover {
+    border-color: #fca5a5;
+    background: #fef2f2;
+  }
+  .scope-add-btn:disabled,
+  .scope-remove-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .scope-error {
+    margin-top: -2px;
+    margin-bottom: 8px;
+    font-size: 11px;
+    color: #b91c1c;
+    font-family: var(--font-mono);
+  }
 
   .board-meta {
     display: flex;
@@ -554,16 +842,16 @@
 
   .cards {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
   }
 
   .card {
     background: #fff;
     border: 1px solid #e2e8f0;
-    border-left: 3px solid var(--card-accent);
+    border-left: 4px solid var(--priority-accent, #d1a900);
     border-radius: 12px;
-    padding: 0.95rem;
+    padding: 1.1rem;
     cursor: pointer;
     transition: transform 0.15s ease, box-shadow 0.15s ease;
     box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
@@ -578,13 +866,17 @@
     justify-content: space-between;
     align-items: center;
     margin-bottom: 8px;
+    background: var(--priority-soft, #fbf4d7);
+    border: 1px solid var(--priority-accent, #d1a900);
+    border-radius: 9px;
+    padding: 6px 8px;
   }
   .issue-key {
     font-family: var(--font-mono);
     font-size: 11px;
-    color: var(--card-text, #334155);
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
+    color: var(--priority-ink, #334155);
+    background: #ffffff;
+    border: 1px solid var(--priority-accent, #d1a900);
     padding: 2px 6px;
     border-radius: 6px;
   }
@@ -592,6 +884,13 @@
     font-family: var(--font-mono);
     font-size: 10px;
     font-weight: 700;
+    color: var(--priority-badge-text, #ffffff);
+    background: var(--priority-accent, #d1a900);
+    border: 1px solid var(--priority-accent, #d1a900);
+    padding: 2px 8px;
+    border-radius: 999px;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
   }
   .summary {
     font-size: 13px;
@@ -609,6 +908,9 @@
     justify-content: space-between;
     gap: 6px;
   }
+  .worklog-slot {
+    margin: 0 0 0.55rem;
+  }
   .status-pill {
     font-size: 10px;
     font-family: var(--font-mono);
@@ -623,6 +925,16 @@
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+  .task-hours {
+    font-size: 10px;
+    font-family: var(--font-mono);
+    color: #0f172a;
+    background: #fff7ed;
+    border: 1px solid #fdba74;
+    border-radius: 999px;
+    padding: 2px 8px;
+    white-space: nowrap;
   }
   .avatar {
     width: 22px;
@@ -656,20 +968,181 @@
     background: #fff;
   }
 
+  .mobile-back-top {
+    display: none;
+  }
+
+  @media (max-width: 1024px) {
+    .page-shell {
+      padding-top: 1rem;
+    }
+    .header {
+      flex-wrap: wrap;
+    }
+    .header-right {
+      width: 100%;
+      justify-content: flex-end;
+    }
+    .search-input-wrap {
+      min-width: 220px;
+    }
+    .scope-value-wrap {
+      min-width: 260px;
+    }
+    .cards {
+      grid-template-columns: 1fr;
+    }
+    .result-info {
+      white-space: normal;
+    }
+  }
+
   @media (max-width: 700px) {
+    .page-shell {
+      padding-top: 0.75rem;
+    }
+    .header {
+      gap: 0.6rem;
+      padding: 0.75rem;
+    }
+    .header-left {
+      width: 100%;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .logo-text {
+      font-size: 0.92rem;
+    }
+    .project-badge {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .header-right {
+      width: 100%;
+      justify-content: stretch;
+    }
+    .btn-primary {
+      width: 100%;
+      justify-content: center;
+    }
+    .searchbar {
+      gap: 0.55rem;
+    }
+    .cards {
+      grid-template-columns: 1fr;
+    }
+    .scope-value-wrap {
+      min-width: 100%;
+      flex: 1;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .scope-add-btn,
+    .scope-remove-btn {
+      width: 38px;
+      height: 38px;
+    }
     .search-input-wrap {
       min-width: 100%;
     }
     .search-select {
-      flex: 1;
-      min-width: 0;
+      width: 100%;
+      min-width: 100%;
     }
     .board-meta {
       flex-direction: column;
       align-items: flex-start;
     }
-    .header {
+    .filters {
+      width: 100%;
+    }
+    .filter {
+      padding: 6px 10px;
+    }
+    .card {
+      padding: 0.9rem;
+    }
+    .card-top {
       flex-wrap: wrap;
+      row-gap: 0.35rem;
+    }
+    .issue-key {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .card-bottom {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 0.45rem;
+    }
+    .meta-right {
+      width: 100%;
+      justify-content: space-between;
+    }
+    .task-hours,
+    .status-pill,
+    .date {
+      font-size: 10px;
+    }
+    .mobile-back-top {
+      display: flex;
+      position: fixed;
+      right: 0.85rem;
+      bottom: 0.95rem;
+      width: 34px;
+      height: 34px;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid #fdba74;
+      border-radius: 999px;
+      background: #fff7ed;
+      color: #c2410c;
+      font-size: 16px;
+      font-weight: 800;
+      box-shadow: 0 8px 22px rgba(194, 65, 12, 0.18);
+      opacity: 0;
+      transform: translateY(8px);
+      pointer-events: none;
+      transition: opacity 0.18s ease, transform 0.18s ease;
+      z-index: 50;
+    }
+    .mobile-back-top.visible {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .page-shell {
+      padding-top: 0.65rem;
+    }
+    .logo-mark {
+      width: 28px;
+      height: 28px;
+      font-size: 13px;
+    }
+    .logo-text {
+      font-size: 0.84rem;
+    }
+    .project-badge {
+      font-size: 10px;
+    }
+    .search-input,
+    .search-select {
+      font-size: 12px;
+      padding-top: 8px;
+      padding-bottom: 8px;
+    }
+    .summary {
+      font-size: 12px;
+    }
+    .card {
+      border-radius: 10px;
     }
   }
 </style>

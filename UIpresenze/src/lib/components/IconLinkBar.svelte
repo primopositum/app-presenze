@@ -58,8 +58,8 @@
   });
 </script>
 
-<div class="mt-8 flex justify-center" style={`--icon-auto-color: #16a34a;`}>
-  <div class="rounded-[4%] border-[10px] border-gray-800 bg-white p-8 shadow-lg overflow-hidden">
+<div class="utility-shell" style={`--icon-auto-color: #16a34a;`}>
+  <div class="utility-card rounded-[4%] border-[10px] border-gray-800 bg-white p-8 shadow-lg overflow-hidden">
     <button type="button" class="icon-container auto-icon" on:click={() => goto('/auto')} aria-label="Vai alla pagina auto">
       <FontAwesomeIcon icon={faCar} class="text-gray-700 text-[280%]" />
     </button>
@@ -79,6 +79,19 @@
 </div>
 
 <style>
+  .utility-shell {
+    margin-top: 2rem;
+    display: flex;
+    justify-content: center;
+    padding-inline: 1rem;
+    /* Evita sovrapposizione con HourBalance fixed in basso a destra */
+    padding-bottom: 190px;
+  }
+
+  .utility-card {
+    max-width: min(100%, 760px);
+  }
+
   .icon-container {
     position: relative;
     display: inline-flex;
@@ -102,5 +115,22 @@
 
   .auto-icon:hover :global(svg) {
     color: var(--icon-auto-color);
+  }
+
+  @media (max-width: 900px) {
+    .utility-shell {
+      padding-bottom: 170px;
+    }
+
+    .utility-card {
+      border-width: 8px;
+      padding: 1rem;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .utility-shell {
+      padding-bottom: 1rem;
+    }
   }
 </style>

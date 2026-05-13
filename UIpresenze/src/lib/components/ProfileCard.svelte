@@ -3,6 +3,7 @@
   import { createEventDispatcher } from 'svelte';
   import type { UpdateAccountPayload, User } from '$lib/services/users';
   import { useCreateSignatureApi, useLatestSignatureApi } from '$lib/hooks/useSignatureApi';
+  import { getJiraTokenStatus, overwriteJiraToken } from '$lib/services/jiraCredentials';
   import ErrorCard from '$lib/components/ErrorCard.svelte';
 
   export let user: User;
@@ -64,6 +65,13 @@
   let editSaldo     = 0;
   let editIsActive  = false;
   let editTipologia = '';
+  let jiraTokenLoading = false;
+  let jiraTokenDraft = '';
+  let jiraTokenMask = '';
+  let jiraTokenError = '';
+  let jiraTokenHasToken = false;
+  let jiraTokenIsValid: boolean | null = null;
+  let lastJiraTokenLoadedForUserId: number | null = null;
   const TARGET_WIDTH_CM = 5;
   const TARGET_HEIGHT_CM = 2.5;
   const TARGET_DPI = 300;
@@ -258,21 +266,69 @@
       }
     }
 
+    const nextJiraToken = jiraTokenDraft.trim();
+    const shouldOverwriteJiraToken = isOwnProfile && nextJiraToken.length > 0;
+    const hasProfileChanges = Object.keys(payload).some((key) => key !== 'id' && key !== 'user_id');
+    if (!hasProfileChanges && !shouldOverwriteJiraToken) {
+      editing = false;
+      return;
+    }
+
     saving    = true;
     saveError = '';
 
     try {
-      if (onSave) {
-        await onSave(payload);
-      } else {
-        dispatch('save', payload);
+      if (hasProfileChanges) {
+        if (onSave) {
+          await onSave(payload);
+        } else {
+          dispatch('save', payload);
+        }
       }
+      if (shouldOverwriteJiraToken) {
+        await overwriteJiraToken(nextJiraToken);
+        await loadJiraTokenStatus();
+      }
+
       editing = false;
     } catch (e) {
       saveError = e instanceof Error ? e.message : 'Errore durante il salvataggio';
     } finally {
       saving = false;
     }
+  }
+
+  async function loadJiraTokenStatus() {
+    if (!isOwnProfile) {
+      jiraTokenLoading = false;
+      jiraTokenMask = '';
+      jiraTokenError = '';
+      jiraTokenHasToken = false;
+      jiraTokenIsValid = null;
+      return;
+    }
+
+    jiraTokenLoading = true;
+    jiraTokenError = '';
+    try {
+      const data = await getJiraTokenStatus();
+      jiraTokenHasToken = !!data.token_present;
+      jiraTokenIsValid = data.token_valid;
+      jiraTokenMask = data.token_valid ? (data.masked_token || '*****') : '';
+      jiraTokenError = data.token_present && data.token_valid === false ? (data.error || 'Token Jira non valido') : '';
+    } catch (e) {
+      jiraTokenHasToken = false;
+      jiraTokenIsValid = null;
+      jiraTokenMask = '';
+      jiraTokenError = e instanceof Error ? e.message : 'Errore verifica token Jira';
+    } finally {
+      jiraTokenLoading = false;
+    }
+  }
+
+  $: if (isOwnProfile && user?.id && lastJiraTokenLoadedForUserId !== Number(user.id)) {
+    lastJiraTokenLoadedForUserId = Number(user.id);
+    void loadJiraTokenStatus();
   }
 
   // ── 3-D tilt ─────────────────────────────────────────────────────────
@@ -304,11 +360,6 @@
       maximumFractionDigits: 2,
     }).format(Number(n) || 0)} h`;
 
-  function openMail() {
-    const email = user?.email?.trim();
-    if (!email || editing) return;
-    window.location.href = `mailto:${email}`;
-  }
 </script>
 
 <input
@@ -483,15 +534,7 @@
             {/if}
           </div>
 
-          <div class="mt-0.5 mb-4">
-            {#if editing}
-              <input bind:value={editEmail} type="email" class="edit-input w-full text-[0.72rem]" placeholder="Email" />
-            {:else}
-              <p class="text-[0.72rem] text-zinc-400 font-medium tracking-wide truncate">{user.email}</p>
-            {/if}
-          </div>
-
-          <div class="h-px bg-gradient-to-r {isSuperProfile ? 'from-fuchsia-200 via-fuchsia-100' : 'from-orange-200 via-orange-100'} to-transparent mb-4"></div>
+          <div class="h-px bg-gradient-to-r {isSuperProfile ? 'from-fuchsia-200 via-fuchsia-100' : 'from-orange-200 via-orange-100'} to-transparent mt-3 mb-4"></div>
 
           <!-- ── INFO ROWS ─────────────────────────────────── -->
 
@@ -532,28 +575,45 @@
                 </span>
               {/if}
             </div>
-
-            <!-- email row -->
-            <div
-              class="flex items-center justify-between px-3.5 py-3 rounded-xl bg-zinc-50 border border-zinc-100 transition-all duration-200 {editing ? '' : 'hover:bg-zinc-100 hover:border-zinc-200 cursor-pointer'}"
-              role="button"
-              tabindex="0"
-              on:click={openMail}
-              on:keydown={(e) => !editing && (e.key === 'Enter' || e.key === ' ') && openMail()}
-            >
+            <!-- jira token row -->
+            <div class="flex items-center justify-between px-3.5 py-3 rounded-xl bg-zinc-50 border border-zinc-100">
               <div class="flex items-center gap-2.5">
                 <div class="w-7 h-7 rounded-lg bg-zinc-100 flex items-center justify-center shrink-0">
-                  <svg viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5 text-zinc-400">
-                    <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/>
-                    <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/>
+                  <svg viewBox="0 0 20 20" fill="none" class="w-3.5 h-3.5 text-zinc-400">
+                    <rect x="4.5" y="9" width="11" height="7.5" rx="1.6" stroke="currentColor" stroke-width="1.6" />
+                    <path d="M7.5 9V7.6a2.5 2.5 0 015 0V9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
                   </svg>
                 </div>
-                <span class="text-xs text-zinc-500 font-semibold tracking-wide">Email</span>
+                <span class="text-xs text-zinc-500 font-semibold tracking-wide">Token Jira</span>
               </div>
-              <span class="text-xs font-semibold text-zinc-700 truncate max-w-[150px]">
-                {editing ? editEmail || '—' : user.email}
-              </span>
+              {#if isOwnProfile && editing}
+                <div class="flex items-center gap-1.5">
+                  <input
+                    bind:value={jiraTokenDraft}
+                    type="password"
+                    class="edit-input w-36 text-right font-mono text-xs"
+                    placeholder="Sovrascrivi token"
+                    autocomplete="new-password"
+                    disabled={saving}
+                  />
+                </div>
+              {:else}
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-semibold text-zinc-700 truncate max-w-[110px]">
+                    {#if jiraTokenLoading}
+                      Verifica...
+                    {:else if jiraTokenHasToken && jiraTokenIsValid === true}
+                      {jiraTokenMask || '*****'}
+                    {:else}
+                      {' '}
+                    {/if}
+                  </span>
+                </div>
+              {/if}
             </div>
+            {#if !editing && isOwnProfile && jiraTokenHasToken && jiraTokenIsValid === false && jiraTokenError}
+              <p class="text-[0.72rem] text-red-500 font-medium px-1">{jiraTokenError}</p>
+            {/if}
 
             <!-- contratto attivo toggle — solo admin in edit -->
             {#if editing && isAdmin}
