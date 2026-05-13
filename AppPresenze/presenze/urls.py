@@ -77,11 +77,18 @@ api_urlpatterns = [
     # Utilities Bar (read-only)
     # -------------------------------------------------------------------------
     path("utilitiesbar/", views.UtilitiesBarListView.as_view(), name="utilitiesbar-list"),
+    path("jira/credentials/", views.JiraCredentialsView.as_view(), name="jira-credentials"),
+    path("jira/credentials/token/", views.JiraCredentialsTokenView.as_view(), name="jira-credentials-token"),
+    path("jira/filters/", views.UpdateJiraFiltersView.as_view(), name="updateJiraFilters"),
     path("jira/search/", views.JiraProxyView.as_view(), name="jira-search"),
     path("jira/timesheet/", views.JiraWorklogsTodayView.as_view(), name="jira-timesheet"),
+    path("jira/time/<str:issue_key>/", views.JiraIssueTimeView.as_view(), name="jira-issue-time"),
+    path("jira/time/<str:issue_key>/log/", views.JiraIssueWorklogView.as_view(), name="jira-worklog-create"),
+    path("jira/time/<str:issue_key>/log/<str:worklog_id>/", views.JiraIssueWorklogView.as_view(), name="jira-worklog-detail"),
 ]
 
 
 urlpatterns = [
     path("api/", include(api_urlpatterns)),
 ]
+

@@ -1,13 +1,52 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.contrib.auth import get_user_model
-from .models import TimeEntry, Saldo, Contratto, Automobile, Trasferta, UtilitiesBar
+from django import forms
+from .models import TimeEntry, Saldo, Contratto, Automobile, Trasferta, UtilitiesBar, JiraCredentials, JiraGlobals
 
 admin.site.register(TimeEntry)
 admin.site.register(Saldo)
 admin.site.register(Automobile)
 admin.site.register(Trasferta)
 admin.site.register(UtilitiesBar)
+
+
+class JiraCredentialsAdminForm(forms.ModelForm):
+    jira_token = forms.CharField(
+        required=False,
+        widget=forms.PasswordInput(render_value=False),
+        help_text="Inserisci un nuovo token per aggiornarlo. Lascia vuoto per non modificarlo.",
+        label="Jira token",
+    )
+
+    class Meta:
+        model = JiraCredentials
+        fields = ("utente", "jira_email", "jira_token")
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        token = (self.cleaned_data.get("jira_token") or "").strip()
+        if token:
+            # Usa il setter del model: cifra automaticamente prima del salvataggio.
+            instance.jira_token = token
+        if commit:
+            instance.save()
+        return instance
+
+
+@admin.register(JiraCredentials)
+class JiraCredentialsAdmin(admin.ModelAdmin):
+    form = JiraCredentialsAdminForm
+    list_display = ("id", "utente", "jira_email")
+    list_display_links = ("id", "utente")
+    search_fields = ("utente__email", "jira_email")
+
+
+@admin.register(JiraGlobals)
+class JiraGlobalsAdmin(admin.ModelAdmin):
+    list_display = ("id", "domain", "filters")
+    list_display_links = ("id", "domain")
+    search_fields = ("domain",)
 
 
 User = get_user_model()
@@ -68,4 +107,5 @@ class ContrattoAdmin(admin.ModelAdmin):
         return ", ".join(str(int(o)) for o in obj.ore_sett)
 
     ore_sett_display.short_description = "Ore settimanali"
+
 

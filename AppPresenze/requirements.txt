@@ -11,3 +11,4 @@ gunicorn
 whitenoise
 djangorestframework-simplejwt
 requests
+cryptography

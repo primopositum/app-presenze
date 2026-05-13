@@ -3,6 +3,8 @@ from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, Permis
 from django.utils import timezone
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
+from django.conf import settings
+from cryptography.fernet import Fernet
 import uuid
 
 
@@ -487,4 +489,56 @@ class SignatureEvent(models.Model):
             models.Index(fields=["user", "-created_at"], name="SignatureEv_user_id_4c4f1c_idx"),
             models.Index(fields=["event_type", "-created_at"], name="SignatureEv_event_t_c75314_idx"),
         ]
+
+# ---------------------------
+# JiraGlobals / JiraCredentials
+# ---------------------------
+
+class JiraGlobals(models.Model):
+    domain = models.CharField(max_length=255)
+    filters = ArrayField(
+        base_field=models.CharField(max_length=255),
+        default=list,
+        blank=True,
+        help_text="Filtri globali Jira (array di stringhe)",
+    )
+
+    class Meta:
+        db_table = "JiraGlobals"
+
+    def __str__(self):
+        return f"JiraGlobals ({self.domain})"
+
+
+def _get_fernet():
+    return Fernet(settings.ENCRYPTION_KEY)
+
+
+def encrypt_token(token: str) -> str:
+    return _get_fernet().encrypt(token.encode()).decode()
+
+
+def decrypt_token(token_enc: str) -> str:
+    return _get_fernet().decrypt(token_enc.encode()).decode()
+
+
+class JiraCredentials(models.Model):
+    utente       = models.OneToOneField(
+                       Utente,
+                       on_delete=models.CASCADE,
+                       related_name='jira_credentials'
+                   )
+    jira_email   = models.CharField(max_length=255)
+    _jira_token  = models.TextField(db_column='jira_token')
+
+    @property
+    def jira_token(self):
+        return decrypt_token(self._jira_token)
+
+    @jira_token.setter
+    def jira_token(self, value):
+        self._jira_token = encrypt_token(value)
+
+    def __str__(self):
+        return f"Jira credentials for {self.utente.email}"
 
