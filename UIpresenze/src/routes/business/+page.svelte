@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import {
     useJiraSearch,
     useJiraFiltersGet,
@@ -6,12 +7,10 @@
     parseScopePreset,
     type JiraScopeType
   } from '$lib/hooks/useJira';
-  import JiraScopeModal from '$lib/components/JiraScopeModal.svelte';
-  import JiraCompletedSidebar from '$lib/components/JiraCompletedSidebar.svelte';
-  import JiraWorklogCard from '$lib/components/JiraWorklogCard.svelte';
+  import JiraScopeModal from '$lib/components/Jira/JiraScopeModal.svelte';
+  import JiraCard from '$lib/components/Jira/JiraCard.svelte';
+  import { auth } from '$lib/stores/auth';
   import { onMount } from 'svelte';
-
-  const DOMAIN = (import.meta.env.PUBLIC_JIRA_DOMAIN ?? 'primopositum.atlassian.net').trim();
 
   let scopeValue = '';
   let scopePresets: string[] = [];
@@ -53,11 +52,21 @@
   let loaded = false;
   let lastUpdate = '';
   let showBackToTop = false;
+  let viewMode: 'list' | 'status' = 'list';
+  let persistenceReady = false;
+
+  const BOARD_STATE_STORAGE_KEY = 'jira_business_board_state_v1';
+
+  type BoardState = {
+    utente: string;
+    filtroInUso: string;
+    view: 'elenco' | 'stato';
+  };
 
   // Searchbar state
   let searchQuery = '';
   let assigneeFilter = '';
-  let maxResults = 50;
+  let maxResults = 100;
 
   const STATUS_META: Record<string, { accent: string; text: string }> = {
     'To Do': { accent: '#4f46e5', text: '#a5b4fc' },
@@ -66,56 +75,6 @@
     Done: { accent: '#16a34a', text: '#86efac' },
     Blocked: { accent: '#dc2626', text: '#fca5a5' }
   };
-
-  const PRIORITY_ICON: Record<string, string> = {
-    Highest: '^^',
-    High: '^',
-    Medium: 'o',
-    Low: 'v',
-    Lowest: 'vv'
-  };
-
-  const PRIORITY_THEME: Record<string, { accent: string; soft: string; ink: string; badgeText: string }> = {
-     Highest: {
-    accent: '#DC2626',     // red-600
-    soft: '#FEE2E2',       // red-100
-    ink: '#7F1D1D',        // red-900
-    badgeText: '#FFFFFF'
-  },
-
-  High: {
-    accent: '#EA580C',     // orange-600
-    soft: '#FFEDD5',       // orange-100
-    ink: '#9A3412',        // orange-900
-    badgeText: '#FFFFFF'
-  },
-
-  Medium: {
-    accent: '#CA8A04',     // yellow-600
-    soft: '#FEF9C3',       // yellow-100
-    ink: '#713F12',        // amber-900
-    badgeText: '#111827'
-  },
-
-  Low: {
-    accent: '#0891B2',     // cyan-600
-    soft: '#CFFAFE',       // cyan-100
-    ink: '#164E63',        // cyan-900
-    badgeText: '#FFFFFF'
-  },
-
-  Lowest: {
-    accent: '#4F46E5',     // indigo-600
-    soft: '#E0E7FF',       // indigo-100
-    ink: '#312E81',        // indigo-900
-    badgeText: '#FFFFFF'
-  }
-  };
-
-  function priorityTheme(name?: string) {
-    if (!name) return PRIORITY_THEME.Medium;
-    return PRIORITY_THEME[name] || PRIORITY_THEME.Medium;
-  }
 
   $: statuses = [...new Set(issues.map((i) => i.fields?.status?.name).filter(Boolean) as string[])];
 
@@ -147,55 +106,24 @@
       projectKey.toLowerCase().includes(normalizedQuery);
     return matchStatus && matchSearch;
   });
-
-  function initials(name?: string) {
-    if (!name) return '?';
-    return name
-      .split(' ')
-      .map((w) => w[0])
-      .join('')
-      .substring(0, 2)
-      .toUpperCase();
-  }
-
-  function fmtDate(iso?: string) {
-    if (!iso) return '';
-    return new Date(iso).toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: '2-digit' });
-  }
-
-  function taskTotalSeconds(fields?: JiraIssue['fields']) {
-    if (!fields) return 0;
-    return (
-      fields.aggregatetimespent ??
-      fields.timespent ??
-      fields.timetracking?.timeSpentSeconds ??
-      fields.aggregatetimeestimate ??
-      fields.timeestimate ??
-      fields.aggregatetimeoriginalestimate ??
-      fields.timeoriginalestimate ??
-      fields.timetracking?.originalEstimateSeconds ??
-      0
-    );
-  }
-
-  function fmtHours(seconds?: number | null) {
-    const safeSeconds = Number(seconds ?? 0);
-    if (!Number.isFinite(safeSeconds) || safeSeconds <= 0) return '0h';
-    const hours = safeSeconds / 3600;
-    const rounded = Math.round(hours * 10) / 10;
-    const label = Number.isInteger(rounded)
-      ? rounded.toFixed(0)
-      : rounded.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-    return `${label}h`;
+  $: groupedByStatus = [...new Set(filtered.map((i) => i.fields?.status?.name || 'Senza stato'))].map(
+    (status) => ({
+      status,
+      items: filtered.filter((issue) => (issue.fields?.status?.name || 'Senza stato') === status)
+    })
+  );
+  $: statusColumns = Math.min(Math.max(groupedByStatus.length, 1), 5);
+  $: if (persistenceReady) {
+    persistBoardState({
+      utente: String($auth.user?.email || ''),
+      filtroInUso: selectedScopePreset?.value || scopeValue || '',
+      view: viewMode === 'status' ? 'stato' : 'elenco'
+    });
   }
 
   function statusMeta(s?: string) {
     if (!s) return { accent: '#64748b', text: '#334155' };
     return STATUS_META[s] || { accent: '#64748b', text: '#334155' };
-  }
-
-  function openIssue(key: string) {
-    window.open(`https://${DOMAIN}/browse/${key}`, '_blank', 'noopener,noreferrer');
   }
 
   function scopeTypeLabel(type: JiraScopeType) {
@@ -212,16 +140,52 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  async function loadScopePresets(initial = false) {
+  function readBoardState(): BoardState | null {
+    try {
+      const raw = localStorage.getItem(BOARD_STATE_STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as Partial<BoardState>;
+      return {
+        utente: String(parsed.utente || ''),
+        filtroInUso: String(parsed.filtroInUso || ''),
+        view: parsed.view === 'stato' ? 'stato' : 'elenco'
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function persistBoardState(state: BoardState) {
+    localStorage.setItem(BOARD_STATE_STORAGE_KEY, JSON.stringify(state));
+  }
+
+  async function loadScopePresets(initial = false, preferredScopeValue = '') {
     scopeFiltersError = '';
     scopeFiltersLoading = true;
     try {
       const data = await useJiraFiltersGet();
       scopePresets = Array.isArray(data?.filters) ? data.filters : [];
       if (initial && scopePresets.length > 0) {
-        const first = parseScopePreset(scopePresets[0]);
-        if (first) {
-          scopeValue = first.raw;
+        if (preferredScopeValue && scopePresets.includes(preferredScopeValue)) {
+          scopeValue = preferredScopeValue;
+        } else if (preferredScopeValue) {
+          const byValue = scopePresets.find((item) => {
+            const parsed = parseScopePreset(item);
+            return parsed?.value === preferredScopeValue;
+          });
+          if (byValue) {
+            scopeValue = byValue;
+          } else {
+            const first = parseScopePreset(scopePresets[0]);
+            if (first) {
+              scopeValue = first.raw;
+            }
+          }
+        } else {
+          const first = parseScopePreset(scopePresets[0]);
+          if (first) {
+            scopeValue = first.raw;
+          }
         }
       }
     } catch (e) {
@@ -314,8 +278,14 @@
   }
 
   onMount(async () => {
-    await loadScopePresets(true);
-    fetchTasks();
+    const saved = readBoardState();
+    if (saved?.view === 'stato') {
+      viewMode = 'status';
+    }
+
+    await loadScopePresets(true, saved?.filtroInUso || '');
+    await fetchTasks();
+    persistenceReady = true;
     handleWindowScroll();
   });
 
@@ -325,13 +295,14 @@
 
 <main class="page-shell">
   <section class="board">
+  <h1 class="page-title">Jira Board</h1>
   <div class="header">
     <div class="header-left">
       <span class="logo-mark">J</span>
-      <span class="logo-text">Jira Board</span>
       <code class="project-badge">{scopeValue || 'SCOPE N/D'}</code>
     </div>
     <div class="header-right">
+      <button class="btn-ghost" type="button" on:click={() => goto('/JiraHistory')}>vai allo storico</button>
       <button class="btn-primary" on:click={fetchTasks} disabled={loading}>
         {#if loading}<span class="spinner"></span>{/if}
         {loading ? 'Caricamento...' : 'Scarica task'}
@@ -369,7 +340,7 @@
         class="scope-remove-btn"
         on:click={removeCurrentScopePreset}
         disabled={scopeFiltersLoading || !selectedScopePreset}
-        title="Rimuovi filtro corrente"
+        title="Elimina filtro corrente"
       >
         X
       </button>
@@ -399,6 +370,16 @@
       <option value={50}>50 risultati</option>
       <option value={100}>100 risultati</option>
     </select>
+
+    <label class="view-toggle" title="Cambia vista issue">
+      <span>Elenco</span>
+      <input
+        type="checkbox"
+        checked={viewMode === 'status'}
+        on:change={(e) => (viewMode = e.currentTarget.checked ? 'status' : 'list')}
+      />
+      <span>Stati</span>
+    </label>
   </div>
   {#if scopeFiltersError}
     <div class="scope-error">{scopeFiltersError}</div>
@@ -406,23 +387,25 @@
 
   {#if loaded}
     <div class="board-meta">
-      <div class="filters">
-        <button class="filter" class:active={activeStatus === 'all'} on:click={() => (activeStatus = 'all')}>
-          tutte <span class="count">{issues.length}</span>
-        </button>
-        {#each statuses as s}
-          {@const meta = statusMeta(s)}
-          <button
-            class="filter"
-            class:active={activeStatus === s}
-            style={`--accent: ${meta.accent}; --accent-bg: ${meta.accent}22;`}
-            on:click={() => (activeStatus = s)}
-          >
-            {s}
-            <span class="count">{statusCounts[s] || 0}</span>
+      {#if viewMode === 'list'}
+        <div class="filters">
+          <button class="filter" class:active={activeStatus === 'all'} on:click={() => (activeStatus = 'all')}>
+            tutte <span class="count">{issues.length}</span>
           </button>
-        {/each}
-      </div>
+          {#each statuses as s}
+            {@const meta = statusMeta(s)}
+            <button
+              class="filter"
+              class:active={activeStatus === s}
+              style={`--accent: ${meta.accent}; --accent-bg: ${meta.accent}22;`}
+              on:click={() => (activeStatus = s)}
+            >
+              {s}
+              <span class="count">{statusCounts[s] || 0}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
       <span class="result-info">
         {filtered.length} di {issues.length} issue
         {#if lastUpdate} | {lastUpdate}{/if}
@@ -432,53 +415,33 @@
     {#if filtered.length === 0}
       <div class="empty">Nessuna task trovata</div>
     {:else}
-      <div class="cards">
-        {#each filtered as issue (issue.key)}
-          {@const f = issue.fields || {}}
-          {@const status = f.status?.name || 'Unknown'}
-          {@const priority = f.priority?.name || 'Medium'}
-          {@const totalSeconds = taskTotalSeconds(f)}
-          {@const meta = statusMeta(status)}
-          {@const pmeta = priorityTheme(priority)}
-          <article
-            class="card"
-            style={`--card-text: ${meta.text}; --priority-accent: ${pmeta.accent}; --priority-soft: ${pmeta.soft}; --priority-ink: ${pmeta.ink}; --priority-badge-text: ${pmeta.badgeText};`}
-            role="button"
-            tabindex="0"
-            on:click={() => openIssue(issue.key)}
-            on:keydown={(e) => (e.key === 'Enter' || e.key === ' ' ? openIssue(issue.key) : undefined)}
-          >
-            <div class="card-top">
-              <code class="issue-key">{f.project?.name || '-'}</code>
-              <span class="priority" title={priority}>
-                {PRIORITY_ICON[priority] || 'o'} {priority}
-              </span>
-            </div>
-            <p class="summary">{f.summary || '-'}</p>
-            <div class="worklog-slot">
-              <JiraWorklogCard
-                issueKey={issue.key}
-                projectCode={f.project?.key || issue.key.split('-')[0] || ''}
-                issueSummary={f.summary || ''}
-              />
-            </div>
-            <div class="card-bottom">
-              <span class="status-pill">{status}</span>
-              <div class="meta-right">
-                <span class="task-hours" title={`Tempo totale task: ${Math.max(totalSeconds, 0)}s`}>
-                  Ore {fmtHours(totalSeconds)}
-                </span>
-                {#if f.assignee?.displayName}
-                  <div class="avatar" title={f.assignee.displayName}>
-                    {initials(f.assignee.displayName)}
-                  </div>
-                {/if}
-                <span class="date">{fmtDate(f.created)}</span>
+      {#if viewMode === 'list'}
+        <div class="cards">
+          {#each filtered as issue (issue.key)}
+            <JiraCard issue={issue} />
+          {/each}
+        </div>
+      {:else}
+        <div class="status-groups" style={`--status-cols:${statusColumns};`}>
+          {#each groupedByStatus as group (group.status)}
+            {@const meta = statusMeta(group.status)}
+            <section
+              class="status-group"
+              style={`--status-accent:${meta.accent}; --status-soft:${meta.accent}1f; --status-text:${meta.text};`}
+            >
+              <header class="status-group-head">
+                <h3>{group.status}</h3>
+                <span class="count">{group.items.length}</span>
+              </header>
+              <div class="status-group-cards">
+                {#each group.items as issue (issue.key)}
+                  <JiraCard issue={issue} />
+                {/each}
               </div>
-            </div>
-          </article>
-        {/each}
-      </div>
+            </section>
+          {/each}
+        </div>
+      {/if}
     {/if}
   {:else if !loading}
     <div class="empty">Premi "Carica task" per iniziare</div>
@@ -525,6 +488,15 @@
     width: 100%;
     max-width: 1456px;
     margin: 0 auto;
+  }
+  .page-title {
+    margin: 0 0 0.7rem;
+    font-size: 2.21rem;
+    line-height: 1.05;
+    color: #0f172a;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    font-family: var(--font-infinity);
   }
   .right-rail {
     position: fixed;
@@ -736,6 +708,45 @@
     border-color: #fb923c;
     box-shadow: 0 0 0 2px rgba(251, 146, 60, 0.18);
   }
+  .view-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 2px;
+    color: #334155;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    white-space: nowrap;
+  }
+  .view-toggle input {
+    appearance: none;
+    width: 42px;
+    height: 22px;
+    border-radius: 999px;
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    position: relative;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .view-toggle input::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    background: #f97316;
+    transition: transform 0.15s ease;
+  }
+  .view-toggle input:checked {
+    border-color: #fb923c;
+    background: #fff7ed;
+  }
+  .view-toggle input:checked::after {
+    transform: translateX(20px);
+  }
   .scope-dropdown {
     appearance: none;
     cursor: pointer;
@@ -844,6 +855,72 @@
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 14px;
+  }
+  .status-groups {
+    display: grid;
+    grid-template-columns: repeat(var(--status-cols, 1), minmax(0, 1fr));
+    gap: 10px;
+    align-items: start;
+  }
+  .status-group {
+    border: 1px solid #e2e8f0;
+    border-top: 3px solid var(--status-accent, #64748b);
+    border-radius: 12px;
+    background: linear-gradient(180deg, var(--status-soft, #f8fafc), #fff 38%);
+    padding: 10px;
+    min-width: 0;
+  }
+  .status-group-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px dashed #cbd5e1;
+  }
+  .status-group-head h3 {
+    margin: 0;
+    color: var(--status-text, #334155);
+    font-size: 12px;
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .status-group-cards {
+    display: grid;
+    gap: 8px;
+  }
+  .status-group-cards :global(.card) {
+    padding: 0.72rem;
+    border-radius: 10px;
+  }
+  .cards :global(.card:hover),
+  .status-group-cards :global(.card:hover) {
+    background: #e0f2fe;
+  }
+  .status-group-cards :global(.card-top) {
+    margin-bottom: 6px;
+    padding: 4px 6px;
+  }
+  .status-group-cards :global(.summary) {
+    font-size: 12px;
+    line-height: 1.3;
+    margin-bottom: 8px;
+    -webkit-line-clamp: 1;
+  }
+  .status-group-cards :global(.worklog-slot) {
+    margin: 0 0 0.35rem;
+  }
+  .status-group-cards :global(.status-pill),
+  .status-group-cards :global(.task-hours),
+  .status-group-cards :global(.date) {
+    font-size: 9px;
+  }
+  .status-group-cards :global(.avatar) {
+    width: 18px;
+    height: 18px;
+    font-size: 8px;
   }
 
   .card {
@@ -992,6 +1069,9 @@
     .cards {
       grid-template-columns: 1fr;
     }
+    .status-groups {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
     .result-info {
       white-space: normal;
     }
@@ -1013,6 +1093,10 @@
     .logo-text {
       font-size: 0.92rem;
     }
+    .page-title {
+      font-size: 1.76rem;
+      margin-bottom: 0.55rem;
+    }
     .project-badge {
       max-width: 100%;
       overflow: hidden;
@@ -1033,6 +1117,9 @@
     .cards {
       grid-template-columns: 1fr;
     }
+    .status-groups {
+      grid-template-columns: 1fr;
+    }
     .scope-value-wrap {
       min-width: 100%;
       flex: 1;
@@ -1050,6 +1137,10 @@
     .search-select {
       width: 100%;
       min-width: 100%;
+    }
+    .view-toggle {
+      width: 100%;
+      justify-content: flex-end;
     }
     .board-meta {
       flex-direction: column;
@@ -1128,6 +1219,9 @@
     }
     .logo-text {
       font-size: 0.84rem;
+    }
+    .page-title {
+      font-size: 1.56rem;
     }
     .project-badge {
       font-size: 10px;

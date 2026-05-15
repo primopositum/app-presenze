@@ -153,7 +153,7 @@ export function jiraSearch(params: JiraSearchParams) {
   return request('/jira/search/', {
     jql: params.jql ?? '',
     fields: params.fields ?? 'summary,status,priority,assignee,created,updated,issuetype,project',
-    maxResults: String(params.maxResults ?? 20),
+    maxResults: params.maxResults !== undefined ? String(params.maxResults) : '',
     startAt: String(params.startAt ?? 0),
   });
 }

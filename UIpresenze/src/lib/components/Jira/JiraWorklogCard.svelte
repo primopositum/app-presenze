@@ -345,9 +345,9 @@
                     class:selected={selectedIssueKey === issue.key}
                     on:click={() => pickIssue(issue.key)}
                   >
-                    <strong>{issue.key}</strong>
-                    <span>{issueProjectLabel(issue)}</span>
-                    <small>{issue.fields?.summary || '-'}</small>
+                    <small>{issue.key}</small>
+                    <strong>{issueProjectLabel(issue)}</strong>
+                    <span>{issue.fields?.summary || '-'}</span>
                   </button>
                 {/each}
               {/if}

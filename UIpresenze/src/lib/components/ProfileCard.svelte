@@ -41,6 +41,8 @@
   $: activeContract = user.contratti?.find((c) => c.is_active);
   $: roleLabel      = activeContract?.tipologia ?? 'Dipendente';
   $: isSuperProfile = user?.is_superuser === true;
+  $: contractOreSett = activeContract?.ore_sett ?? user.contratti?.[0]?.ore_sett ?? [];
+  $: contractWeeklyHours = (contractOreSett ?? []).reduce((sum, value) => sum + toHours(value), 0);
 
   // ── edit state ────────────────────────────────────────────────────────
 
@@ -360,6 +362,18 @@
       maximumFractionDigits: 2,
     }).format(Number(n) || 0)} h`;
 
+  const fmtHours = (n: unknown) =>
+    `${new Intl.NumberFormat('it-IT', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(Number(n) || 0)} h`;
+
+  function toHours(value: unknown): number {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    const parsed = Number(String(value ?? '').replace(',', '.'));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
 </script>
 
 <input
@@ -574,6 +588,20 @@
                   {fmtSaldo(editing ? editSaldo : user.saldo?.valore_saldo_validato)}
                 </span>
               {/if}
+            </div>
+
+            <div class="flex items-center justify-between px-3.5 py-3 rounded-xl bg-zinc-50 border border-zinc-100">
+              <div class="flex items-center gap-2.5">
+                <div class="w-7 h-7 rounded-lg bg-zinc-100 flex items-center justify-center shrink-0">
+                  <svg viewBox="0 0 20 20" fill="none" class="w-3.5 h-3.5 text-zinc-400">
+                    <path d="M4 5.8h12M4 10h12M4 14.2h12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                  </svg>
+                </div>
+                <span class="text-xs text-zinc-500 font-semibold tracking-wide">Contratto</span>
+              </div>
+              <span class="text-sm font-black text-zinc-700 font-mono tabular-nums">
+                {fmtHours(contractWeeklyHours)}
+              </span>
             </div>
             <!-- jira token row -->
             <div class="flex items-center justify-between px-3.5 py-3 rounded-xl bg-zinc-50 border border-zinc-100">

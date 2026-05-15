@@ -33,7 +33,7 @@
 	import PreSetWeek from '$lib/components/PreSetWeek.svelte';
   import TimeEntryFormProvider from '$lib/components/ctx/TimeEntryFormProvider.svelte';
   import ErrorCard from '$lib/components/ErrorCard.svelte';
-  import Useractivity from '$lib/components/Useractivity.svelte';
+  import Useractivity from '$lib/components/Jira/JiraUserActivity.svelte';
   import { hourBalanceExtra } from '$lib/stores/hourBalanceExtra';
   import { useOneUserApi } from '$lib/hooks/useUserApi.js';
   let loading = false;
@@ -347,7 +347,6 @@ export const loadData = async () => {
     const hours = Number(entry.ore_tot) || 0;
     if (entry.type === 1) return acc + hours;
     if (entry.type === 3) return acc + hours;
-    if (entry.type === 4) return acc - hours;
     return acc;
   }, 0);
 

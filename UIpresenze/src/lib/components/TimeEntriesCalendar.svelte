@@ -178,7 +178,7 @@
           relative
           transition-colors
           ${isDisabled ? `${vBg || 'bg-[#e5e7eb]'} text-gray-700` : `cursor-pointer ${vBg || (weekendEmpty ? 'bg-[#dbeafe]' : weekend ? 'bg-[#e5e7eb]' : 'bg-[#d1d5db]')} hover:brightness-95`}
-          ${isToday ? 'outline outline-2 outline-green-500 border-none' : 'border-gray-400'}
+          ${isToday ? 'outline outline-3 outline-green-500 border-none' : 'border-gray-400'}
         `}
         on:click={() => handleDay(day)}
         on:keydown={(e) => {

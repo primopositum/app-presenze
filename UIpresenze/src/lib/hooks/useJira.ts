@@ -46,7 +46,7 @@ export async function useJiraSearch(input: JiraSearchInput) {
 
   const jql = `${baseJql}${input.assigneeFilter ? ` AND assignee=${input.assigneeFilter}` : ''} ORDER BY created DESC`;
   const fields =
-    'summary,status,priority,assignee,created,updated,issuetype,project,timetracking,timespent,aggregatetimespent,timeestimate,aggregatetimeestimate,timeoriginalestimate,aggregatetimeoriginalestimate';
+    'summary,status,priority,assignee,created,updated,issuetype,project,comment,timetracking,timespent,aggregatetimespent,timeestimate,aggregatetimeestimate,timeoriginalestimate,aggregatetimeoriginalestimate';
 
   return jiraSearch({
     jql,

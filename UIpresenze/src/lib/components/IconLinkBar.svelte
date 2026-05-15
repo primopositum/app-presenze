@@ -84,8 +84,6 @@
     display: flex;
     justify-content: center;
     padding-inline: 1rem;
-    /* Evita sovrapposizione con HourBalance fixed in basso a destra */
-    padding-bottom: 190px;
   }
 
   .utility-card {
@@ -118,19 +116,9 @@
   }
 
   @media (max-width: 900px) {
-    .utility-shell {
-      padding-bottom: 170px;
-    }
-
     .utility-card {
       border-width: 8px;
       padding: 1rem;
-    }
-  }
-
-  @media (max-width: 640px) {
-    .utility-shell {
-      padding-bottom: 1rem;
     }
   }
 </style>

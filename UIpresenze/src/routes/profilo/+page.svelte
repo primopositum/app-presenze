@@ -3,6 +3,7 @@
   import { page } from '$app/stores';
   import { auth } from '$lib/stores/auth';
   import ProfileCard from '$lib/components/ProfileCard.svelte';
+  import PreSetWeek from '$lib/components/PreSetWeek.svelte';
   import LoaderOverlay from '$lib/components/loader/LoaderOverlay.svelte';
   import type { User } from '$lib/services/users';
   import type { CreateAccountPayload, UpdateAccountPayload } from '$lib/services/users';
@@ -23,6 +24,8 @@
   let createTipologiaContratto = '';
 
   $: isSuperuser = !!$auth.user?.is_superuser;
+  $: isStaff = !!$auth.user?.is_staff;
+  $: showOwnPresetWeek = !!$auth.user && !isSuperuser && !isStaff;
   $: showAllUsers = $page.url.searchParams.get('show_all_users') === '1';
   $: visibleUsers = showAllUsers
     ? users
@@ -174,7 +177,12 @@
     {/if}
 
   {:else}
-    <ProfileCard user={$auth.user} currentUser={$auth.user} onSave={saveAccount} />
+    <div class="space-y-6">
+      <ProfileCard user={$auth.user} currentUser={$auth.user} onSave={saveAccount} />
+      {#if showOwnPresetWeek}
+        <PreSetWeek />
+      {/if}
+    </div>
   {/if}
 </main>
 

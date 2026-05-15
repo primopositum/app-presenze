@@ -2,6 +2,7 @@
   import { goto } from '$app/navigation';
   import CardImage from '$lib/components/CardImage.svelte';
   import IconLinkBar from '$lib/components/IconLinkBar.svelte';
+  import JiraPersonalTask from '$lib/components/Jira/JiraPersonalTask.svelte';
   import { auth } from '$lib/stores/auth';
 
   let user: any = null;
@@ -10,8 +11,8 @@
   $: isAuthed = $auth.isAuthed;
   
    const redirect = (route : string) => {
-    if (route === 'buisness') {
-      goto('/buisness', { state: { route } });
+    if (route === 'business') {
+      goto('/business', { state: { route } });
       return;
     }
     if (user?.is_superuser){goto(`/preMenu`, {state : {route}});}
@@ -40,8 +41,8 @@
   <CardImage
     caption="Accedi all'area delle task"
     alt="Task"
-    on:click = {()=>{redirect('buisness')}}
-    imageSrc="/buisness.png"
+    on:click = {()=>{redirect('business')}}
+    imageSrc="/business.png"
      />
   <CardImage
     caption="Accedi all'area delle presenze"
@@ -54,6 +55,9 @@
 <div >
   <IconLinkBar></IconLinkBar>
 </div>
+{#if isAuthed && !user?.is_superuser && !user?.is_staff}
+  <JiraPersonalTask />
+{/if}
 </main>
 
 

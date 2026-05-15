@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { jiraTimesheet, jiraDeleteWorklog, type JiraTimesheetActivity } from '$lib/services/jira';
-  import JiraWorklogCard from '$lib/components/JiraWorklogCard.svelte';
+  import { jiraTimesheet, jiraDeleteWorklog, jiraAddWorklog, jiraUpdateWorklog, type JiraTimesheetActivity } from '$lib/services/jira';
+  import JiraWorklogCard from '$lib/components/Jira/JiraWorklogCard.svelte';
   import ConfirmCard from '$lib/components/ConfirmCard.svelte';
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
   import { faTrash } from '@fortawesome/free-solid-svg-icons';
@@ -14,7 +14,11 @@
   let lastLoadedDay = '';
   let deletingWorklogId = '';
   let worklogActionError = '';
+  let completeActionError = '';
+  let completeActionSuccess = '';
+  let completing = false;
   let deleteConfirmTarget: { issueKey: string; worklogId: string } | null = null;
+  const COMPLETE_ISSUE_KEY = 'AM-1';
 
   function toNumber(value: unknown) {
     const n = Number(value);
@@ -88,6 +92,82 @@
     await load();
   }
 
+  function secondsToJiraTimeSpent(totalSeconds: number) {
+    const safe = Math.max(0, Math.round(totalSeconds));
+    if (safe <= 0) return '';
+    const h = Math.floor(safe / 3600);
+    const m = Math.floor((safe % 3600) / 60);
+    const s = safe % 60;
+    const chunks: string[] = [];
+    if (h > 0) chunks.push(`${h}h`);
+    if (m > 0) chunks.push(`${m}m`);
+    if (s > 0) chunks.push(`${s}s`);
+    return chunks.join(' ');
+  }
+
+  function buildStartedForDay(dayValue: string, baseStarted?: string) {
+    if (baseStarted) return baseStarted;
+    const [year, month, dayPart] = dayValue.split('-').map((part) => Number(part));
+    const local = new Date(year, (month || 1) - 1, dayPart || 1, 9, 0, 0, 0);
+    const yyyy = local.getFullYear();
+    const mm = String(local.getMonth() + 1).padStart(2, '0');
+    const dd = String(local.getDate()).padStart(2, '0');
+    const hh = String(local.getHours()).padStart(2, '0');
+    const mi = String(local.getMinutes()).padStart(2, '0');
+    const ss = String(local.getSeconds()).padStart(2, '0');
+    const offsetMinutes = -local.getTimezoneOffset();
+    const sign = offsetMinutes >= 0 ? '+' : '-';
+    const absMinutes = Math.abs(offsetMinutes);
+    const offH = String(Math.floor(absMinutes / 60)).padStart(2, '0');
+    const offM = String(absMinutes % 60).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}.000${sign}${offH}${offM}`;
+  }
+
+  async function completeWithAm1() {
+    completeActionError = '';
+    completeActionSuccess = '';
+    if (!day) {
+      completeActionError = 'Seleziona un giorno prima di completare.';
+      return;
+    }
+    if (completing) return;
+    if (expectedSeconds <= 0) {
+      completeActionError = 'Target giornaliero non valido.';
+      return;
+    }
+
+    const am1Entry = activities.find((item) => (item.issue_key || '').toUpperCase() === COMPLETE_ISSUE_KEY);
+    const am1CurrentSeconds = am1Entry ? activitySeconds(am1Entry) : 0;
+    const coveredWithoutAm1 = Math.max(0, totalActivitySeconds - am1CurrentSeconds);
+    const missingSeconds = expectedSeconds - coveredWithoutAm1;
+    if (missingSeconds <= 0) {
+      completeActionError = 'Copertura già completa: nessuna ora da aggiungere su AM-1.';
+      return;
+    }
+
+    const timeSpent = secondsToJiraTimeSpent(missingSeconds);
+    if (!timeSpent) {
+      completeActionError = 'Impossibile calcolare il timeSpent da registrare.';
+      return;
+    }
+
+    completing = true;
+    try {
+      const started = buildStartedForDay(day, am1Entry?.started);
+      if (am1Entry?.worklog_id) {
+        await jiraUpdateWorklog(COMPLETE_ISSUE_KEY, am1Entry.worklog_id, { timeSpent, started });
+      } else {
+        await jiraAddWorklog(COMPLETE_ISSUE_KEY, { timeSpent, started });
+      }
+      await refreshAfterWorklogCreate();
+      completeActionSuccess = `Completamento registrato su ${COMPLETE_ISSUE_KEY}: ${timeSpent}.`;
+    } catch (e: any) {
+      completeActionError = String(e?.message || e || `Errore completamento su ${COMPLETE_ISSUE_KEY}`);
+    } finally {
+      completing = false;
+    }
+  }
+
   async function removeWorklog(issueKey: string, worklogId: string) {
     if (!issueKey || !worklogId || deletingWorklogId) return;
     deletingWorklogId = worklogId;
@@ -151,6 +231,7 @@
   $: worklogBlockReason = worklogCreationBlocked
     ? `Copertura Jira gia al ${rawCoveragePercent.toFixed(1)}%: inserimento bloccato.`
     : '';
+  $: completeButtonDisabled = !day || loading || expectedSeconds <= 0 || completing;
   $: segments = activities.map((item, idx) => {
     const seconds = activitySeconds(item);
     const widthPct = denominatorSeconds > 0 ? (seconds / denominatorSeconds) * 100 : 0;
@@ -180,12 +261,33 @@
     <span class="target-hours">Target: {expectedHours.toFixed(2)}h</span>
   </div>
 
-  <JiraWorklogCard
-    {day}
-    blocked={worklogCreationBlocked}
-    blockedReason={worklogBlockReason}
-    on:created={refreshAfterWorklogCreate}
-  />
+  <div class="worklog-actions-row">
+    <div class="worklog-card-col">
+      <JiraWorklogCard
+        {day}
+        blocked={worklogCreationBlocked}
+        blockedReason={worklogBlockReason}
+        on:created={refreshAfterWorklogCreate}
+      />
+    </div>
+    {#if !worklogBlockReason}
+      <button
+        type="button"
+        class="complete-btn"
+        on:click={completeWithAm1}
+        disabled={completeButtonDisabled}
+        title="Completa su AM-1 fino al target giornaliero"
+      >
+        {completing ? 'Completamento...' : 'Completa'}
+      </button>
+    {/if}
+  </div>
+  {#if completeActionError}
+    <p class="state error">{completeActionError}</p>
+  {/if}
+  {#if completeActionSuccess}
+    <p class="state success">{completeActionSuccess}</p>
+  {/if}
 
   {#if !day}
     <p class="state">Seleziona un giorno nel calendario per vedere le attivita Jira.</p>
@@ -202,7 +304,7 @@
     <div class="progress-wrap">
       <div class="progress-meta">
         <span>Ore Jira: {formatHours(totalActivitySeconds)}h</span>
-        <span>Copertura: {progressPercent.toFixed(1)}%</span>
+        <span>Copertura: {rawCoveragePercent.toFixed(1)}%</span>
       </div>
 
       <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={progressPercent}>
@@ -315,6 +417,43 @@
 
   .state.error {
     color: #b91c1c;
+  }
+
+  .state.success {
+    color: #166534;
+  }
+
+  .worklog-actions-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 15px;
+    margin-bottom: 0.45rem;
+  }
+
+  .worklog-card-col {
+    flex: 0 0 auto;
+    min-width: auto;
+  }
+
+  .worklog-actions-row :global(.jira-worklog) {
+    width: auto;
+  }
+
+  .complete-btn {
+    border: 1px solid #94a3b8;
+    background: #f1f5f9;
+    color: #334155;
+    border-radius: 9px;
+    padding: 0.35rem 0.55rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .complete-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 
   .progress-wrap {
@@ -479,6 +618,15 @@
     .head {
       align-items: flex-start;
       flex-direction: column;
+    }
+
+    .worklog-actions-row {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .complete-btn {
+      width: fit-content;
     }
 
   }
