@@ -1,4 +1,5 @@
 import base64
+import re
 from datetime import date, datetime, time, timedelta, timezone as dt_timezone
 from urllib.parse import urlparse
 
@@ -237,7 +238,7 @@ def _sum_worked_seconds_for_user_day(user, target_date: date) -> int:
     if not target_date:
         return 0
     rows = (
-        TimeEntry.objects.filter(utente=user, data=target_date, type__in=[1, 3, 4])
+        TimeEntry.objects.filter(utente=user, data=target_date, type__in=[1, 3])
         .values("type")
         .annotate(total=Sum("ore_tot"))
     )
@@ -248,10 +249,47 @@ def _sum_worked_seconds_for_user_day(user, target_date: date) -> int:
         hours = float(row.get("total") or 0)
         if entry_type in (1, 3):
             worked_hours += hours
-        elif entry_type == 4:
-            worked_hours -= hours
+
 
     return max(0, int(round(worked_hours * 3600)))
+
+
+_TIME_SPENT_TOKEN_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*([wdhms])", re.IGNORECASE)
+_TIME_SPENT_SECONDS_BY_UNIT = {
+    "s": 1,
+    "m": 60,
+    "h": 3600,
+    # Jira defaults: 1 giorno = 8h, 1 settimana = 5 giorni.
+    "d": 8 * 3600,
+    "w": 5 * 8 * 3600,
+}
+
+
+def _parse_time_spent_to_seconds(time_spent: str):
+    text = str(time_spent or "").strip().lower()
+    if not text:
+        return None
+
+    matches = list(_TIME_SPENT_TOKEN_RE.finditer(text))
+    if not matches:
+        return None
+
+    normalized = "".join(f"{m.group(1)}{m.group(2).lower()}" for m in matches)
+    compact = re.sub(r"\s+", "", text)
+    if normalized != compact:
+        return None
+
+    total_seconds = 0.0
+    for match in matches:
+        raw_value = match.group(1).replace(",", ".")
+        unit = match.group(2).lower()
+        value = float(raw_value)
+        if value <= 0:
+            return None
+        total_seconds += value * _TIME_SPENT_SECONDS_BY_UNIT[unit]
+
+    seconds_int = int(round(total_seconds))
+    return seconds_int if seconds_int > 0 else None
 
 
 def _jira_current_account_id(domain: str, headers: dict):
@@ -386,6 +424,10 @@ class JiraWorklogsTodayView(APIView):
         issues = []
 
         try:
+            current_account_id = _jira_current_account_id(domain, headers)
+            if not current_account_id:
+                return Response({"error": "Impossibile identificare l'account Jira corrente"}, status=502)
+
             while True:
                 params = {
                     "jql": jql,
@@ -422,6 +464,9 @@ class JiraWorklogsTodayView(APIView):
                         continue
 
                     author = worklog.get("author", {}) or {}
+                    author_account_id = str(author.get("accountId") or "").strip()
+                    if author_account_id != current_account_id:
+                        continue
                     comment = _extract_comment_text(worklog.get("comment")).strip()
                     activities.append(
                         {
@@ -612,6 +657,12 @@ class JiraIssueWorklogView(APIView):
         time_spent = (request.data.get("timeSpent") or "").strip()
         if not time_spent:
             return Response({"error": "Parametro obbligatorio: timeSpent"}, status=400)
+        new_worklog_seconds = _parse_time_spent_to_seconds(time_spent)
+        if not new_worklog_seconds:
+            return Response(
+                {"error": "Formato timeSpent non valido. Esempi: 2h, 1h 30m, 45m."},
+                status=400,
+            )
 
         started_value, parse_error = _parse_started_value(request)
         if parse_error:
@@ -648,7 +699,7 @@ class JiraIssueWorklogView(APIView):
                 {
                     "error": (
                         f"Impossibile registrare worklog: nessuna ora lavorata disponibile per il giorno "
-                        f"{target_date.isoformat()} (type 1 + 3 - 4)."
+                        f"{target_date.isoformat()} (type 1 + 3)."
                     )
                 },
                 status=409,
@@ -677,6 +728,23 @@ class JiraIssueWorklogView(APIView):
                 status=409,
             )
 
+        projected_seconds = logged_seconds + new_worklog_seconds
+        if projected_seconds > worked_seconds:
+            worked_hours = round(worked_seconds / 3600, 2)
+            logged_hours = round(logged_seconds / 3600, 2)
+            new_hours = round(new_worklog_seconds / 3600, 2)
+            projected_hours = round(projected_seconds / 3600, 2)
+            return Response(
+                {
+                    "error": (
+                        f"Inserimento non consentito per {target_date.isoformat()}: "
+                        f"{logged_hours}h gia loggate + {new_hours}h richieste = {projected_hours}h, "
+                        f"oltre le {worked_hours}h lavorate."
+                    )
+                },
+                status=409,
+            )
+
         url = f"https://{domain}/rest/api/3/issue/{issue_key_clean}/worklog"
         try:
             response = requests.post(url, headers=headers, json=payload, timeout=10)
@@ -700,6 +768,12 @@ class JiraIssueWorklogView(APIView):
         time_spent = (request.data.get("timeSpent") or "").strip()
         if not time_spent:
             return Response({"error": "Parametro obbligatorio: timeSpent"}, status=400)
+        new_worklog_seconds = _parse_time_spent_to_seconds(time_spent)
+        if not new_worklog_seconds:
+            return Response(
+                {"error": "Formato timeSpent non valido. Esempi: 2h, 1h 30m, 45m."},
+                status=400,
+            )
 
         started_value, parse_error = _parse_started_value(request)
         if parse_error:
@@ -725,6 +799,66 @@ class JiraIssueWorklogView(APIView):
         domain, email, api_token = creds
         headers = _jira_headers(email, api_token)
         headers["Content-Type"] = "application/json"
+
+        target_date = _local_date_from_started(started_value)
+        if not target_date:
+            return Response({"error": "Formato started non valido"}, status=400)
+
+        worked_seconds = _sum_worked_seconds_for_user_day(request.user, target_date)
+        if worked_seconds <= 0:
+            return Response(
+                {
+                    "error": (
+                        f"Impossibile aggiornare worklog: nessuna ora lavorata disponibile per il giorno "
+                        f"{target_date.isoformat()} (type 1 + 3)."
+                    )
+                },
+                status=409,
+            )
+
+        detail_url = f"https://{domain}/rest/api/3/issue/{issue_key_clean}/worklog/{worklog_id_clean}"
+        try:
+            detail_response = requests.get(detail_url, headers=headers, timeout=10)
+            detail_response.raise_for_status()
+            detail_payload = detail_response.json() or {}
+
+            account_id = _jira_current_account_id(domain, headers)
+            logged_seconds = _sum_jira_logged_seconds_for_user_day(domain, headers, account_id, target_date)
+
+            current_author_id = str((detail_payload.get("author") or {}).get("accountId") or "").strip()
+            current_started = str(detail_payload.get("started") or "")
+            current_date = _local_date_from_started(current_started)
+            current_seconds = int(detail_payload.get("timeSpentSeconds") or 0)
+            if (
+                current_author_id
+                and current_author_id == account_id
+                and current_date == target_date
+                and current_seconds > 0
+            ):
+                logged_seconds = max(0, logged_seconds - current_seconds)
+
+            projected_seconds = logged_seconds + new_worklog_seconds
+            if projected_seconds > worked_seconds:
+                worked_hours = round(worked_seconds / 3600, 2)
+                logged_hours = round(logged_seconds / 3600, 2)
+                new_hours = round(new_worklog_seconds / 3600, 2)
+                projected_hours = round(projected_seconds / 3600, 2)
+                return Response(
+                    {
+                        "error": (
+                            f"Aggiornamento non consentito per {target_date.isoformat()}: "
+                            f"{logged_hours}h gia loggate + {new_hours}h richieste = {projected_hours}h, "
+                            f"oltre le {worked_hours}h lavorate."
+                        )
+                    },
+                    status=409,
+                )
+        except requests.exceptions.Timeout:
+            return Response({"error": "Timeout connessione a Jira"}, status=504)
+        except requests.exceptions.HTTPError as exc:
+            return _jira_error_response(exc)
+        except requests.exceptions.RequestException as exc:
+            return Response({"error": str(exc)}, status=502)
 
         url = f"https://{domain}/rest/api/3/issue/{issue_key_clean}/worklog/{worklog_id_clean}"
         try:

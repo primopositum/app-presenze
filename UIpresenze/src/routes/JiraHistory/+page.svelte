@@ -6,6 +6,11 @@
   type JiraIssue = {
     key: string;
     fields?: {
+      summary?: string;
+      status?: { name?: string };
+      assignee?: { displayName?: string } | null;
+      issuetype?: { name?: string; subtask?: boolean } | null;
+      parent?: { key?: string; fields?: { summary?: string } } | null;
       project?: { key?: string; name?: string };
       timespent?: number | null;
       aggregatetimespent?: number | null;
@@ -26,19 +31,19 @@
 </script>
 
 <main class="history-page">
-  <button
-    class="back-arrow-btn"
-    type="button"
-    on:click={() => goto('/business')}
-    aria-label="Torna alla pagina business"
-    title="Torna alla pagina business"
-  >
-    ←
-  </button>
   <h1 class="page-title">Jira History</h1>
   <header class="page-header">
     <div class="header-main">
       <div>
+        <button
+          class="back-arrow-btn"
+          type="button"
+          on:click={() => goto('/business')}
+          aria-label="Torna alla pagina business"
+          title="Torna alla pagina business"
+        >
+          ←
+        </button>
         <p>Analisi ore su progetti completati e distribuzione in base ai progetti selezionati.</p>
       </div>
       <div class="search-wrap">
@@ -115,7 +120,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    margin-bottom: 0.55rem;
+    margin-bottom: 0.4rem;
     font-size: 18px;
     line-height: 1;
     font-family: var(--font-mono);

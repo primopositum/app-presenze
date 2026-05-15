@@ -4,6 +4,7 @@
   type JiraIssue = {
     key: string;
     fields?: {
+      assignee?: { displayName?: string } | null;
       project?: { key?: string; name?: string };
       timespent?: number | null;
       aggregatetimespent?: number | null;
@@ -18,10 +19,9 @@
     };
   };
 
-  type ProjectHours = {
-    key: string;
-    name: string;
-    issueCount: number;
+  type ChartRow = {
+    id: string;
+    label: string;
     seconds: number;
     hours: number;
     percent: number;
@@ -58,52 +58,56 @@
       : `${rounded.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}h`;
   }
 
-  $: byProject = issues.reduce<Record<string, { key: string; name: string; seconds: number; issueCount: number }>>(
-    (acc, issue) => {
-      const key = issue.fields?.project?.key || 'N/D';
-      const name = issue.fields?.project?.name || 'Progetto non disponibile';
-      if (!acc[key]) {
-        acc[key] = { key, name, seconds: 0, issueCount: 0 };
-      }
-      const seconds = Math.max(0, Number(taskTotalSeconds(issue.fields) || 0));
-      acc[key].seconds += seconds;
-      acc[key].issueCount += 1;
-      return acc;
-    },
-    {}
-  );
-
-  $: allProjects = Object.values(byProject);
+  $: allProjects = [
+    ...new Set(issues.map((issue) => issue.fields?.project?.key || 'N/D'))
+  ];
   $: selectedSet = new Set(selectedProjectKeys);
-  $: activeProjects =
-    selectedProjectKeys.length > 0 ? allProjects.filter((project) => selectedSet.has(project.key)) : allProjects;
-  $: totalSeconds = sum(activeProjects.map((p) => p.seconds));
+  $: selectedIssues =
+    selectedProjectKeys.length > 0
+      ? issues.filter((issue) => selectedSet.has(issue.fields?.project?.key || 'N/D'))
+      : issues;
+  $: chartMode = selectedProjectKeys.length > 0 ? 'user' : 'project';
+  $: grouped = selectedIssues.reduce<Record<string, { label: string; seconds: number }>>((acc, issue) => {
+    const id =
+      chartMode === 'user'
+        ? issue.fields?.assignee?.displayName || 'Unassigned'
+        : issue.fields?.project?.key || 'N/D';
+    const label =
+      chartMode === 'user'
+        ? issue.fields?.assignee?.displayName || 'Unassigned'
+        : issue.fields?.project?.name || issue.fields?.project?.key || 'Progetto non disponibile';
+    if (!acc[id]) {
+      acc[id] = { label, seconds: 0 };
+    }
+    acc[id].seconds += Math.max(0, Number(taskTotalSeconds(issue.fields) || 0));
+    return acc;
+  }, {});
+  $: totalSeconds = sum(Object.values(grouped).map((v) => v.seconds));
 
   $: colorScale = scaleOrdinal<string, string>(schemeTableau10);
 
-  $: projectHours = activeProjects
-    .map((project) => ({
-      key: project.key,
-      name: project.name,
-      issueCount: project.issueCount,
-      seconds: project.seconds,
-      hours: project.seconds / 3600,
-      percent: totalSeconds > 0 ? (project.seconds / totalSeconds) * 100 : 0,
-      color: colorScale(project.key)
+  $: chartRows = Object.entries(grouped)
+    .map(([id, data]) => ({
+      id,
+      label: data.label,
+      seconds: data.seconds,
+      hours: data.seconds / 3600,
+      percent: totalSeconds > 0 ? (data.seconds / totalSeconds) * 100 : 0,
+      color: colorScale(id)
     }))
     .sort((a, b) => descending(a.seconds, b.seconds));
 
-  $: pieLayout = pie<ProjectHours>()
+  $: pieLayout = pie<ChartRow>()
     .sort(null)
     .value((d) => d.seconds);
 
-  $: arcs = pieLayout(projectHours);
-  $: arcPath = arc<PieArcDatum<ProjectHours>>().innerRadius(innerRadius).outerRadius(outerRadius);
+  $: arcs = pieLayout(chartRows);
+  $: arcPath = arc<PieArcDatum<ChartRow>>().innerRadius(innerRadius).outerRadius(outerRadius);
 
   $: chartWidth = 390;
-  $: chartHeight = Math.max(200, projectHours.length * 32 + 20);
-  $: yScale = scaleBand<string>().domain(projectHours.map((d) => d.key)).range([0, chartHeight]).padding(0.2);
-  $: xScale = scaleLinear().domain([0, Math.max(1, ...projectHours.map((d) => d.hours))]).range([0, 210]);
+  $: chartHeight = Math.max(200, chartRows.length * 32 + 20);
+  $: yScale = scaleBand<string>().domain(chartRows.map((d) => d.id)).range([0, chartHeight]).padding(0.2);
+  $: xScale = scaleLinear().domain([0, Math.max(1, ...chartRows.map((d) => d.hours))]).range([0, 210]);
 </script>
 
 <section class="charts-shell">
@@ -111,8 +115,10 @@
 
   <div class="metric-grid">
     <article class="metric-card">
-      <span class="label">{selectedProjectKeys.length > 0 ? 'Progetti selezionati' : 'Progetti totali'}</span>
-      <strong>{activeProjects.length}</strong>
+      <span class="label">
+        {selectedProjectKeys.length > 0 ? 'Utenti coinvolti (selezione)' : 'Progetti totali'}
+      </span>
+      <strong>{selectedProjectKeys.length > 0 ? chartRows.length : allProjects.length}</strong>
     </article>
     <article class="metric-card">
       <span class="label">Ore totali</span>
@@ -124,24 +130,24 @@
     <p class="hint">Nessun progetto selezionato: visualizzazione totale ore per progetto.</p>
   {/if}
 
-  {#if activeProjects.length === 0}
+  {#if chartRows.length === 0}
     <p class="empty">Nessun progetto disponibile per i grafici.</p>
   {:else}
     <article class="chart-card">
-      <h4>Distribuzione ore per progetto (%)</h4>
+      <h4>{selectedProjectKeys.length > 0 ? 'Distribuzione ore per utente (%)' : 'Distribuzione ore per progetto (%)'}</h4>
       <div class="donut-wrap">
-        <svg width={donutSize} height={donutSize} viewBox="0 0 220 220" role="img" aria-label="Distribuzione ore per progetto">
+        <svg width={donutSize} height={donutSize} viewBox="0 0 220 220" role="img" aria-label={selectedProjectKeys.length > 0 ? 'Distribuzione ore per utente' : 'Distribuzione ore per progetto'}>
           <g transform="translate(110,110)">
-            {#each arcs as slice (slice.data.key)}
+            {#each arcs as slice (slice.data.id)}
               <path d={arcPath(slice) || ''} fill={slice.data.color} stroke="#fff" stroke-width="1.5"></path>
             {/each}
           </g>
         </svg>
         <ul class="legend">
-          {#each projectHours as row (row.key)}
+          {#each chartRows as row (row.id)}
             <li>
               <span class="dot" style={`--dot:${row.color}`}></span>
-              <span class="name">{row.key}</span>
+              <span class="name">{row.id}</span>
               <span class="num">{row.percent.toFixed(1)}%</span>
             </li>
           {/each}
@@ -150,13 +156,13 @@
     </article>
 
     <article class="chart-card">
-      <h4>Ore per progetto</h4>
+      <h4>{selectedProjectKeys.length > 0 ? 'Ore per utente' : 'Ore per progetto'}</h4>
       <div class="bar-wrap">
-        <svg width={chartWidth} height={chartHeight + 24} viewBox={`0 0 ${chartWidth} ${chartHeight + 24}`} role="img" aria-label="Ore per progetto">
+        <svg width={chartWidth} height={chartHeight + 24} viewBox={`0 0 ${chartWidth} ${chartHeight + 24}`} role="img" aria-label={selectedProjectKeys.length > 0 ? 'Ore per utente' : 'Ore per progetto'}>
           <g transform="translate(150,10)">
-            {#each projectHours as row (row.key)}
+            {#each chartRows as row (row.id)}
               <rect
-                y={yScale(row.key) || 0}
+                y={yScale(row.id) || 0}
                 x="0"
                 width={xScale(row.hours)}
                 height={yScale.bandwidth()}
@@ -164,8 +170,8 @@
                 fill={row.color}
                 opacity="0.88"
               ></rect>
-              <text x="-10" y={(yScale(row.key) || 0) + yScale.bandwidth() / 2 + 4} text-anchor="end" class="axis-label">{row.key}</text>
-              <text x={xScale(row.hours) + 8} y={(yScale(row.key) || 0) + yScale.bandwidth() / 2 + 4} class="axis-value">
+              <text x="-10" y={(yScale(row.id) || 0) + yScale.bandwidth() / 2 + 4} text-anchor="end" class="axis-label">{row.id}</text>
+              <text x={xScale(row.hours) + 8} y={(yScale(row.id) || 0) + yScale.bandwidth() / 2 + 4} class="axis-value">
                 {fmtHours(row.seconds)}
               </text>
             {/each}
