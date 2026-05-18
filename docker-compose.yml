@@ -48,6 +48,8 @@ services:
       - ./AppPresenze/.env
     environment:
       TZ: Europe/Rome
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: ["/bin/sh", "/app/scripts/run_scheduler.sh"]
     depends_on:
       - backend
@@ -60,3 +62,4 @@ networks:
     driver: bridge
 volumes:
   static_files:
+
