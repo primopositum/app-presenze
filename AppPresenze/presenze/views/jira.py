@@ -12,6 +12,9 @@ from rest_framework.views import APIView
 from ..models import JiraCredentials, JiraGlobals, TimeEntry
 
 
+##########################################################################################################################################################################################################################################
+#setup
+##########################################################################################################################################################################################################################################
 def _normalize_jira_domain(raw_domain: str) -> str:
     value = (raw_domain or "").strip()
     if not value:
@@ -113,7 +116,6 @@ def _fetch_issue_worklogs(domain: str, issue_key: str, headers: dict):
             break
 
     return all_worklogs
-
 
 def _parse_started_value(request):
     def _format_started_iso(value: datetime) -> str:
@@ -264,6 +266,19 @@ _TIME_SPENT_SECONDS_BY_UNIT = {
     "w": 5 * 8 * 3600,
 }
 
+_PRIORITY_NAME_ORDER = {
+    "blocker": 0,
+    "highest": 0,
+    "critical": 1,
+    "high": 2,
+    "medium": 3,
+    "normal": 3,
+    "low": 4,
+    "minor": 4,
+    "lowest": 5,
+    "trivial": 5,
+}
+
 
 def _parse_time_spent_to_seconds(time_spent: str):
     text = str(time_spent or "").strip().lower()
@@ -292,6 +307,158 @@ def _parse_time_spent_to_seconds(time_spent: str):
     return seconds_int if seconds_int > 0 else None
 
 
+def _jira_priority_sort_key(issue_payload):
+    fields = (issue_payload or {}).get("fields", {}) or {}
+    priority = fields.get("priority", {}) or {}
+    priority_name = str(priority.get("name") or "").strip().lower()
+    name_rank = _PRIORITY_NAME_ORDER.get(priority_name, 99)
+
+    priority_id_raw = str(priority.get("id") or "").strip()
+    priority_id_rank = int(priority_id_raw) if priority_id_raw.isdigit() else 999999
+
+    issue_key = str((issue_payload or {}).get("key") or "").strip()
+    return (name_rank, priority_id_rank, issue_key)
+
+
+def _sort_issues_by_priority(search_payload):
+    if not isinstance(search_payload, dict):
+        return search_payload
+
+    issues = search_payload.get("issues")
+    if not isinstance(issues, list):
+        return search_payload
+
+    search_payload["issues"] = sorted(issues, key=_jira_priority_sort_key)
+    return search_payload
+
+
+def _split_jql_order_by(jql: str):
+    value = str(jql or "").strip()
+    if not value:
+        return "", ""
+
+    match = re.search(r"\s+ORDER\s+BY\s+", value, flags=re.IGNORECASE)
+    if not match:
+        return value, ""
+
+    return value[:match.start()].strip(), value[match.start():].strip()
+
+
+def _exclude_completata_for_scope_jql(jql: str):
+    base_jql, order_by = _split_jql_order_by(jql)
+    if not base_jql:
+        return jql
+
+    # Applica la regola solo alle query scope usate dai preset filter[].
+    if not re.match(r"^\s*(filter|project|labels)\s*=", base_jql, flags=re.IGNORECASE):
+        return jql
+
+    # Evita doppie condizioni equivalenti.
+    if re.search(r'status\s*!=\s*"Completata"', base_jql, flags=re.IGNORECASE):
+        return jql
+    if re.search(r'status\s+NOT\s+IN\s*\([^)]*"Completata"[^)]*\)', base_jql, flags=re.IGNORECASE):
+        return jql
+
+    filtered = f'{base_jql} AND status != "Completata"'
+    return f"{filtered} {order_by}".strip() if order_by else filtered
+
+
+def _is_scope_filter_jql(jql: str):
+    base_jql, _order_by = _split_jql_order_by(jql)
+    if not base_jql:
+        return False
+    return bool(re.match(r"^\s*(filter|project|labels)\s*=", base_jql, flags=re.IGNORECASE))
+
+
+def _drop_completata_issues_case_insensitive(search_payload):
+    if not isinstance(search_payload, dict):
+        return
+    issues = search_payload.get("issues")
+    if not isinstance(issues, list):
+        return
+
+    filtered = []
+    for issue in issues:
+        fields = (issue or {}).get("fields", {}) or {}
+        status = (fields.get("status", {}) or {}).get("name", "")
+        status_name = str(status or "").strip().casefold()
+        if status_name == "completata":
+            continue
+        filtered.append(issue)
+
+    search_payload["issues"] = filtered
+
+
+def _jql_looks_completed_history(jql: str):
+    text = str(jql or "").lower()
+    if not text:
+        return False
+
+    return (
+        ("statuscategory" in text and "done" in text)
+        or '"completed"' in text
+        or '"completata"' in text
+    )
+
+
+def _worklog_seconds_by_author(domain: str, issue_key: str, headers: dict):
+    totals = {}
+    worklogs = _fetch_issue_worklogs(domain, issue_key, headers)
+    for worklog in worklogs:
+        seconds = int(worklog.get("timeSpentSeconds") or 0)
+        if seconds <= 0:
+            continue
+        author = (worklog.get("author") or {}) if isinstance(worklog, dict) else {}
+        author_name = str(author.get("displayName") or "").strip() or "Unassigned"
+        totals[author_name] = totals.get(author_name, 0) + seconds
+    return totals
+
+
+def _enrich_completed_issues_with_worklog_authors(search_payload, domain: str, headers: dict):
+    if not isinstance(search_payload, dict):
+        return
+    issues = search_payload.get("issues")
+    if not isinstance(issues, list):
+        return
+
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        issue_key = str(issue.get("key") or "").strip()
+        fields = issue.get("fields")
+        if not issue_key or not isinstance(fields, dict):
+            continue
+
+        try:
+            totals = _worklog_seconds_by_author(domain, issue_key, headers)
+        except requests.exceptions.RequestException:
+            # Se una issue non e interrogabile, non bloccare l'intera risposta.
+            continue
+
+        if not totals:
+            continue
+
+        sorted_authors = sorted(
+            totals.items(),
+            key=lambda item: (-item[1], item[0].lower()),
+        )
+        workers = [
+            {"displayName": name, "timeSpentSeconds": seconds}
+            for name, seconds in sorted_authors
+        ]
+
+        # Manteniamo il contratto FE invariato: assignee.displayName esiste sempre.
+        top_name, top_seconds = sorted_authors[0]
+        fields["assignee"] = {"displayName": top_name}
+
+        # Metadati aggiuntivi utili per debug/estensioni future.
+        fields["worklog_authors"] = workers
+        fields["worklog_primary_author"] = {
+            "displayName": top_name,
+            "timeSpentSeconds": top_seconds,
+        }
+
+
 def _jira_current_account_id(domain: str, headers: dict):
     url = f"https://{domain}/rest/api/3/myself"
     response = requests.get(url, headers=headers, timeout=10)
@@ -299,6 +466,9 @@ def _jira_current_account_id(domain: str, headers: dict):
     payload = response.json() or {}
     return str(payload.get("accountId") or "").strip()
 
+##########################################################################################################################################################################################################################################
+#functions
+##########################################################################################################################################################################################################################################
 
 def _sum_jira_logged_seconds_for_user_day(domain: str, headers: dict, account_id: str, target_date: date) -> int:
     if not account_id:
@@ -356,9 +526,13 @@ class JiraProxyView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        jql = request.GET.get("jql", "")
+        jql = _exclude_completata_for_scope_jql(request.GET.get("jql", ""))
         fields_raw = request.GET.get("fields", "summary,status,priority,assignee,created,updated")
-        max_results = request.GET.get("maxResults", 20)
+        max_results_raw = request.GET.get("maxResults")
+        if max_results_raw in (None, ""):
+            max_results = 300 if _jql_looks_completed_history(jql) else 20
+        else:
+            max_results = max_results_raw
         start_at = request.GET.get("startAt", 0)
 
         creds, error_response = _jira_credentials_for_user(request.user)
@@ -368,6 +542,9 @@ class JiraProxyView(APIView):
 
         url = f"https://{domain}/rest/api/3/search/jql"
         fields = [field.strip() for field in fields_raw.split(",") if field.strip()]
+        priority_requested = any(field.lower() == "priority" for field in fields)
+        if not priority_requested:
+            fields.append("priority")
         params = {
             "jql": jql,
             "fields": fields,
@@ -379,7 +556,23 @@ class JiraProxyView(APIView):
         try:
             response = requests.get(url, params=params, headers=headers, timeout=10)
             response.raise_for_status()
-            return Response(response.json(), status=response.status_code)
+            payload = response.json()
+
+            if _is_scope_filter_jql(jql):
+                _drop_completata_issues_case_insensitive(payload)
+
+            if _jql_looks_completed_history(jql):
+                _enrich_completed_issues_with_worklog_authors(payload, domain, headers)
+
+            _sort_issues_by_priority(payload)
+
+            if not priority_requested and isinstance(payload, dict):
+                for issue in payload.get("issues", []):
+                    issue_fields = (issue or {}).get("fields")
+                    if isinstance(issue_fields, dict):
+                        issue_fields.pop("priority", None)
+
+            return Response(payload, status=response.status_code)
         except requests.exceptions.Timeout:
             return Response({"error": "Timeout connessione a Jira"}, status=504)
         except requests.exceptions.HTTPError as e:

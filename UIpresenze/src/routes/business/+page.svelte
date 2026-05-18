@@ -25,7 +25,7 @@
     key: string;
     fields?: {
       summary?: string;
-      status?: { name?: string };
+      status?: { name?: string; id?: string; statusCategory?: { key?: string; name?: string } };
       priority?: { name?: string };
       assignee?: { displayName?: string } | null;
       created?: string;
@@ -76,7 +76,21 @@
     Blocked: { accent: '#dc2626', text: '#fca5a5' }
   };
 
-  $: statuses = [...new Set(issues.map((i) => i.fields?.status?.name).filter(Boolean) as string[])];
+  $: statusOrder = (() => {
+    const byName = new Map<string, number>();
+    issues.forEach((issue, index) => {
+      const name = issue.fields?.status?.name;
+      if (!name) return;
+      if (!byName.has(name)) {
+        byName.set(name, index);
+      }
+    });
+    return [...byName.entries()]
+      .sort((a, b) => a[1] - b[1])
+      .map(([name]) => name);
+  })();
+
+  $: statuses = statusOrder;
 
   $: statusCounts = issues.reduce<Record<string, number>>((acc, i) => {
     const s = i.fields?.status?.name;
@@ -106,12 +120,15 @@
       projectKey.toLowerCase().includes(normalizedQuery);
     return matchStatus && matchSearch;
   });
-  $: groupedByStatus = [...new Set(filtered.map((i) => i.fields?.status?.name || 'Senza stato'))].map(
-    (status) => ({
+  $: groupedByStatus = (() => {
+    const filteredStatusNames = new Set(filtered.map((i) => i.fields?.status?.name || 'Senza stato'));
+    const ordered = statusOrder.filter((name) => filteredStatusNames.has(name));
+    if (filteredStatusNames.has('Senza stato')) ordered.push('Senza stato');
+    return ordered.map((status) => ({
       status,
       items: filtered.filter((issue) => (issue.fields?.status?.name || 'Senza stato') === status)
-    })
-  );
+    }));
+  })();
   $: statusColumns = Math.min(Math.max(groupedByStatus.length, 1), 5);
   $: if (persistenceReady) {
     persistBoardState({

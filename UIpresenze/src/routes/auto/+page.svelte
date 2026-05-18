@@ -196,7 +196,13 @@
 
 {#if showForm}
   <div class="modal-backdrop" on:click={closeForm}>
-    <div class="form-wrap modal-card" role="dialog" aria-modal="true" on:click|stopPropagation>
+    <div
+      class="form-wrap modal-card"
+      class:new-auto={!isEdit}
+      role="dialog"
+      aria-modal="true"
+      on:click|stopPropagation
+    >
       <h2>{isEdit ? 'Modifica automobile' : 'Nuova automobile'}</h2>
       <div class="form-grid">
         <input type="text" bind:value={marca} placeholder="Marca" />
@@ -301,6 +307,11 @@
     font-size: 0.9rem;
   }
 
+  .form-grid input[type='text']::placeholder {
+    color: #9a3412;
+    opacity: 0.7;
+  }
+
   .check {
     display: inline-flex;
     align-items: center;
@@ -370,6 +381,55 @@
     max-height: calc(100vh - 32px);
     overflow: auto;
     box-shadow: 0 20px 40px rgba(0, 0, 0, 0.28);
+  }
+
+  .form-wrap.new-auto {
+    background: var(--color-auto-accent-50);
+    border-color: var(--color-auto-accent-200);
+    color: #7c2d12;
+    box-shadow: 0 20px 40px rgba(249, 115, 22, 0.18);
+    color-scheme: light;
+  }
+
+  .form-wrap.new-auto h2 {
+    color: #c2410c;
+  }
+
+  .form-wrap.new-auto .form-grid input[type='text'] {
+    background: #ffffff;
+    border-color: var(--color-auto-accent-200);
+    color: #7c2d12;
+  }
+
+  .form-wrap.new-auto .form-grid input[type='text']:focus {
+    border-color: var(--color-auto-accent-500);
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.2);
+  }
+
+  .form-wrap.new-auto .check {
+    color: #9a3412;
+  }
+
+  .form-wrap.new-auto .ghost {
+    background: #ffffff;
+    border-color: var(--color-auto-accent-200);
+    color: #c2410c;
+  }
+
+  .form-wrap.new-auto .ghost:hover {
+    background: var(--color-auto-accent-100);
+  }
+
+  .form-wrap.new-auto .refresh {
+    border-color: var(--color-auto-accent-500);
+    background: var(--color-auto-accent-500);
+    color: #ffffff;
+  }
+
+  .form-wrap.new-auto .refresh:hover {
+    background: #ea580c;
+    border-color: #ea580c;
   }
 
   @media (max-width: 980px) {

@@ -95,6 +95,7 @@
       percent: totalSeconds > 0 ? (data.seconds / totalSeconds) * 100 : 0,
       color: colorScale(id)
     }))
+    .filter((row) => !(row.id === 'Unassigned' && row.seconds <= 0))
     .sort((a, b) => descending(a.seconds, b.seconds));
 
   $: pieLayout = pie<ChartRow>()
@@ -104,10 +105,14 @@
   $: arcs = pieLayout(chartRows);
   $: arcPath = arc<PieArcDatum<ChartRow>>().innerRadius(innerRadius).outerRadius(outerRadius);
 
-  $: chartWidth = 390;
+  $: maxLabelLength = chartRows.reduce((acc, row) => Math.max(acc, row.label.length), 0);
+  $: labelColumnWidth = Math.min(360, Math.max(150, Math.ceil(maxLabelLength * 7.2)));
+  $: barAreaWidth = 210;
+  $: valueColumnWidth = 80;
+  $: chartWidth = labelColumnWidth + barAreaWidth + valueColumnWidth;
   $: chartHeight = Math.max(200, chartRows.length * 32 + 20);
   $: yScale = scaleBand<string>().domain(chartRows.map((d) => d.id)).range([0, chartHeight]).padding(0.2);
-  $: xScale = scaleLinear().domain([0, Math.max(1, ...chartRows.map((d) => d.hours))]).range([0, 210]);
+  $: xScale = scaleLinear().domain([0, Math.max(1, ...chartRows.map((d) => d.hours))]).range([0, barAreaWidth]);
 </script>
 
 <section class="charts-shell">
@@ -147,7 +152,7 @@
           {#each chartRows as row (row.id)}
             <li>
               <span class="dot" style={`--dot:${row.color}`}></span>
-              <span class="name">{row.id}</span>
+              <span class="name">{row.label}</span>
               <span class="num">{row.percent.toFixed(1)}%</span>
             </li>
           {/each}
@@ -159,7 +164,7 @@
       <h4>{selectedProjectKeys.length > 0 ? 'Ore per utente' : 'Ore per progetto'}</h4>
       <div class="bar-wrap">
         <svg width={chartWidth} height={chartHeight + 24} viewBox={`0 0 ${chartWidth} ${chartHeight + 24}`} role="img" aria-label={selectedProjectKeys.length > 0 ? 'Ore per utente' : 'Ore per progetto'}>
-          <g transform="translate(150,10)">
+          <g transform={`translate(${labelColumnWidth},10)`}>
             {#each chartRows as row (row.id)}
               <rect
                 y={yScale(row.id) || 0}
@@ -170,7 +175,7 @@
                 fill={row.color}
                 opacity="0.88"
               ></rect>
-              <text x="-10" y={(yScale(row.id) || 0) + yScale.bandwidth() / 2 + 4} text-anchor="end" class="axis-label">{row.id}</text>
+              <text x="-10" y={(yScale(row.id) || 0) + yScale.bandwidth() / 2 + 4} text-anchor="end" class="axis-label">{row.label}</text>
               <text x={xScale(row.hours) + 8} y={(yScale(row.id) || 0) + yScale.bandwidth() / 2 + 4} class="axis-value">
                 {fmtHours(row.seconds)}
               </text>

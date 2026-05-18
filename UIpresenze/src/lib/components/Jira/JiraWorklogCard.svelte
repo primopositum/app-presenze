@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onDestroy } from 'svelte';
   import { jiraSearch, jiraAddWorklog } from '$lib/services/jira';
 
   export let day: string | null = null;
@@ -52,13 +52,47 @@
   }
 
   $: fixedIssueKey = normalizeTrim(issueKey);
-  $: lockedProjectCode = normalizeUpper(projectCode) || (fixedIssueKey ? normalizeUpper(fixedIssueKey.split('-')[0] || '') : '');
-  $: activeDate = day || worklogDate;
-  $: isDateLocked = Boolean(day);
-  $: usesFixedIssue = Boolean(fixedIssueKey);
+  $: hintedProjectCode =
+    normalizeUpper(projectCode) || (fixedIssueKey ? normalizeUpper(fixedIssueKey.split('-')[0] || '') : '');
+  $: activeDate = normalizeTrim(worklogDate) || normalizeTrim(day) || todayIsoDate();
 
   if (!worklogDate) {
     worklogDate = todayIsoDate();
+  }
+
+  $: if (day && !showWorklogComposer) {
+    worklogDate = day;
+  }
+
+  $: if (typeof document !== 'undefined') {
+    document.body.style.overflow = showWorklogComposer ? 'hidden' : '';
+    document.body.classList.toggle('jira-worklog-modal-open', showWorklogComposer);
+  }
+
+  onDestroy(() => {
+    if (typeof document !== 'undefined') {
+      document.body.style.overflow = '';
+      document.body.classList.remove('jira-worklog-modal-open');
+    }
+  });
+
+  function portalToBody(node: HTMLElement) {
+    if (typeof document === 'undefined') return;
+
+    const originalParent = node.parentNode;
+    const originalNextSibling = node.nextSibling;
+    document.body.appendChild(node);
+
+    return {
+      destroy() {
+        if (!originalParent) return;
+        if (originalNextSibling && originalNextSibling.parentNode === originalParent) {
+          originalParent.insertBefore(node, originalNextSibling);
+          return;
+        }
+        originalParent.appendChild(node);
+      }
+    };
   }
 
   function issueProjectLabel(issue: JiraLoggableIssue) {
@@ -110,21 +144,8 @@
     clearComposerMessages();
     loggableIssuesError = '';
     showWorklogComposer = true;
-
-    if (usesFixedIssue) {
+    if (fixedIssueKey && !selectedIssueKey) {
       selectedIssueKey = fixedIssueKey;
-      loggableIssues = [
-        {
-          key: fixedIssueKey,
-          fields: {
-            summary: issueSummary || '',
-            project: { key: lockedProjectCode, name: '' },
-            status: undefined
-          }
-        }
-      ];
-      loggableIssuesLoaded = true;
-      return;
     }
 
     if (loggableIssuesLoaded && !force) return;
@@ -152,11 +173,14 @@
         startAt += batch.length;
       }
 
-      loggableIssues = lockedProjectCode
-        ? allIssues.filter((issue) => normalizeUpper(issue.fields?.project?.key) === lockedProjectCode)
-        : allIssues;
+      loggableIssues = allIssues;
       loggableIssuesLoaded = true;
-      if (!selectedIssueKey && loggableIssues.length > 0) {
+      const preferredIssueKey = fixedIssueKey || selectedIssueKey;
+      if (preferredIssueKey && loggableIssues.some((issue) => issue.key === preferredIssueKey)) {
+        selectedIssueKey = preferredIssueKey;
+      } else if (preferredIssueKey && !selectedIssueKey) {
+        selectedIssueKey = preferredIssueKey;
+      } else if (!selectedIssueKey && loggableIssues.length > 0) {
         selectedIssueKey = loggableIssues[0].key;
       }
     } catch (e: any) {
@@ -204,7 +228,7 @@
     try {
       const selectedIssue = loggableIssues.find((issue) => issue.key === selectedIssueKey);
       const computedProjectCode =
-        lockedProjectCode || selectedIssue?.fields?.project?.key || selectedIssueKey.split('-')[0] || '';
+        selectedIssue?.fields?.project?.key || hintedProjectCode || selectedIssueKey.split('-')[0] || '';
       const commentText = worklogComment.trim();
       const withProjectCode = computedProjectCode
         ? `[${computedProjectCode}]${commentText ? ` ${commentText}` : ''}`
@@ -226,17 +250,6 @@
     } finally {
       creatingWorklog = false;
     }
-  }
-
-  $: if (!day && !usesFixedIssue) {
-    showWorklogComposer = false;
-    loggableIssuesLoaded = false;
-    loggableIssues = [];
-    selectedIssueKey = '';
-    worklogValue = '';
-    worklogComment = '';
-    loggableIssuesError = '';
-    clearComposerMessages();
   }
 
   $: normalizedLoggableSearch = loggableSearch.trim().toLowerCase();
@@ -272,21 +285,19 @@
   {/if}
 
   {#if showWorklogComposer}
-    <div class="worklog-overlay" on:click|stopPropagation={closeComposerFromBackdrop}>
+    <div class="worklog-overlay" use:portalToBody on:click|stopPropagation={closeComposerFromBackdrop}>
       <div class="worklog-composer" role="dialog" aria-modal="true" on:click|stopPropagation>
         <div class="composer-head">
           <strong>Nuovo worklog</strong>
           <div class="composer-actions">
-            {#if !usesFixedIssue}
-              <button
-                class="composer-ghost"
-                type="button"
-                on:click={() => loadLoggableIssues(true)}
-                disabled={loadingLoggableIssues || creatingWorklog}
-              >
-                Aggiorna lista
-              </button>
-            {/if}
+            <button
+              class="composer-ghost"
+              type="button"
+              on:click={() => loadLoggableIssues(true)}
+              disabled={loadingLoggableIssues || creatingWorklog}
+            >
+              Aggiorna lista
+            </button>
             <button
               class="composer-ghost"
               type="button"
@@ -305,7 +316,7 @@
         <div class="composer-grid">
           <label>
             <span>Data</span>
-            <input type="date" bind:value={worklogDate} disabled={isDateLocked} />
+            <input type="date" bind:value={worklogDate} />
           </label>
           <label>
             <span>Ora</span>
@@ -317,54 +328,48 @@
           </label>
         </div>
 
-        {#if lockedProjectCode}
-          <p class="project-lock">Progetto Jira bloccato: <code>{lockedProjectCode}</code></p>
+        {#if hintedProjectCode}
+          <p class="project-lock">Progetto suggerito: <code>{hintedProjectCode}</code></p>
         {/if}
 
-        {#if !usesFixedIssue}
-          <label class="composer-block">
-            <span>Cerca progetto/issue</span>
-            <input
-              type="text"
-              bind:value={loggableSearch}
-              placeholder="Filtra per codice progetto, issue key o summary..."
-              disabled={loadingLoggableIssues}
-            />
-          </label>
+        <label class="composer-block">
+          <span>Cerca progetto/issue</span>
+          <input
+            type="text"
+            bind:value={loggableSearch}
+            placeholder="Filtra per codice progetto, issue key o summary..."
+            disabled={loadingLoggableIssues}
+          />
+        </label>
 
-          <label class="composer-block">
-            <span>Progetto / issue selezionato: {selectedIssueKey || 'nessuno'}</span>
-            <div class="issue-live-list" aria-live="polite">
-              {#if filteredLoggableIssues.length === 0}
-                <p class="issue-empty">Nessun risultato</p>
-              {:else}
-                {#each filteredLoggableIssues.slice(0, 20) as issue (issue.key)}
-                  <button
-                    type="button"
-                    class="issue-item"
-                    class:selected={selectedIssueKey === issue.key}
-                    on:click={() => pickIssue(issue.key)}
-                  >
-                    <small>{issue.key}</small>
-                    <strong>{issueProjectLabel(issue)}</strong>
-                    <span>{issue.fields?.summary || '-'}</span>
-                  </button>
-                {/each}
-              {/if}
-            </div>
-          </label>
-        {:else}
-          <div class="composer-block">
-            <span>Issue selezionata</span>
-            <div class="issue-live-list">
+        <label class="composer-block">
+          <span>Progetto / issue selezionato: {selectedIssueKey || 'nessuno'}</span>
+          <div class="issue-live-list" aria-live="polite">
+            {#if filteredLoggableIssues.length === 0}
+              <p class="issue-empty">Nessun risultato</p>
+            {:else}
+              {#each filteredLoggableIssues.slice(0, 20) as issue (issue.key)}
+                <button
+                  type="button"
+                  class="issue-item"
+                  class:selected={selectedIssueKey === issue.key}
+                  on:click={() => pickIssue(issue.key)}
+                >
+                  <small>{issue.key}</small>
+                  <strong>{issueProjectLabel(issue)}</strong>
+                  <span>{issue.fields?.summary || '-'}</span>
+                </button>
+              {/each}
+            {/if}
+            {#if fixedIssueKey && !filteredLoggableIssues.some((issue) => issue.key === fixedIssueKey)}
               <div class="issue-item selected issue-item-static">
-                <strong>{fixedIssueKey}</strong>
-                <span>{lockedProjectCode || '-'}</span>
-                <small>{issueSummary || '-'}</small>
+                <small>{fixedIssueKey}</small>
+                <strong>{hintedProjectCode || '-'}</strong>
+                <span>{issueSummary || 'Issue selezionata dal contesto'}</span>
               </div>
-            </div>
+            {/if}
           </div>
-        {/if}
+        </label>
 
         <label class="composer-block">
           <span>Commento (opzionale)</span>
@@ -451,13 +456,14 @@
   .worklog-overlay {
     position: fixed;
     inset: 0;
-    z-index: 1200;
+    z-index: 2147483000;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 1rem;
     background: rgba(15, 23, 42, 0.5);
     backdrop-filter: blur(2px);
+    isolation: isolate;
   }
 
   .composer-head {
@@ -652,5 +658,19 @@
       flex-wrap: wrap;
       justify-content: flex-end;
     }
+  }
+
+  :global(body.jira-worklog-modal-open .hover-comments .panel) {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    transform: translateY(-4px) !important;
+  }
+
+  :global(body.jira-worklog-modal-open .card),
+  :global(body.jira-worklog-modal-open .card:hover),
+  :global(body.jira-worklog-modal-open .card:focus-within) {
+    z-index: 1 !important;
+    transform: none !important;
   }
 </style>

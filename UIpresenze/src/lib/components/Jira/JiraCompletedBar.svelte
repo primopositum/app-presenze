@@ -89,6 +89,7 @@
     try {
       const data = await jiraSearch({
         jql: '(statusCategory = Done OR status in ("Completed","Completata")) ORDER BY updated DESC',
+        maxResults: 300,
         fields:
           'summary,status,assignee,issuetype,parent,project,timetracking,timespent,aggregatetimespent,timeestimate,aggregatetimeestimate,timeoriginalestimate,aggregatetimeoriginalestimate'
       });
