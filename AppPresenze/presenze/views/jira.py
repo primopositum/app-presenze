@@ -529,11 +529,19 @@ class JiraProxyView(APIView):
         jql = _exclude_completata_for_scope_jql(request.GET.get("jql", ""))
         fields_raw = request.GET.get("fields", "summary,status,priority,assignee,created,updated")
         max_results_raw = request.GET.get("maxResults")
+        start_at_raw = request.GET.get("startAt", 0)
+        try:
+            start_at = max(0, int(str(start_at_raw).strip() or 0))
+        except (TypeError, ValueError):
+            start_at = 0
+
+        fetch_all_pages = str(max_results_raw or "").strip().lower() in {"0", "all", "*"}
         if max_results_raw in (None, ""):
             max_results = 300 if _jql_looks_completed_history(jql) else 20
+        elif fetch_all_pages:
+            max_results = 100
         else:
             max_results = max_results_raw
-        start_at = request.GET.get("startAt", 0)
 
         creds, error_response = _jira_credentials_for_user(request.user)
         if error_response:
@@ -548,15 +556,53 @@ class JiraProxyView(APIView):
         params = {
             "jql": jql,
             "fields": fields,
-            "maxResults": max_results,
-            "startAt": start_at,
         }
         headers = _jira_headers(email, api_token)
 
         try:
-            response = requests.get(url, params=params, headers=headers, timeout=10)
-            response.raise_for_status()
-            payload = response.json()
+            if fetch_all_pages:
+                collected_issues = []
+                page_start = start_at
+                total = 0
+                payload = {}
+                status_code = 200
+
+                while True:
+                    page_params = {
+                        **params,
+                        "maxResults": max_results,
+                        "startAt": page_start,
+                    }
+                    response = requests.get(url, params=page_params, headers=headers, timeout=10)
+                    response.raise_for_status()
+                    status_code = response.status_code
+                    page_payload = response.json() or {}
+                    if not payload:
+                        payload = page_payload
+
+                    batch = page_payload.get("issues", [])
+                    if isinstance(batch, list):
+                        collected_issues.extend(batch)
+
+                    total = int(page_payload.get("total", len(collected_issues)) or len(collected_issues))
+                    page_start += len(batch) if isinstance(batch, list) else 0
+                    if page_start >= total or not batch:
+                        break
+
+                payload["issues"] = collected_issues
+                payload["startAt"] = start_at
+                payload["maxResults"] = len(collected_issues)
+                payload["total"] = total
+            else:
+                request_params = {
+                    **params,
+                    "maxResults": max_results,
+                    "startAt": start_at,
+                }
+                response = requests.get(url, params=request_params, headers=headers, timeout=10)
+                response.raise_for_status()
+                status_code = response.status_code
+                payload = response.json()
 
             if _is_scope_filter_jql(jql):
                 _drop_completata_issues_case_insensitive(payload)
@@ -572,7 +618,7 @@ class JiraProxyView(APIView):
                     if isinstance(issue_fields, dict):
                         issue_fields.pop("priority", None)
 
-            return Response(payload, status=response.status_code)
+            return Response(payload, status=status_code)
         except requests.exceptions.Timeout:
             return Response({"error": "Timeout connessione a Jira"}, status=504)
         except requests.exceptions.HTTPError as e:

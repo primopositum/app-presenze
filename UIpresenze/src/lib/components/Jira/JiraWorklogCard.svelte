@@ -64,9 +64,15 @@
     worklogDate = day;
   }
 
+  // Lock body scroll when modal is open — avoids layout shift conflicts
   $: if (typeof document !== 'undefined') {
-    document.body.style.overflow = showWorklogComposer ? 'hidden' : '';
-    document.body.classList.toggle('jira-worklog-modal-open', showWorklogComposer);
+    if (showWorklogComposer) {
+      document.body.style.overflow = 'hidden';
+      document.body.classList.add('jira-worklog-modal-open');
+    } else {
+      document.body.style.overflow = '';
+      document.body.classList.remove('jira-worklog-modal-open');
+    }
   }
 
   onDestroy(() => {
@@ -76,21 +82,21 @@
     }
   });
 
+  // Portal: move modal to body to escape any parent stacking context / z-index conflicts
   function portalToBody(node: HTMLElement) {
     if (typeof document === 'undefined') return;
-
-    const originalParent = node.parentNode;
-    const originalNextSibling = node.nextSibling;
+    const placeholder = document.createComment('portal-placeholder');
+    node.parentNode?.insertBefore(placeholder, node);
     document.body.appendChild(node);
 
     return {
       destroy() {
-        if (!originalParent) return;
-        if (originalNextSibling && originalNextSibling.parentNode === originalParent) {
-          originalParent.insertBefore(node, originalNextSibling);
-          return;
+        if (document.body.contains(node)) {
+          document.body.removeChild(node);
         }
-        originalParent.appendChild(node);
+        if (placeholder.parentNode) {
+          placeholder.parentNode.removeChild(placeholder);
+        }
       }
     };
   }
@@ -195,13 +201,23 @@
     clearComposerMessages();
   }
 
-  function closeComposerFromBackdrop() {
+  // Only close on backdrop click, never bubble up to parent hover handlers
+  function handleBackdropPointerDown(e: PointerEvent) {
+    e.stopPropagation();
+  }
+
+  function handleBackdropClick(e: MouseEvent) {
+    e.stopPropagation();
     if (creatingWorklog || loadingLoggableIssues) return;
     closeComposer();
   }
 
-  function pickIssue(issueKey: string) {
-    selectedIssueKey = issueKey;
+  function stopAll(e: Event) {
+    e.stopPropagation();
+  }
+
+  function pickIssue(key: string) {
+    selectedIssueKey = key;
     clearComposerMessages();
   }
 
@@ -269,31 +285,62 @@
 </script>
 
 <div class="jira-worklog">
+  <!--
+    FIX: un solo handler on:click con |stopPropagation inline.
+    Rimuove il doppio on:click che causava race condition
+    con i listener hover del componente padre.
+  -->
   <button
     class="worklog-btn"
     type="button"
-    on:click={() => loadLoggableIssues(false)}
-    on:click|stopPropagation
+    on:click|stopPropagation={() => loadLoggableIssues(false)}
+    on:mousedown|stopPropagation
     on:keydown|stopPropagation
     disabled={!activeDate || loadingLoggableIssues || blocked}
     title={blocked ? blockedReason : ''}
   >
     {loadingLoggableIssues ? 'Caricamento spazi...' : 'Aggiungi worklog Jira'}
   </button>
+
   {#if blocked && blockedReason}
     <p class="worklog-blocked">{blockedReason}</p>
   {/if}
 
   {#if showWorklogComposer}
-    <div class="worklog-overlay" use:portalToBody on:click|stopPropagation={closeComposerFromBackdrop}>
-      <div class="worklog-composer" role="dialog" aria-modal="true" on:click|stopPropagation>
+    <!--
+      FIX: overlay gestisce pointerdown + click separatamente.
+      Il pointerdown blocca subito la propagazione verso la card padre
+      (mouseleave/mouseenter), impedendo il loop apri-chiudi.
+      Il composer interno blocca tutti gli eventi risalenti.
+    -->
+    <div
+      class="worklog-overlay"
+      use:portalToBody
+      on:pointerdown={handleBackdropPointerDown}
+      on:click={handleBackdropClick}
+      on:mouseenter|stopPropagation
+      on:mouseleave|stopPropagation
+      on:mouseover|stopPropagation
+      on:mouseout|stopPropagation
+    >
+      <div
+        class="worklog-composer"
+        role="dialog"
+        aria-modal="true"
+        on:click={stopAll}
+        on:pointerdown={stopAll}
+        on:mouseenter|stopPropagation
+        on:mouseleave|stopPropagation
+        on:mouseover|stopPropagation
+        on:mouseout|stopPropagation
+      >
         <div class="composer-head">
           <strong>Nuovo worklog</strong>
           <div class="composer-actions">
             <button
               class="composer-ghost"
               type="button"
-              on:click={() => loadLoggableIssues(true)}
+              on:click|stopPropagation={() => loadLoggableIssues(true)}
               disabled={loadingLoggableIssues || creatingWorklog}
             >
               Aggiorna lista
@@ -301,7 +348,7 @@
             <button
               class="composer-ghost"
               type="button"
-              on:click={closeComposer}
+              on:click|stopPropagation={closeComposer}
               disabled={creatingWorklog}
             >
               Chiudi
@@ -353,7 +400,7 @@
                   type="button"
                   class="issue-item"
                   class:selected={selectedIssueKey === issue.key}
-                  on:click={() => pickIssue(issue.key)}
+                  on:click|stopPropagation={() => pickIssue(issue.key)}
                 >
                   <small>{issue.key}</small>
                   <strong>{issueProjectLabel(issue)}</strong>
@@ -392,7 +439,7 @@
           <button
             class="worklog-submit"
             type="button"
-            on:click={createWorklog}
+            on:click|stopPropagation={createWorklog}
             disabled={creatingWorklog || loadingLoggableIssues || !activeDate}
           >
             {creatingWorklog ? 'Invio in corso...' : 'Registra worklog'}
@@ -442,17 +489,11 @@
     color: #c2410c;
   }
 
-  .worklog-composer {
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    background: #f8fafc;
-    padding: 0.7rem;
-    width: min(860px, calc(100vw - 2rem));
-    max-height: calc(100vh - 3rem);
-    overflow: auto;
-    box-shadow: 0 20px 45px rgba(15, 23, 42, 0.28);
-  }
-
+  /*
+   * FIX: isolation: isolate crea un nuovo stacking context nel composer,
+   * impedendo che z-index dei figli "sfuggano" verso la card padre.
+   * will-change: transform forza la GPU a trattarlo come layer separato.
+   */
   .worklog-overlay {
     position: fixed;
     inset: 0;
@@ -464,6 +505,24 @@
     background: rgba(15, 23, 42, 0.5);
     backdrop-filter: blur(2px);
     isolation: isolate;
+    /* Evita che il repaint dell'overlay tocchi il layer della card padre */
+    will-change: opacity;
+    contain: strict;
+  }
+
+  .worklog-composer {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #f8fafc;
+    padding: 0.7rem;
+    width: min(860px, calc(100vw - 2rem));
+    max-height: calc(100vh - 3rem);
+    overflow: auto;
+    box-shadow: 0 20px 45px rgba(15, 23, 42, 0.28);
+    /* Stacking context proprio: i figli non competono con la card */
+    isolation: isolate;
+    position: relative;
+    z-index: 1;
   }
 
   .composer-head {
@@ -660,11 +719,28 @@
     }
   }
 
+  /*
+   * FIX: quando il modale è aperto, disabilita completamente hover e
+   * transform sulla card padre tramite pointer-events: none sull'overlay
+   * che copre tutto. Il pannello hover viene nascosto con !important
+   * per evitare conflitti di z-index con l'overlay portato nel body.
+   */
+  :global(body.jira-worklog-modal-open) {
+    /* Blocca tutti gli eventi pointer sugli elementi sotto l'overlay */
+    pointer-events: none;
+  }
+
+  /* Il solo overlay (portato nel body) deve restare interagibile */
+  :global(body.jira-worklog-modal-open .worklog-overlay) {
+    pointer-events: auto;
+  }
+
   :global(body.jira-worklog-modal-open .hover-comments .panel) {
     opacity: 0 !important;
     visibility: hidden !important;
     pointer-events: none !important;
     transform: translateY(-4px) !important;
+    transition: none !important;
   }
 
   :global(body.jira-worklog-modal-open .card),
@@ -672,5 +748,6 @@
   :global(body.jira-worklog-modal-open .card:focus-within) {
     z-index: 1 !important;
     transform: none !important;
+    transition: none !important;
   }
 </style>

@@ -91,6 +91,12 @@
     }
   }
 
+  function handleCoefficienteInput(event: Event) {
+    const target = event.currentTarget as HTMLInputElement | null;
+    if (!target) return;
+    coefficiente = target.value.replace(/,/g, '.');
+  }
+
   async function submitForm() {
     error = null;
     if (!marca.trim() || !alimentazione.trim()) {
@@ -98,7 +104,7 @@
       return;
     }
 
-    const coefficienteValue = coefficiente.trim() || 0;
+    const coefficienteValue = coefficiente.trim().replace(/,/g, '.') || 0;
 
     const payload: AutomobileCreate = {
       marca: marca.trim(),
@@ -207,7 +213,12 @@
       <div class="form-grid">
         <input type="text" bind:value={marca} placeholder="Marca" />
         <input type="text" bind:value={alimentazione} placeholder="Alimentazione" />
-        <input type="text" bind:value={coefficiente} placeholder="Coefficiente" />
+        <input
+          type="text"
+          bind:value={coefficiente}
+          placeholder="Coefficiente"
+          on:input={handleCoefficienteInput}
+        />
         <input type="text" bind:value={descrizione} placeholder="Descrizione" />
         <label class="check">
           <input type="checkbox" bind:checked={isActive} />

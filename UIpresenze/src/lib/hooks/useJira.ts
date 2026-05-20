@@ -19,7 +19,7 @@ export type JiraSearchInput = {
   scopeType?: 'project' | 'filter' | 'labels';
   scopeValue: string;
   assigneeFilter: string;
-  maxResults: number;
+  maxResults?: number;
 };
 
 export async function useJiraSearch(input: JiraSearchInput) {
@@ -44,14 +44,16 @@ export async function useJiraSearch(input: JiraSearchInput) {
     baseJql = `project=${scopeValue}`;
   }
 
-  const jql = `${baseJql}${input.assigneeFilter ? ` AND assignee=${input.assigneeFilter}` : ''} ORDER BY created DESC`;
+  const year2026Range = 'created >= "2026-01-01" AND created < "2027-01-01"';
+  const jql = `${baseJql}${input.assigneeFilter ? ` AND assignee=${input.assigneeFilter}` : ''} AND ${year2026Range} ORDER BY created DESC`;
   const fields =
     'summary,status,priority,assignee,created,updated,issuetype,project,comment,timetracking,timespent,aggregatetimespent,timeestimate,aggregatetimeestimate,timeoriginalestimate,aggregatetimeoriginalestimate';
 
   return jiraSearch({
     jql,
     fields,
-    maxResults: Number(input.maxResults ?? 20)
+    // 0 = fetch all pages lato backend
+    maxResults: Number(input.maxResults ?? 0)
   });
 }
 

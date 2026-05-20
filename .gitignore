@@ -131,3 +131,10 @@ playwright-report/
 playwright/.cache/
 
 AppPresenze/.example.env
+
+# ==========================================
+# AGENT SKILLS (local tooling)
+# ==========================================
+
+.agents/skills/caveman/
+.agents/skills/caveman-*/

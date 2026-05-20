@@ -66,7 +66,6 @@
   // Searchbar state
   let searchQuery = '';
   let assigneeFilter = '';
-  let maxResults = 100;
 
   const STATUS_META: Record<string, { accent: string; text: string }> = {
     'To Do': { accent: '#4f46e5', text: '#a5b4fc' },
@@ -275,8 +274,7 @@
     try {
       const data = await useJiraSearch({
         scopeValue,
-        assigneeFilter,
-        maxResults
+        assigneeFilter
       });
       issues = (data?.issues || []) as JiraIssue[];
       lastUpdate = new Date().toLocaleTimeString('it-IT');
@@ -381,12 +379,7 @@
       <option value="currentUser()">Solo le mie</option>
     </select>
 
-    <select class="search-select" bind:value={maxResults} on:change={loaded ? fetchTasks : undefined}>
-      <option value={10}>10 risultati</option>
-      <option value={20}>20 risultati</option>
-      <option value={50}>50 risultati</option>
-      <option value={100}>100 risultati</option>
-    </select>
+    <span class="search-select" aria-label="Filtro anno">Anno: 2026</span>
 
     <label class="view-toggle" title="Cambia vista issue">
       <span>Elenco</span>
