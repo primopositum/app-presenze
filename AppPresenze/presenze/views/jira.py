@@ -239,6 +239,93 @@ def _local_date_from_started(started_value: str):
     return parsed.astimezone(django_timezone.get_current_timezone()).date()
 
 
+def _parse_scope_preset(scope_value_raw: str):
+    scope_value = str(scope_value_raw or "").strip()
+    if not scope_value:
+        return None, ""
+    match = re.match(r"^(project|filter|labels|space)\s*=\s*(.+)$", scope_value, flags=re.IGNORECASE)
+    if not match:
+        return None, scope_value
+    scope_type = str(match.group(1) or "").strip().lower()
+    if scope_type == "space":
+        scope_type = "labels"
+    scope_value = str(match.group(2) or "").strip()
+    return scope_type, scope_value
+
+
+def _extract_project_key_for_statuses(scope_type_raw: str, scope_value_raw: str):
+    scope_type = str(scope_type_raw or "").strip().lower()
+    scope_value = str(scope_value_raw or "").strip()
+
+    preset_type, preset_value = _parse_scope_preset(scope_value)
+    if preset_type:
+        scope_type = preset_type
+        scope_value = preset_value
+
+    if scope_type != "project":
+        return ""
+
+    project_key = str(scope_value or "").strip()
+    if not project_key:
+        return ""
+    if not re.match(r"^[A-Za-z][A-Za-z0-9_]*$", project_key):
+        return ""
+    return project_key
+
+
+def _status_category_rank(category_key: str):
+    key = str(category_key or "").strip().casefold()
+    if key in {"new", "todo", "to do", "to-do"}:
+        return 0
+    if key in {"indeterminate", "in progress", "in-progress"}:
+        return 1
+    if key in {"done", "complete", "completed"}:
+        return 2
+    return 3
+
+
+def _normalize_status_rows(status_rows):
+    normalized = []
+    seen_names = set()
+    for row in status_rows or []:
+        if not isinstance(row, dict):
+            continue
+
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+        name_key = name.casefold()
+        if name_key in seen_names:
+            continue
+        seen_names.add(name_key)
+
+        status_category = row.get("statusCategory", {}) or {}
+        category_key = str(status_category.get("key") or "").strip()
+        category_name = str(status_category.get("name") or "").strip()
+        normalized.append(
+            {
+                "id": str(row.get("id") or ""),
+                "name": name,
+                "category_key": category_key,
+                "category_name": category_name,
+            }
+        )
+
+    normalized.sort(key=lambda item: (_status_category_rank(item.get("category_key")), (item.get("name") or "").casefold()))
+    return normalized
+
+
+def _extract_statuses_from_project_payload(payload):
+    rows = []
+    if not isinstance(payload, list):
+        return rows
+    for issue_type in payload:
+        statuses = (issue_type or {}).get("statuses", []) or []
+        if isinstance(statuses, list):
+            rows.extend(statuses)
+    return rows
+
+
 def _sum_worked_seconds_for_user_day(user, target_date: date) -> int:
     if not target_date:
         return 0
@@ -791,6 +878,53 @@ class JiraProxyView(APIView):
             return Response(detail, status=e.response.status_code)
         except requests.exceptions.RequestException as e: 
             return Response({"error": str(e)}, status=502)
+
+
+class JiraStatusesView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        scope_type = (request.GET.get("scopeType") or "").strip()
+        scope_value = (request.GET.get("scopeValue") or "").strip()
+
+        creds, error_response = _jira_credentials_for_user(request.user)
+        if error_response:
+            return error_response
+        domain, email, api_token = creds
+        headers = _jira_headers(email, api_token)
+
+        project_key = _extract_project_key_for_statuses(scope_type, scope_value)
+        source = "global"
+        url = f"https://{domain}/rest/api/3/status"
+        if project_key:
+            source = "project"
+            url = f"https://{domain}/rest/api/3/project/{project_key}/statuses"
+
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            payload = response.json() or []
+
+            if source == "project":
+                status_rows = _extract_statuses_from_project_payload(payload)
+            else:
+                status_rows = payload if isinstance(payload, list) else []
+
+            statuses = _normalize_status_rows(status_rows)
+            return Response(
+                {
+                    "source": source,
+                    "project_key": project_key or None,
+                    "count": len(statuses),
+                    "statuses": statuses,
+                }
+            )
+        except requests.exceptions.Timeout:
+            return Response({"error": "Timeout connessione a Jira"}, status=504)
+        except requests.exceptions.HTTPError as exc:
+            return _jira_error_response(exc)
+        except requests.exceptions.RequestException as exc:
+            return Response({"error": str(exc)}, status=502)
 
 
 class JiraWorklogsTodayView(APIView):

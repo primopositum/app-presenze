@@ -4,6 +4,7 @@ import {
   jiraFiltersPost,
   jiraIssueTime,
   jiraWorklogsByYear,
+  jiraStatuses,
   jiraAddWorklog,
   jiraUpdateState,
   jiraUpdateWorklog,
@@ -14,6 +15,7 @@ import {
   type JiraScopeType,
   type JiraIssueTimeFilter,
   type JiraYearWorklogResponse,
+  type JiraStatusesResponse,
   type JiraUpdateStatePayload,
   type JiraWorklogPayload,
   type JiraIssueEstimatePayload,
@@ -48,8 +50,7 @@ export async function useJiraSearch(input: JiraSearchInput) {
     baseJql = `project=${scopeValue}`;
   }
 
-  const year2026Range = 'created >= "2026-01-01" AND created < "2027-01-01"';
-  const jql = `${baseJql}${input.assigneeFilter ? ` AND assignee=${input.assigneeFilter}` : ''} AND ${year2026Range} ORDER BY created DESC`;
+  const jql = `${baseJql}${input.assigneeFilter ? ` AND assignee=${input.assigneeFilter}` : ''} ORDER BY created DESC`;
   const fields =
     'summary,status,priority,assignee,created,updated,issuetype,project,comment,timetracking,timespent,aggregatetimespent,timeestimate,aggregatetimeestimate,timeoriginalestimate,aggregatetimeoriginalestimate';
 
@@ -92,6 +93,14 @@ export async function useJiraWorklogsByYear(year: number | string): Promise<Jira
     throw new Error('Anno non valido');
   }
   return jiraWorklogsByYear(parsedYear);
+}
+
+export async function useJiraStatuses(scopeType?: JiraScopeType, scopeValue = ''): Promise<JiraStatusesResponse> {
+  const rawScopeValue = String(scopeValue ?? '').trim();
+  const parsedPreset = parseScopePreset(rawScopeValue);
+  const resolvedType = parsedPreset?.type ?? scopeType ?? inferScopeType(rawScopeValue);
+  const resolvedValue = parsedPreset?.value ?? rawScopeValue;
+  return jiraStatuses(resolvedType, resolvedValue);
 }
 
 export async function useJiraAddWorklog(issueKey: string, payload: JiraWorklogPayload) {

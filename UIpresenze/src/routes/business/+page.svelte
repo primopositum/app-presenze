@@ -2,6 +2,7 @@
   import { goto } from '$app/navigation';
   import {
     useJiraSearch,
+    useJiraStatuses,
     useJiraFiltersGet,
     useJiraFiltersPost,
     useJiraUpdateState,
@@ -48,6 +49,7 @@
   };
 
   let issues: JiraIssue[] = [];
+  let jiraStatuses: string[] = [];
   let activeStatus = 'all';
   let loading = false;
   let error = '';
@@ -97,7 +99,21 @@
       .map(([name]) => name);
   })();
 
-  $: statuses = statusOrder;
+  $: statuses = (() => {
+    const merged: string[] = [];
+    const seen = new Set<string>();
+    const push = (name?: string) => {
+      const value = String(name || '').trim();
+      if (!value || value === 'Senza stato') return;
+      const key = value.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      merged.push(value);
+    };
+    jiraStatuses.forEach(push);
+    statusOrder.forEach(push);
+    return merged;
+  })();
 
   $: statusCounts = issues.reduce<Record<string, number>>((acc, i) => {
     const s = i.fields?.status?.name;
@@ -128,13 +144,20 @@
     return matchStatus && matchSearch;
   });
   $: groupedByStatus = (() => {
-    const filteredStatusNames = new Set(filtered.map((i) => i.fields?.status?.name || 'Senza stato'));
-    const ordered = statusOrder.filter((name) => filteredStatusNames.has(name));
-    if (filteredStatusNames.has('Senza stato')) ordered.push('Senza stato');
-    return ordered.map((status) => ({
+    const groups = statuses.map((status) => ({
       status,
       items: filtered.filter((issue) => (issue.fields?.status?.name || 'Senza stato') === status)
     }));
+
+    const hasNoStatus = filtered.some((issue) => !(issue.fields?.status?.name || '').trim());
+    if (hasNoStatus && !groups.some((group) => group.status === 'Senza stato')) {
+      groups.push({
+        status: 'Senza stato',
+        items: filtered.filter((issue) => (issue.fields?.status?.name || 'Senza stato') === 'Senza stato')
+      });
+    }
+
+    return groups;
   })();
   $: statusColumns = Math.min(Math.max(groupedByStatus.length, 1), 5);
   $: if (persistenceReady) {
@@ -378,6 +401,16 @@
         assigneeFilter
       });
       issues = (data?.issues || []) as JiraIssue[];
+      try {
+        const statusesData = await useJiraStatuses(undefined, scopeValue);
+        jiraStatuses = Array.isArray(statusesData?.statuses)
+          ? statusesData.statuses
+              .map((item) => String(item?.name || '').trim())
+              .filter((name, index, arr) => !!name && arr.findIndex((val) => val.toLowerCase() === name.toLowerCase()) === index)
+          : [];
+      } catch {
+        jiraStatuses = [];
+      }
       lastUpdate = new Date().toLocaleTimeString('it-IT');
       loaded = true;
       if (activeStatus !== 'all' && !statuses.includes(activeStatus)) {
@@ -479,8 +512,6 @@
       <option value="">Tutti</option>
       <option value="currentUser()">Solo le mie</option>
     </select>
-
-    <span class="search-select" aria-label="Filtro anno">Anno: 2026</span>
 
     <label class="view-toggle" title="Cambia vista issue">
       <span>Elenco</span>

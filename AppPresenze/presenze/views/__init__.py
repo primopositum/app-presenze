@@ -30,6 +30,7 @@ from .signatures import signature_create, signature_latest
 from .utilitiesbar import UtilitiesBarListView
 from .jira import (
     JiraProxyView,
+    JiraStatusesView,
     JiraWorklogsTodayView,
     JiraWorklogView,
     JiraWorklogStreamView,

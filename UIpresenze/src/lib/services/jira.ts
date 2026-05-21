@@ -127,6 +127,20 @@ export type JiraYearWorklogResponse = {
   projects: JiraYearWorklogProject[];
 };
 
+export type JiraStatusInfo = {
+  id?: string;
+  name: string;
+  category_key?: string;
+  category_name?: string;
+};
+
+export type JiraStatusesResponse = {
+  source?: 'project' | 'global';
+  project_key?: string | null;
+  count: number;
+  statuses: JiraStatusInfo[];
+};
+
 async function request(path: string, params: Record<string, string>) {
   const endpoint = path.startsWith('http') ? path : `${BASE}${path.startsWith('/') ? '' : '/'}${path}`;
   const searchParams = new URLSearchParams();
@@ -210,6 +224,13 @@ export function jiraTimesheet(date: string) {
 
 export function jiraWorklogsByYear(year: string | number) {
   return request('/jira/worklogs/year/', { year: String(year ?? '').trim() }) as Promise<JiraYearWorklogResponse>;
+}
+
+export function jiraStatuses(scopeType = '', scopeValue = '') {
+  return request('/jira/statuses/', {
+    scopeType: String(scopeType || '').trim(),
+    scopeValue: String(scopeValue || '').trim(),
+  }) as Promise<JiraStatusesResponse>;
 }
 
 export function jiraFiltersGet() {
