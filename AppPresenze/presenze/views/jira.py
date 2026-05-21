@@ -1,10 +1,13 @@
 import base64
+import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, time, timedelta, timezone as dt_timezone
 from urllib.parse import urlparse
 
 import requests
 from django.db.models import Sum
+from django.http import StreamingHttpResponse
 from django.utils import timezone as django_timezone
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -278,6 +281,7 @@ _PRIORITY_NAME_ORDER = {
     "lowest": 5,
     "trivial": 5,
 }
+_WORKLOG_ENRICH_MAX_WORKERS = 8
 
 
 def _parse_time_spent_to_seconds(time_spent: str):
@@ -421,6 +425,7 @@ def _enrich_completed_issues_with_worklog_authors(search_payload, domain: str, h
     if not isinstance(issues, list):
         return
 
+    issue_rows = []
     for issue in issues:
         if not isinstance(issue, dict):
             continue
@@ -428,35 +433,52 @@ def _enrich_completed_issues_with_worklog_authors(search_payload, domain: str, h
         fields = issue.get("fields")
         if not issue_key or not isinstance(fields, dict):
             continue
+        issue_rows.append((issue_key, fields))
 
-        try:
-            totals = _worklog_seconds_by_author(domain, issue_key, headers)
-        except requests.exceptions.RequestException:
-            # Se una issue non e interrogabile, non bloccare l'intera risposta.
-            continue
+    if not issue_rows:
+        return
 
-        if not totals:
-            continue
+    max_workers = min(_WORKLOG_ENRICH_MAX_WORKERS, len(issue_rows))
+    if max_workers <= 1:
+        # Fallback: mantiene il comportamento anche su ambienti con un solo worker.
+        max_workers = 1
 
-        sorted_authors = sorted(
-            totals.items(),
-            key=lambda item: (-item[1], item[0].lower()),
-        )
-        workers = [
-            {"displayName": name, "timeSpentSeconds": seconds}
-            for name, seconds in sorted_authors
-        ]
-
-        # Manteniamo il contratto FE invariato: assignee.displayName esiste sempre.
-        top_name, top_seconds = sorted_authors[0]
-        fields["assignee"] = {"displayName": top_name}
-
-        # Metadati aggiuntivi utili per debug/estensioni future.
-        fields["worklog_authors"] = workers
-        fields["worklog_primary_author"] = {
-            "displayName": top_name,
-            "timeSpentSeconds": top_seconds,
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_map = {
+            executor.submit(_worklog_seconds_by_author, domain, issue_key, headers): fields
+            for issue_key, fields in issue_rows
         }
+
+        for future in as_completed(future_map):
+            fields = future_map[future]
+            try:
+                totals = future.result()
+            except requests.exceptions.RequestException:
+                # Se una issue non e interrogabile, non bloccare l'intera risposta.
+                continue
+
+            if not totals:
+                continue
+
+            sorted_authors = sorted(
+                totals.items(),
+                key=lambda item: (-item[1], item[0].lower()),
+            )
+            workers = [
+                {"displayName": name, "timeSpentSeconds": seconds}
+                for name, seconds in sorted_authors
+            ]
+
+            # Manteniamo il contratto FE invariato: assignee.displayName esiste sempre.
+            top_name, top_seconds = sorted_authors[0]
+            fields["assignee"] = {"displayName": top_name}
+
+            # Metadati aggiuntivi utili per debug/estensioni future.
+            fields["worklog_authors"] = workers
+            fields["worklog_primary_author"] = {
+                "displayName": top_name,
+                "timeSpentSeconds": top_seconds,
+            }
 
 
 def _jira_current_account_id(domain: str, headers: dict):
@@ -465,6 +487,146 @@ def _jira_current_account_id(domain: str, headers: dict):
     response.raise_for_status()
     payload = response.json() or {}
     return str(payload.get("accountId") or "").strip()
+
+
+def _year_worklog_jql(target_year: int) -> str:
+    # Buffer di un anno: include issue chiuse a cavallo ma con worklog nell'anno target.
+    return (
+        f'(statusCategory = Done OR status in ("Completed","Completata"))'
+        f' AND resolutiondate >= "{date(target_year - 1, 1, 1).isoformat()}"'
+        f' AND resolutiondate <= "{date(target_year + 1, 1, 1).isoformat()}"'
+        f' ORDER BY updated DESC'
+    )
+
+
+def _search_issues_for_year_worklog(domain: str, headers: dict, target_year: int):
+    search_url = f"https://{domain}/rest/api/3/search/jql"
+    jql = _year_worklog_jql(target_year)
+    start_at = 0
+    issues = []
+
+    while True:
+        params = {
+            "jql": jql,
+            "fields": ["summary", "project", "status", "assignee"],
+            "startAt": start_at,
+            "maxResults": 100,
+        }
+        search_response = requests.get(search_url, params=params, headers=headers, timeout=10)
+        search_response.raise_for_status()
+        payload = search_response.json() or {}
+        batch = payload.get("issues", [])
+        if isinstance(batch, list):
+            issues.extend(batch)
+
+        start_at += len(batch) if isinstance(batch, list) else 0
+        total = int(payload.get("total", 0))
+        if start_at >= total or not batch:
+            break
+
+    return issues, jql
+
+
+def _build_year_worklog_payload(
+    domain: str,
+    headers: dict,
+    target_year: int,
+    issues: list,
+    progress_cb=None,
+):
+    projects_map = {}
+    total_worklogs = 0
+    total_seconds = 0
+    total_issues = 0
+    total = len(issues)
+
+    for idx, issue in enumerate(issues):
+        issue_key = str((issue or {}).get("key") or "").strip()
+        if not issue_key:
+            if progress_cb:
+                progress_cb(idx + 1, total)
+            continue
+
+        fields = (issue.get("fields") or {}) if isinstance(issue, dict) else {}
+        project = fields.get("project", {}) or {}
+        project_key = str(project.get("key") or "N/D").strip() or "N/D"
+        project_name = str(project.get("name") or "Progetto non disponibile").strip() or "Progetto non disponibile"
+
+        issue_worklogs = []
+        issue_total_seconds = 0
+        worklogs = _fetch_issue_worklogs(domain, issue_key, headers)
+
+        for worklog in worklogs:
+            started_value = str(worklog.get("started") or "")
+            local_day = _local_date_from_started(started_value)
+            # Filtro preciso anno lato Python.
+            if not local_day or local_day.year != target_year:
+                continue
+
+            seconds = int(worklog.get("timeSpentSeconds") or 0)
+            author = worklog.get("author", {}) or {}
+            comment = _extract_comment_text(worklog.get("comment")).strip()
+            issue_worklogs.append(
+                {
+                    "worklog_id": worklog.get("id"),
+                    "author": author.get("displayName"),
+                    "author_account_id": author.get("accountId"),
+                    "started": started_value,
+                    "date": local_day.isoformat(),
+                    "time_spent": worklog.get("timeSpent"),
+                    "time_spent_seconds": seconds,
+                    "comment": comment,
+                }
+            )
+            if seconds > 0:
+                issue_total_seconds += seconds
+
+        if issue_worklogs:
+            issue_worklogs.sort(key=lambda item: item.get("started") or "", reverse=True)
+            total_worklogs += len(issue_worklogs)
+            total_seconds += issue_total_seconds
+            total_issues += 1
+
+            if project_key not in projects_map:
+                projects_map[project_key] = {
+                    "project_key": project_key,
+                    "project_name": project_name,
+                    "issues": [],
+                    "issues_count": 0,
+                    "worklogs_count": 0,
+                    "total_seconds": 0,
+                }
+
+            projects_map[project_key]["issues"].append(
+                {
+                    "issue_key": issue_key,
+                    "issue_summary": fields.get("summary"),
+                    "status": (fields.get("status", {}) or {}).get("name"),
+                    "assignee": (fields.get("assignee", {}) or {}).get("displayName"),
+                    "worklogs_count": len(issue_worklogs),
+                    "total_seconds": issue_total_seconds,
+                    "worklogs": issue_worklogs,
+                }
+            )
+            projects_map[project_key]["issues_count"] += 1
+            projects_map[project_key]["worklogs_count"] += len(issue_worklogs)
+            projects_map[project_key]["total_seconds"] += issue_total_seconds
+
+        if progress_cb:
+            progress_cb(idx + 1, total)
+
+    projects = list(projects_map.values())
+    for project_row in projects:
+        project_row["issues"].sort(key=lambda item: (item.get("issue_key") or ""))
+    projects.sort(key=lambda item: (item.get("project_key") or ""))
+
+    return {
+        "projects_count": len(projects),
+        "issues_count": total_issues,
+        "worklogs_count": total_worklogs,
+        "total_seconds": total_seconds,
+        "projects": projects,
+    }
 
 ##########################################################################################################################################################################################################################################
 #functions
@@ -627,7 +789,7 @@ class JiraProxyView(APIView):
             except Exception:
                 detail = {"error": str(e)}
             return Response(detail, status=e.response.status_code)
-        except requests.exceptions.RequestException as e:
+        except requests.exceptions.RequestException as e: 
             return Response({"error": str(e)}, status=502)
 
 
@@ -740,6 +902,194 @@ class JiraWorklogsTodayView(APIView):
             return Response(detail, status=e.response.status_code)
         except requests.exceptions.RequestException as e:
             return Response({"error": str(e)}, status=502)
+
+
+class JiraWorklogView(APIView):
+    """
+    Restituisce i worklog Jira per un anno specifico, organizzati per progetto -> issue -> worklog.
+
+    Endpoint:
+        GET /api/jira/worklogs/year/?year=YYYY
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        year_raw = (request.GET.get("year") or "").strip()
+        if not year_raw:
+            return Response({"error": "Parametro year obbligatorio (YYYY)"}, status=400)
+
+        try:
+            target_year = int(year_raw)
+            if target_year < 1900 or target_year > 3000:
+                raise ValueError
+        except ValueError:
+            return Response({"error": "Formato year non valido (usa YYYY)"}, status=400)
+
+        creds, error_response = _jira_credentials_for_user(request.user)
+        if error_response:
+            return error_response
+        domain, email, api_token = creds
+        headers = _jira_headers(email, api_token)
+
+        try:
+            issues, jql = _search_issues_for_year_worklog(domain, headers, target_year)
+            payload = _build_year_worklog_payload(domain, headers, target_year, issues)
+
+            return Response(
+                {
+                    "year": target_year,
+                    "jql": jql,
+                    **payload,
+                }
+            )
+        except requests.exceptions.Timeout:
+            return Response({"error": "Timeout connessione a Jira"}, status=504)
+        except requests.exceptions.HTTPError as e:
+            return _jira_error_response(e)
+        except requests.exceptions.RequestException as e:
+            return Response({"error": str(e)}, status=502)
+
+
+class JiraWorklogStreamView(APIView):
+    """
+    Stream SSE dei worklog annuali Jira con progresso incrementale.
+
+    Endpoint:
+        GET /api/jira/worklogs/year/stream/?year=YYYY
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        year_raw = (request.GET.get("year") or "").strip()
+        if not year_raw:
+            return Response({"error": "Parametro year obbligatorio (YYYY)"}, status=400)
+
+        try:
+            target_year = int(year_raw)
+            if target_year < 1900 or target_year > 3000:
+                raise ValueError
+        except ValueError:
+            return Response({"error": "Formato year non valido (usa YYYY)"}, status=400)
+
+        creds, error_response = _jira_credentials_for_user(request.user)
+        if error_response:
+            return error_response
+        domain, email, api_token = creds
+        headers = _jira_headers(email, api_token)
+
+        try:
+            issues, jql = _search_issues_for_year_worklog(domain, headers, target_year)
+        except requests.exceptions.Timeout:
+            return Response({"error": "Timeout connessione a Jira"}, status=504)
+        except requests.exceptions.HTTPError as e:
+            return _jira_error_response(e)
+        except requests.exceptions.RequestException as e:
+            return Response({"error": str(e)}, status=502)
+
+        def event_stream():
+            try:
+                total = len(issues)
+                yield f"data: {json.dumps({'type': 'start', 'total': total}, ensure_ascii=False)}\n\n"
+
+                projects_map = {}
+                total_worklogs = 0
+                total_seconds = 0
+                total_issues = 0
+
+                for idx, issue in enumerate(issues):
+                    issue_key = str((issue or {}).get("key") or "").strip()
+                    if issue_key:
+                        fields = (issue.get("fields") or {}) if isinstance(issue, dict) else {}
+                        project = fields.get("project", {}) or {}
+                        project_key = str(project.get("key") or "N/D").strip() or "N/D"
+                        project_name = str(project.get("name") or "Progetto non disponibile").strip() or "Progetto non disponibile"
+
+                        issue_worklogs = []
+                        issue_total_seconds = 0
+                        worklogs = _fetch_issue_worklogs(domain, issue_key, headers)
+                        for worklog in worklogs:
+                            started_value = str(worklog.get("started") or "")
+                            local_day = _local_date_from_started(started_value)
+                            if not local_day or local_day.year != target_year:
+                                continue
+
+                            seconds = int(worklog.get("timeSpentSeconds") or 0)
+                            author = worklog.get("author", {}) or {}
+                            comment = _extract_comment_text(worklog.get("comment")).strip()
+                            issue_worklogs.append(
+                                {
+                                    "worklog_id": worklog.get("id"),
+                                    "author": author.get("displayName"),
+                                    "author_account_id": author.get("accountId"),
+                                    "started": started_value,
+                                    "date": local_day.isoformat(),
+                                    "time_spent": worklog.get("timeSpent"),
+                                    "time_spent_seconds": seconds,
+                                    "comment": comment,
+                                }
+                            )
+                            if seconds > 0:
+                                issue_total_seconds += seconds
+
+                        if issue_worklogs:
+                            issue_worklogs.sort(key=lambda item: item.get("started") or "", reverse=True)
+                            total_worklogs += len(issue_worklogs)
+                            total_seconds += issue_total_seconds
+                            total_issues += 1
+
+                            if project_key not in projects_map:
+                                projects_map[project_key] = {
+                                    "project_key": project_key,
+                                    "project_name": project_name,
+                                    "issues": [],
+                                    "issues_count": 0,
+                                    "worklogs_count": 0,
+                                    "total_seconds": 0,
+                                }
+
+                            projects_map[project_key]["issues"].append(
+                                {
+                                    "issue_key": issue_key,
+                                    "issue_summary": fields.get("summary"),
+                                    "status": (fields.get("status", {}) or {}).get("name"),
+                                    "assignee": (fields.get("assignee", {}) or {}).get("displayName"),
+                                    "worklogs_count": len(issue_worklogs),
+                                    "total_seconds": issue_total_seconds,
+                                    "worklogs": issue_worklogs,
+                                }
+                            )
+                            projects_map[project_key]["issues_count"] += 1
+                            projects_map[project_key]["worklogs_count"] += len(issue_worklogs)
+                            projects_map[project_key]["total_seconds"] += issue_total_seconds
+
+                    yield f"data: {json.dumps({'type': 'progress', 'loaded': idx + 1, 'total': total}, ensure_ascii=False)}\n\n"
+
+                projects = list(projects_map.values())
+                for project_row in projects:
+                    project_row["issues"].sort(key=lambda item: (item.get("issue_key") or ""))
+                projects.sort(key=lambda item: (item.get("project_key") or ""))
+
+                done_payload = {
+                    "type": "done",
+                    "year": target_year,
+                    "jql": jql,
+                    "projects_count": len(projects),
+                    "issues_count": total_issues,
+                    "worklogs_count": total_worklogs,
+                    "total_seconds": total_seconds,
+                    "projects": projects,
+                }
+                yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
+            except requests.exceptions.RequestException as exc:
+                err_payload = {"type": "error", "error": str(exc)}
+                yield f"data: {json.dumps(err_payload, ensure_ascii=False)}\n\n"
+
+        response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
+        response["Cache-Control"] = "no-cache"
+        response["X-Accel-Buffering"] = "no"
+        return response
 
 
 class JiraIssueTimeView(APIView):
@@ -1138,6 +1488,107 @@ class JiraIssueWorklogView(APIView):
             return _jira_error_response(exc)
         except requests.exceptions.RequestException as exc:
             return Response({"error": str(exc)}, status=502)
+
+
+class JiraUpdateState(APIView):
+    """
+    Aggiorna lo stato Jira di una work/issue tramite transizione.
+
+    Endpoint:
+        PUT /api/jira/work/<work_key>/state/
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def put(self, request, work_key: str):
+        work_key_clean = (work_key or "").strip()
+        if not work_key_clean:
+            return Response({"error": "Work key obbligatoria"}, status=400)
+
+        transition_id = str(request.data.get("transition_id") or "").strip()
+        target_status = str(request.data.get("status") or request.data.get("to_status") or "").strip()
+        if not transition_id and not target_status:
+            return Response(
+                {"error": "Parametro obbligatorio: transition_id oppure status"},
+                status=400,
+            )
+
+        creds, error_response = _jira_credentials_for_user(request.user)
+        if error_response:
+            return error_response
+        domain, email, api_token = creds
+        headers = _jira_headers(email, api_token)
+        headers["Content-Type"] = "application/json"
+
+        transitions_url = f"https://{domain}/rest/api/3/issue/{work_key_clean}/transitions"
+
+        try:
+            transitions_res = requests.get(transitions_url, headers=headers, timeout=10)
+            transitions_res.raise_for_status()
+            transitions_payload = transitions_res.json() or {}
+            transitions = transitions_payload.get("transitions", []) or []
+            if not transitions:
+                return Response({"error": "Nessuna transizione disponibile per la work indicata"}, status=409)
+
+            selected_transition = None
+            if transition_id:
+                for tr in transitions:
+                    tr_id = str((tr or {}).get("id") or "").strip()
+                    if tr_id == transition_id:
+                        selected_transition = tr
+                        break
+                if not selected_transition:
+                    return Response(
+                        {"error": f"transition_id non valida per la work {work_key_clean}"},
+                        status=400,
+                    )
+            else:
+                target_cf = target_status.casefold()
+                for tr in transitions:
+                    tr_name = str((tr or {}).get("name") or "").strip()
+                    to_name = str(((tr or {}).get("to") or {}).get("name") or "").strip()
+                    if tr_name.casefold() == target_cf or to_name.casefold() == target_cf:
+                        selected_transition = tr
+                        break
+                if not selected_transition:
+                    available = [
+                        {
+                            "id": str((tr or {}).get("id") or ""),
+                            "name": str((tr or {}).get("name") or ""),
+                            "to_status": str(((tr or {}).get("to") or {}).get("name") or ""),
+                        }
+                        for tr in transitions
+                    ]
+                    return Response(
+                        {
+                            "error": f"Stato '{target_status}' non trovato tra le transizioni disponibili",
+                            "available_transitions": available,
+                        },
+                        status=400,
+                    )
+
+            selected_id = str((selected_transition or {}).get("id") or "").strip()
+            selected_to = str(((selected_transition or {}).get("to") or {}).get("name") or "").strip()
+            post_payload = {"transition": {"id": selected_id}}
+
+            update_res = requests.post(transitions_url, headers=headers, json=post_payload, timeout=10)
+            update_res.raise_for_status()
+
+            return Response(
+                {
+                    "ok": True,
+                    "work_key": work_key_clean,
+                    "transition_id": selected_id,
+                    "to_status": selected_to,
+                }
+            )
+        except requests.exceptions.Timeout:
+            return Response({"error": "Timeout connessione a Jira"}, status=504)
+        except requests.exceptions.HTTPError as exc:
+            return _jira_error_response(exc)
+        except requests.exceptions.RequestException as exc:
+            return Response({"error": str(exc)}, status=502)
+
 
 class JiraCredentialsView(APIView):
     permission_classes = [IsAuthenticated]

@@ -3,7 +3,9 @@ import {
   jiraFiltersGet,
   jiraFiltersPost,
   jiraIssueTime,
+  jiraWorklogsByYear,
   jiraAddWorklog,
+  jiraUpdateState,
   jiraUpdateWorklog,
   jiraDeleteWorklog,
   jiraUpdateIssueEstimate,
@@ -11,6 +13,8 @@ import {
   parseScopePreset,
   type JiraScopeType,
   type JiraIssueTimeFilter,
+  type JiraYearWorklogResponse,
+  type JiraUpdateStatePayload,
   type JiraWorklogPayload,
   type JiraIssueEstimatePayload,
 } from '$lib/services/jira';
@@ -82,8 +86,23 @@ export async function useJiraIssueTime(issueKey: string, filter: JiraIssueTimeFi
   return jiraIssueTime(issueKey, filter);
 }
 
+export async function useJiraWorklogsByYear(year: number | string): Promise<JiraYearWorklogResponse> {
+  const parsedYear = Number(String(year ?? '').trim());
+  if (!Number.isInteger(parsedYear) || parsedYear < 1900 || parsedYear > 3000) {
+    throw new Error('Anno non valido');
+  }
+  return jiraWorklogsByYear(parsedYear);
+}
+
 export async function useJiraAddWorklog(issueKey: string, payload: JiraWorklogPayload) {
   return jiraAddWorklog(issueKey, payload);
+}
+
+export async function useJiraUpdateState(workKey: string, payload: JiraUpdateStatePayload) {
+  if (!String(workKey || '').trim()) {
+    throw new Error('Work key obbligatoria');
+  }
+  return jiraUpdateState(workKey, payload);
 }
 
 export async function useJiraUpdateWorklog(issueKey: string, worklogId: string | number, payload: JiraWorklogPayload) {

@@ -57,6 +57,12 @@ export type JiraIssueEstimatePayload = {
   remainingEstimate?: string;
 };
 
+export type JiraUpdateStatePayload = {
+  transition_id?: string | number;
+  status?: string;
+  to_status?: string;
+};
+
 export type JiraIssueTimeTracking = {
   originalEstimate?: string;
   remainingEstimate?: string;
@@ -79,6 +85,46 @@ export type JiraIssueTimeResponse = {
   worklogs: any[];
   worklogs_count: number;
   filters: { started?: string | null };
+};
+
+export type JiraYearWorklogItem = {
+  worklog_id?: string;
+  author?: string;
+  author_account_id?: string;
+  started?: string;
+  date?: string;
+  time_spent?: string;
+  time_spent_seconds?: number;
+  comment?: string;
+};
+
+export type JiraYearWorklogIssue = {
+  issue_key: string;
+  issue_summary?: string;
+  status?: string;
+  assignee?: string;
+  worklogs_count: number;
+  total_seconds: number;
+  worklogs: JiraYearWorklogItem[];
+};
+
+export type JiraYearWorklogProject = {
+  project_key: string;
+  project_name: string;
+  issues_count: number;
+  worklogs_count: number;
+  total_seconds: number;
+  issues: JiraYearWorklogIssue[];
+};
+
+export type JiraYearWorklogResponse = {
+  year: number;
+  jql: string;
+  projects_count: number;
+  issues_count: number;
+  worklogs_count: number;
+  total_seconds: number;
+  projects: JiraYearWorklogProject[];
 };
 
 async function request(path: string, params: Record<string, string>) {
@@ -162,6 +208,10 @@ export function jiraTimesheet(date: string) {
   return request('/jira/timesheet/', { date }) as Promise<JiraTimesheetResponse>;
 }
 
+export function jiraWorklogsByYear(year: string | number) {
+  return request('/jira/worklogs/year/', { year: String(year ?? '').trim() }) as Promise<JiraYearWorklogResponse>;
+}
+
 export function jiraFiltersGet() {
   return requestJson('/jira/filters/', 'GET') as Promise<{ filters: string[] }>;
 }
@@ -201,4 +251,12 @@ export function jiraUpdateIssueEstimate(issueKey: string, payload: JiraIssueEsti
     'PUT',
     payload as unknown as Record<string, unknown>
   ) as Promise<{ ok: boolean; issue: JiraIssueTimeSummary }>;
+}
+
+export function jiraUpdateState(workKey: string, payload: JiraUpdateStatePayload) {
+  return requestJson(
+    `/jira/work/${encodeURIComponent(workKey)}/state/`,
+    'PUT',
+    payload as unknown as Record<string, unknown>
+  ) as Promise<{ ok: boolean; work_key: string; transition_id?: string; to_status?: string }>;
 }

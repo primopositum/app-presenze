@@ -4,11 +4,13 @@
     useJiraSearch,
     useJiraFiltersGet,
     useJiraFiltersPost,
+    useJiraUpdateState,
     parseScopePreset,
     type JiraScopeType
   } from '$lib/hooks/useJira';
   import JiraScopeModal from '$lib/components/Jira/JiraScopeModal.svelte';
   import JiraCard from '$lib/components/Jira/JiraCard.svelte';
+  import ToastState from '$lib/components/ToastState.svelte';
   import { auth } from '$lib/stores/auth';
   import { onMount } from 'svelte';
 
@@ -54,6 +56,12 @@
   let showBackToTop = false;
   let viewMode: 'list' | 'status' = 'list';
   let persistenceReady = false;
+  let draggingIssueKey = '';
+  let dragOverStatus = '';
+  let updatingIssueKey = '';
+  let toastOpen = false;
+  let toastSuccess = true;
+  let toastMessage = '';
 
   const BOARD_STATE_STORAGE_KEY = 'jira_business_board_state_v1';
 
@@ -146,6 +154,99 @@
     if (type === 'project') return 'Progetto';
     if (type === 'labels') return 'Label';
     return 'Filtro';
+  }
+
+  function showToast(success: boolean, message: string) {
+    toastSuccess = success;
+    toastMessage = message;
+    toastOpen = false;
+    requestAnimationFrame(() => {
+      toastOpen = true;
+    });
+  }
+
+  function canDropToStatus(targetStatus: string) {
+    return Boolean(targetStatus && targetStatus !== 'Senza stato');
+  }
+
+  function handleDragStart(event: DragEvent, issue: JiraIssue, sourceStatus: string) {
+    if (viewMode !== 'status' || updatingIssueKey) return;
+    draggingIssueKey = issue.key;
+    dragOverStatus = sourceStatus;
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', issue.key);
+    }
+  }
+
+  function handleDragEnd() {
+    draggingIssueKey = '';
+    dragOverStatus = '';
+  }
+
+  function handleDragOver(event: DragEvent, targetStatus: string) {
+    if (viewMode !== 'status' || !draggingIssueKey || updatingIssueKey) return;
+    if (!canDropToStatus(targetStatus)) return;
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+    dragOverStatus = targetStatus;
+  }
+
+  function handleDragLeave(targetStatus: string) {
+    if (dragOverStatus === targetStatus) {
+      dragOverStatus = '';
+    }
+  }
+
+  async function handleDrop(event: DragEvent, targetStatus: string) {
+    if (viewMode !== 'status') return;
+    event.preventDefault();
+
+    if (!draggingIssueKey || updatingIssueKey) return;
+    if (!canDropToStatus(targetStatus)) {
+      handleDragEnd();
+      return;
+    }
+
+    const sourceIssue = issues.find((issue) => issue.key === draggingIssueKey);
+    if (!sourceIssue) {
+      handleDragEnd();
+      return;
+    }
+
+    const currentStatus = sourceIssue.fields?.status?.name || 'Senza stato';
+    if (currentStatus === targetStatus) {
+      handleDragEnd();
+      return;
+    }
+
+    const movingIssueKey = draggingIssueKey;
+    updatingIssueKey = movingIssueKey;
+    try {
+      await useJiraUpdateState(movingIssueKey, { status: targetStatus });
+      issues = issues.map((issue) => {
+        if (issue.key !== movingIssueKey) return issue;
+        return {
+          ...issue,
+          fields: {
+            ...(issue.fields || {}),
+            status: {
+              ...(issue.fields?.status || {}),
+              name: targetStatus
+            }
+          }
+        };
+      });
+      showToast(true, `${movingIssueKey} spostata in "${targetStatus}"`);
+    } catch (e: any) {
+      const msg = String(e?.message || e || 'Errore aggiornamento stato');
+      showToast(false, `Aggiornamento fallito: ${msg}`);
+    } finally {
+      updatingIssueKey = '';
+      handleDragEnd();
+    }
   }
 
   function handleWindowScroll() {
@@ -435,9 +536,15 @@
         <div class="status-groups" style={`--status-cols:${statusColumns};`}>
           {#each groupedByStatus as group (group.status)}
             {@const meta = statusMeta(group.status)}
+            {@const dropEnabled = canDropToStatus(group.status)}
             <section
               class="status-group"
+              class:drop-active={dragOverStatus === group.status && dropEnabled}
+              class:drop-disabled={!dropEnabled}
               style={`--status-accent:${meta.accent}; --status-soft:${meta.accent}1f; --status-text:${meta.text};`}
+              on:dragover={(e) => handleDragOver(e, group.status)}
+              on:dragleave={() => handleDragLeave(group.status)}
+              on:drop={(e) => handleDrop(e, group.status)}
             >
               <header class="status-group-head">
                 <h3>{group.status}</h3>
@@ -445,7 +552,16 @@
               </header>
               <div class="status-group-cards">
                 {#each group.items as issue (issue.key)}
-                  <JiraCard issue={issue} />
+                  <div
+                    class="drag-card-wrap"
+                    class:is-dragging={draggingIssueKey === issue.key}
+                    class:is-updating={updatingIssueKey === issue.key}
+                    draggable={!updatingIssueKey}
+                    on:dragstart={(e) => handleDragStart(e, issue, group.status)}
+                    on:dragend={handleDragEnd}
+                  >
+                    <JiraCard issue={issue} />
+                  </div>
                 {/each}
               </div>
             </section>
@@ -473,6 +589,7 @@
     addScopePreset();
   }}
 />
+<ToastState bind:open={toastOpen} success={toastSuccess} message={toastMessage} />
 
 <button
   class="mobile-back-top"
@@ -879,6 +996,15 @@
     background: linear-gradient(180deg, var(--status-soft, #f8fafc), #fff 38%);
     padding: 10px;
     min-width: 0;
+    transition: box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+  }
+  .status-group.drop-active {
+    border-color: var(--status-accent, #fb923c);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-accent, #fb923c) 34%, transparent);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--status-soft, #f8fafc) 65%, #ffffff), #fff 40%);
+  }
+  .status-group.drop-disabled {
+    opacity: 0.9;
   }
   .status-group-head {
     display: flex;
@@ -900,6 +1026,22 @@
   .status-group-cards {
     display: grid;
     gap: 8px;
+  }
+  .drag-card-wrap {
+    cursor: grab;
+    transition: transform 0.14s ease, opacity 0.14s ease, filter 0.14s ease;
+  }
+  .drag-card-wrap:active {
+    cursor: grabbing;
+  }
+  .drag-card-wrap.is-dragging {
+    opacity: 0.55;
+    transform: scale(0.98);
+    filter: saturate(0.85);
+  }
+  .drag-card-wrap.is-updating {
+    pointer-events: none;
+    opacity: 0.7;
   }
   .status-group-cards :global(.card) {
     padding: 0.72rem;

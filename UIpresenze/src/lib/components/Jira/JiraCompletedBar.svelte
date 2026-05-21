@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { jiraSearch } from '$lib/services/jira';
 
   type JiraIssue = {
@@ -21,6 +21,9 @@
         timeSpentSeconds?: number;
         originalEstimateSeconds?: number;
       } | null;
+      created?: string;
+      updated?: string;
+      resolutiondate?: string | null;
     };
   };
 
@@ -34,9 +37,16 @@
   export let issuesData: JiraIssue[] = [];
   export let selectedProjectKeys: string[] = [];
   export let searchQuery = '';
+  export let selectedYear = 'all';
 
   let loading = false;
   let error = '';
+  let progress = 0;
+  let progressVisible = false;
+  let fetchRequestId = 0;
+  let progressHideTimer: ReturnType<typeof setTimeout> | null = null;
+  let mounted = false;
+  let lastLoadedYear = '';
 
   function clearSelection() {
     selectedProjectKeys = [];
@@ -83,28 +93,89 @@
     return Boolean(issueType?.subtask) || typeName.includes('sub-task') || typeName.includes('subtask') || Boolean(issue.fields?.parent);
   }
 
+  function issueYear(issue: JiraIssue) {
+    const dateValue =
+      issue.fields?.resolutiondate ||
+      issue.fields?.updated ||
+      issue.fields?.created;
+    if (!dateValue) return null;
+    const parsed = new Date(dateValue);
+    const year = parsed.getFullYear();
+    return Number.isFinite(year) ? year : null;
+  }
+
   async function fetchCompleted() {
+    const requestId = ++fetchRequestId;
+    if (progressHideTimer) {
+      clearTimeout(progressHideTimer);
+      progressHideTimer = null;
+    }
     loading = true;
     error = '';
+    progress = 0;
+    progressVisible = true;
     try {
-      const data = await jiraSearch({
-        jql: '(statusCategory = Done OR status in ("Completed","Completata")) ORDER BY updated DESC',
-        maxResults: 300,
-        fields:
-          'summary,status,assignee,issuetype,parent,project,timetracking,timespent,aggregatetimespent,timeestimate,aggregatetimeestimate,timeoriginalestimate,aggregatetimeoriginalestimate'
-      });
-      issuesData = (data?.issues || []) as JiraIssue[];
+      const PAGE_SIZE = 100;
+      let startAt = 0;
+      let total = Infinity;
+      let collected: JiraIssue[] = [];
+
+      const yearFilter =
+        selectedYear !== 'all'
+          ? ` AND resolutiondate >= "${selectedYear}-01-01" AND resolutiondate <= "${selectedYear}-12-31"`
+          : '';
+
+      while (startAt < total) {
+        if (requestId !== fetchRequestId) return;
+        const data = await jiraSearch({
+          jql: `(statusCategory = Done OR status in ("Completed","Completata"))${yearFilter} ORDER BY updated DESC`,
+          maxResults: PAGE_SIZE,
+          startAt,
+          fields:
+            'summary,status,assignee,issuetype,parent,project,timetracking,timespent,aggregatetimespent,timeestimate,aggregatetimeestimate,timeoriginalestimate,aggregatetimeoriginalestimate,created,updated,resolutiondate'
+        });
+
+        if (requestId !== fetchRequestId) return;
+        const batch = ((data?.issues || []) as JiraIssue[]);
+        const reportedTotal = Number(data?.total ?? 0);
+        total = Number.isFinite(reportedTotal) && reportedTotal >= 0 ? reportedTotal : 0;
+        collected = [...collected, ...batch];
+        startAt += PAGE_SIZE;
+
+        if (total > 0) {
+          progress = Math.min(Math.round((collected.length / total) * 100), 99);
+        } else {
+          progress = 0;
+        }
+        if (!batch.length) break;
+      }
+
+      progress = 100;
+      issuesData = collected;
       normalizeSelection();
+      progressHideTimer = setTimeout(() => {
+        if (requestId === fetchRequestId) {
+          progressVisible = false;
+        }
+      }, 450);
     } catch (e: any) {
       error = String(e?.message || e || 'Errore caricamento');
+      progressVisible = false;
     } finally {
-      loading = false;
+      if (requestId === fetchRequestId) {
+        loading = false;
+      }
     }
   }
 
   $: normalizedSearch = searchQuery.trim().toLowerCase();
+  $: normalizedYear = selectedYear === 'all' ? 'all' : String(selectedYear);
+  $: yearFilteredIssues =
+    normalizedYear === 'all'
+      ? issuesData
+      : issuesData.filter((issue) => String(issueYear(issue) || '') === normalizedYear);
   $: projects = Object.values(
-    issuesData.reduce<Record<string, ProjectSummary>>((acc, issue) => {
+    yearFilteredIssues.reduce<Record<string, ProjectSummary>>((acc, issue) => {
       const projectKey = issue.fields?.project?.key || 'N/D';
       const projectName = issue.fields?.project?.name || 'Progetto non disponibile';
       if (!acc[projectKey]) {
@@ -135,14 +206,30 @@
   $: selectedHours = filteredProjects
     .filter((p) => selectedProjectKeys.includes(p.key))
     .reduce((acc, p) => acc + p.seconds, 0);
-  $: selectedIssues = issuesData.filter((issue) => selectedProjectKeys.includes(issue.fields?.project?.key || 'N/D'));
+  $: selectedIssues = yearFilteredIssues.filter((issue) =>
+    selectedProjectKeys.includes(issue.fields?.project?.key || 'N/D')
+  );
   $: completedSubtasks = selectedIssues.filter(isSubtask);
   $: if (selectedProjectKeys.length > 0) {
     const available = new Set(projects.map((p) => p.key));
     selectedProjectKeys = selectedProjectKeys.filter((key) => available.has(key));
   }
 
-  onMount(fetchCompleted);
+  onMount(() => {
+    mounted = true;
+    lastLoadedYear = String(selectedYear || 'all');
+    void fetchCompleted();
+  });
+  onDestroy(() => {
+    if (progressHideTimer) {
+      clearTimeout(progressHideTimer);
+      progressHideTimer = null;
+    }
+  });
+  $: if (mounted && String(selectedYear || 'all') !== lastLoadedYear) {
+    lastLoadedYear = String(selectedYear || 'all');
+    void fetchCompleted();
+  }
 </script>
 
 <section class="completed-bar">
@@ -161,6 +248,18 @@
       <button type="button" on:click={fetchCompleted} disabled={loading}>{loading ? '...' : 'Aggiorna'}</button>
     </div>
   </div>
+
+  {#if progressVisible}
+    <div class="progress-shell" aria-live="polite">
+      <div class="progress-meta">
+        <span>Caricamento issue completate</span>
+        <strong>{progress}%</strong>
+      </div>
+      <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={progress}>
+        <div class="progress-fill" style={`width:${progress}%`}></div>
+      </div>
+    </div>
+  {/if}
 
   {#if error}
     <div class="state error">{error}</div>
@@ -298,6 +397,58 @@
 
   .state.error {
     color: #b91c1c;
+  }
+  .progress-shell {
+    margin: 0 0 0.65rem;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid #bbf7d0;
+    border-radius: 9px;
+    background: #f8fff9;
+  }
+  .progress-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.3rem;
+    font-size: 0.7rem;
+    color: #166534;
+    font-family: var(--font-mono);
+  }
+  .progress-meta strong {
+    color: #14532d;
+    font-weight: 700;
+  }
+  .progress-track {
+    height: 9px;
+    border-radius: 999px;
+    background: #dcfce7;
+    overflow: hidden;
+    border: 1px solid #bbf7d0;
+  }
+  .progress-fill {
+    height: 100%;
+    width: 0;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #22c55e, #16a34a 60%, #4ade80);
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.35);
+    transition: width 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+    position: relative;
+  }
+  .progress-fill::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.55) 50%, transparent 80%);
+    animation: progressShine 1.4s linear infinite;
+  }
+  @keyframes progressShine {
+    from {
+      transform: translateX(-120%);
+    }
+    to {
+      transform: translateX(120%);
+    }
   }
 
   .cards-scroll {

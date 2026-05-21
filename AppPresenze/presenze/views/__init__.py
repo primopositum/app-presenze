@@ -31,8 +31,11 @@ from .utilitiesbar import UtilitiesBarListView
 from .jira import (
     JiraProxyView,
     JiraWorklogsTodayView,
+    JiraWorklogView,
+    JiraWorklogStreamView,
     JiraIssueTimeView,
     JiraIssueWorklogView,
+    JiraUpdateState,
     JiraCredentialsView,
     JiraCredentialsTokenView,
     UpdateJiraFiltersView,
