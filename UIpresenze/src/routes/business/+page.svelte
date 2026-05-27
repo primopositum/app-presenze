@@ -14,6 +14,7 @@
   import ToastState from '$lib/components/ToastState.svelte';
   import { auth } from '$lib/stores/auth';
   import { onMount } from 'svelte';
+  import { ensureJiraControlLoaded, jiraControl } from '$lib/stores/jiraControl';
 
   let scopeValue = '';
   let scopePresets: string[] = [];
@@ -427,6 +428,12 @@
   }
 
   onMount(async () => {
+    const jiraEnabled = await ensureJiraControlLoaded();
+    if (!jiraEnabled) {
+      goto('/', { replaceState: true });
+      return;
+    }
+
     const saved = readBoardState();
     if (saved?.view === 'stato') {
       viewMode = 'status';
@@ -437,6 +444,10 @@
     persistenceReady = true;
     handleWindowScroll();
   });
+
+  $: if ($jiraControl.loaded && !$jiraControl.enabled) {
+    goto('/', { replaceState: true });
+  }
 
 </script>
 

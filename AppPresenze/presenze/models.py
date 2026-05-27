@@ -502,6 +502,10 @@ class JiraGlobals(models.Model):
         blank=True,
         help_text="Filtri globali Jira (array di stringhe)",
     )
+    JiraControl = models.BooleanField(
+        default=True,
+        help_text="Abilita/disabilita il controllo ore Jira nella generazione PDF presenze.",
+    )
 
     class Meta:
         db_table = "JiraGlobals"

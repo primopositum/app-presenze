@@ -824,6 +824,9 @@ def _jira_user_monthly_worklog_payload(user, target_year: int, account_id: str =
         if start_at >= int(payload.get("total", 0)) or not batch:
             break
 
+    # Riallinea l'autore principale da worklog anche nel flusso usato dal controllo ore PDF.
+    _enrich_completed_issues_with_worklog_authors({"issues": issues}, domain, headers)
+
     monthly_seconds: dict[int, int] = {m: 0 for m in range(1, 13)}
     monthly_by_project: dict[int, dict[str, int]] = {m: {} for m in range(1, 13)}
 
@@ -2136,13 +2139,19 @@ class UpdateJiraFiltersView(APIView):
                 id=1,
                 domain=(seed.domain or "").strip(),
                 filters=list(seed.filters or []),
+                JiraControl=bool(getattr(seed, "JiraControl", True)),
             )
 
-        return JiraGlobals.objects.create(id=1, domain="", filters=[])
+        return JiraGlobals.objects.create(id=1, domain="", filters=[], JiraControl=True)
 
     def get(self, request):
         jira_global = self._get_jira_globals_root()
-        return Response({"filters": list(jira_global.filters or [])})
+        return Response(
+            {
+                "filters": list(jira_global.filters or []),
+                "JiraControl": bool(getattr(jira_global, "JiraControl", True)),
+            }
+        )
 
     def post(self, request):
         filter_value = self._normalize_filter_scope(request.data.get("filter") or "")

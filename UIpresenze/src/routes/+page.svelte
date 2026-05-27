@@ -4,6 +4,7 @@
   import IconLinkBar from '$lib/components/IconLinkBar.svelte';
   import JiraPersonalTask from '$lib/components/Jira/JiraPersonalTask.svelte';
   import { auth } from '$lib/stores/auth';
+  import { jiraControl } from '$lib/stores/jiraControl';
 
   let user: any = null;
   let isAuthed = false;
@@ -12,6 +13,7 @@
   
    const redirect = (route : string) => {
     if (route === 'business') {
+      if (!$jiraControl.loaded || !$jiraControl.enabled) return;
       goto('/business', { state: { route } });
       return;
     }
@@ -38,12 +40,14 @@
     on:click = {()=>{goto('/trasferte')}}
     imageSrc="/trasferte.png"
        />
-  <CardImage
-    caption="Accedi all'area delle task"
-    alt="Task"
-    on:click = {()=>{redirect('business')}}
-    imageSrc="/business.png"
-     />
+  {#if $jiraControl.loaded && $jiraControl.enabled}
+    <CardImage
+      caption="Accedi all'area delle task"
+      alt="Task"
+      on:click = {()=>{redirect('business')}}
+      imageSrc="/business.png"
+      />
+  {/if}
   <CardImage
     caption="Accedi all'area delle presenze"
     alt="presenze"
@@ -55,7 +59,7 @@
 <div >
   <IconLinkBar></IconLinkBar>
 </div>
-{#if isAuthed && !user?.is_superuser && !user?.is_staff}
+{#if isAuthed && $jiraControl.loaded && $jiraControl.enabled}
   <JiraPersonalTask />
 {/if}
 </main>

@@ -1,9 +1,11 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { useJiraWorklogsByYear } from '$lib/hooks/useJira';
   import type { JiraYearWorklogResponse } from '$lib/services/jira';
   import JiraCompletedBar from '$lib/components/Jira/JiraCompletedBar.svelte';
   import JiraHistoryCharts from '$lib/components/Jira/JiraHistoryCharts.svelte';
+  import { ensureJiraControlLoaded, jiraControl } from '$lib/stores/jiraControl';
 
   type JiraIssue = {
     key: string;
@@ -112,6 +114,17 @@
   $: if (selectedYear !== 'all' && selectedYear !== lastFetchedYear) {
     lastFetchedYear = selectedYear;
     void fetchYearlyWorklogs(selectedYear);
+  }
+
+  onMount(async () => {
+    const jiraEnabled = await ensureJiraControlLoaded();
+    if (!jiraEnabled) {
+      goto('/', { replaceState: true });
+    }
+  });
+
+  $: if ($jiraControl.loaded && !$jiraControl.enabled) {
+    goto('/', { replaceState: true });
   }
 </script>
 

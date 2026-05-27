@@ -141,6 +141,11 @@ export type JiraStatusesResponse = {
   statuses: JiraStatusInfo[];
 };
 
+export type JiraFiltersResponse = {
+  filters: string[];
+  JiraControl?: boolean;
+};
+
 async function request(path: string, params: Record<string, string>) {
   const endpoint = path.startsWith('http') ? path : `${BASE}${path.startsWith('/') ? '' : '/'}${path}`;
   const searchParams = new URLSearchParams();
@@ -234,7 +239,7 @@ export function jiraStatuses(scopeType = '', scopeValue = '') {
 }
 
 export function jiraFiltersGet() {
-  return requestJson('/jira/filters/', 'GET') as Promise<{ filters: string[] }>;
+  return requestJson('/jira/filters/', 'GET') as Promise<JiraFiltersResponse>;
 }
 
 export function jiraFiltersPost(filter: string, append = true) {

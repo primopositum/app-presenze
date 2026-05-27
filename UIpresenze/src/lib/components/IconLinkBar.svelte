@@ -20,6 +20,7 @@
   import { faCar } from '@fortawesome/free-solid-svg-icons';
   import palette from '../../theme/palette.js';
   import { getUtilitiesBar, type UtilitiesBarItem } from '$lib/services/utilitiesbar';
+  import { jiraControl } from '$lib/stores/jiraControl';
 
   const ICON_MAP: Record<string, IconDefinition> = {
     faConfluence,
@@ -38,6 +39,9 @@
 
   const DEFAULT_HOVER = palette.state.info;
   let items: UtilitiesBarItem[] = [];
+  $: visibleItems = items.filter(
+    (item) => ($jiraControl.loaded ? $jiraControl.enabled : false) || item.icon !== 'faJira'
+  );
 
   function normalizeColor(value: string) {
     const color = String(value || '').trim();
@@ -64,7 +68,7 @@
       <FontAwesomeIcon icon={faCar} class="text-gray-700 text-[280%]" />
     </button>
 
-    {#each items as item (item.id)}
+    {#each visibleItems as item (item.id)}
       <a
         href={item.link}
         target="_blank"

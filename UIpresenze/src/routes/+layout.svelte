@@ -3,8 +3,10 @@
 	import '../app.css'; 
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
+	import { jiraControl, ensureJiraControlLoaded, isJiraRoute, resetJiraControl } from '$lib/stores/jiraControl';
 	import { startAutoRefresh, stopAutoRefresh } from '$lib/api';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 
 	export const prerender = false;
 	export const ssr = false;
@@ -13,12 +15,26 @@
 		// Auth
 		auth.init();
 		if (!$auth.isAuthed) {
+			resetJiraControl();
 			stopAutoRefresh();
 			goto('/login');
 			return;
 		}
 		startAutoRefresh();
+		void ensureJiraControlLoaded();
 	});
+
+	$: if ($auth.isAuthed && isJiraRoute($page.url.pathname) && $jiraControl.loaded && !$jiraControl.enabled) {
+		goto('/', { replaceState: true });
+	}
+
+	$: if ($auth.isAuthed && !$jiraControl.loaded && !$jiraControl.loading) {
+		void ensureJiraControlLoaded();
+	}
+
+	$: if (!$auth.isAuthed && $jiraControl.loaded) {
+		resetJiraControl();
+	}
 </script>
 
 <!-- HEADER -->

@@ -34,6 +34,7 @@
   import TimeEntryFormProvider from '$lib/components/ctx/TimeEntryFormProvider.svelte';
   import ErrorCard from '$lib/components/ErrorCard.svelte';
   import Useractivity from '$lib/components/Jira/JiraUserActivity.svelte';
+  import { jiraControl } from '$lib/stores/jiraControl';
   import { hourBalanceExtra } from '$lib/stores/hourBalanceExtra';
   import { useOneUserApi } from '$lib/hooks/useUserApi.js';
   let loading = false;
@@ -626,7 +627,9 @@ export const loadData = async () => {
     {#if $auth.user?.is_superuser}
       <div><PreSetWeek/></div>
     {/if}
-    <Useractivity day={selectedDate} ore={selectedDayWorkedHours} />
+    {#if $jiraControl.loaded && $jiraControl.enabled}
+      <Useractivity day={selectedDate} ore={selectedDayWorkedHours} />
+    {/if}
   {/key}
 </TimeEntryFormProvider>
 

@@ -25,7 +25,7 @@ from rest_framework.response import Response
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import NameObject, BooleanObject
 
-from .models import TimeEntry, Utente
+from .models import JiraGlobals, TimeEntry, Utente
 
 
 # --- Config ---
@@ -304,24 +304,28 @@ class PresenzeMeseScorsoPDFView(APIView):
                     {"detail": f"Ore inserite ({total_hours_internal:.2f}) non coerenti con il contratto ({expected_hours:.2f})."}
                 )
 
-        try:
-            jira_views = import_module("presenze.views.jira")
-            jira_payload = jira_views._jira_user_monthly_worklog_payload(
-                user=user,
-                target_year=start_date.year,
-                target_month=start_date.month,
-            )
-        except ValueError as exc:
-            raise ValidationError({"detail": f"Controllo ore Jira non disponibile: {exc}"})
-        except Exception as exc:
-            raise ValidationError({"detail": f"Errore durante il controllo ore Jira: {exc}"})
+        jira_global = JiraGlobals.objects.order_by("id").first()
+        jira_control_enabled = True if jira_global is None else bool(getattr(jira_global, "JiraControl", True))
 
-        jira_total_seconds = int(jira_payload.get("total_seconds") or 0)
-        jira_hours = (Decimal(jira_total_seconds) / Decimal("3600")).quantize(Decimal("0.01"))
-        if total_hours_internal.quantize(Decimal("0.01")) != jira_hours:
-            raise ValidationError(
-                {"detail": f"Ore inserite ({total_hours_internal:.2f}) non coerenti con Jira ({jira_hours:.2f})."}
-            )
+        if jira_control_enabled:
+            try:
+                jira_views = import_module("presenze.views.jira")
+                jira_payload = jira_views._jira_user_monthly_worklog_payload(
+                    user=user,
+                    target_year=start_date.year,
+                    target_month=start_date.month,
+                )
+            except ValueError as exc:
+                raise ValidationError({"detail": f"Controllo ore Jira non disponibile: {exc}"})
+            except Exception as exc:
+                raise ValidationError({"detail": f"Errore durante il controllo ore Jira: {exc}"})
+
+            jira_total_seconds = int(jira_payload.get("total_seconds") or 0)
+            jira_hours = (Decimal(jira_total_seconds) / Decimal("3600")).quantize(Decimal("0.01"))
+            if total_hours_internal.quantize(Decimal("0.01")) != jira_hours:
+                raise ValidationError(
+                    {"detail": f"Ore inserite ({total_hours_internal:.2f}) non coerenti con Jira ({jira_hours:.2f})."}
+                )
 
         nome = getattr(user, "nome", "") or ""
         cognome = getattr(user, "cognome", "") or ""

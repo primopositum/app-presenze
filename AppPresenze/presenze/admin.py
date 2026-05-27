@@ -44,7 +44,7 @@ class JiraCredentialsAdmin(admin.ModelAdmin):
 
 @admin.register(JiraGlobals)
 class JiraGlobalsAdmin(admin.ModelAdmin):
-    list_display = ("id", "domain", "filters")
+    list_display = ("id", "domain", "JiraControl", "filters")
     list_display_links = ("id", "domain")
     search_fields = ("domain",)
 
