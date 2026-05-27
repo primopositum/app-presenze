@@ -1,4 +1,5 @@
 import base64
+import calendar
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -766,6 +767,130 @@ def _sum_jira_logged_seconds_for_user_day(domain: str, headers: dict, account_id
     return total_logged_seconds
 
 
+def _jira_user_monthly_worklog_payload(user, target_year: int, account_id: str = "", target_month: int | None = None):
+    if target_month is not None and (target_month < 1 or target_month > 12):
+        raise ValueError("Formato month non valido (usa 1-12)")
+
+    creds, error_response = _jira_credentials_for_user(user)
+    if error_response:
+        error_payload = getattr(error_response, "data", {}) or {}
+        error_msg = str(error_payload.get("error") or "Credenziali Jira non configurate")
+        raise ValueError(error_msg)
+
+    domain, email, api_token = creds
+    headers = _jira_headers(email, api_token)
+
+    resolved_account_id = str(account_id or "").strip()
+    if not resolved_account_id:
+        resolved_account_id = _jira_current_account_id(domain, headers)
+
+    if not resolved_account_id:
+        raise ValueError("account_id non trovato")
+
+    if target_month:
+        month_start = date(target_year, target_month, 1)
+        month_end = date(target_year, target_month, calendar.monthrange(target_year, target_month)[1])
+        jql_start = month_start.isoformat()
+        jql_end = month_end.isoformat()
+    else:
+        jql_start = date(target_year, 1, 1).isoformat()
+        jql_end = date(target_year, 12, 31).isoformat()
+
+    jql = (
+        f'worklogAuthor = "{resolved_account_id}"'
+        f' AND worklogDate >= "{jql_start}"'
+        f' AND worklogDate <= "{jql_end}"'
+    )
+
+    search_url = f"https://{domain}/rest/api/3/search/jql"
+    start_at = 0
+    issues = []
+
+    while True:
+        params = {
+            "jql": jql,
+            "fields": ["summary", "project"],
+            "startAt": start_at,
+            "maxResults": 100,
+        }
+        resp = requests.get(search_url, params=params, headers=headers, timeout=10)
+        resp.raise_for_status()
+        payload = resp.json() or {}
+        batch = payload.get("issues", [])
+        if isinstance(batch, list):
+            issues.extend(batch)
+
+        start_at += len(batch) if isinstance(batch, list) else 0
+        if start_at >= int(payload.get("total", 0)) or not batch:
+            break
+
+    monthly_seconds: dict[int, int] = {m: 0 for m in range(1, 13)}
+    monthly_by_project: dict[int, dict[str, int]] = {m: {} for m in range(1, 13)}
+
+    for issue in issues:
+        issue_key = str(issue.get("key") or "").strip()
+        if not issue_key:
+            continue
+
+        fields = issue.get("fields", {}) or {}
+        project = fields.get("project", {}) or {}
+        project_key = str(project.get("key") or "N/D").strip() or "N/D"
+
+        worklogs = _fetch_issue_worklogs(domain, issue_key, headers)
+        for worklog in worklogs:
+            author = worklog.get("author", {}) or {}
+            if author.get("accountId") != resolved_account_id:
+                continue
+
+            started_value = str(worklog.get("started") or "")
+            local_day = _local_date_from_started(started_value)
+            if not local_day or local_day.year != target_year:
+                continue
+            if target_month and local_day.month != target_month:
+                continue
+
+            seconds = int(worklog.get("timeSpentSeconds") or 0)
+            if seconds <= 0:
+                continue
+
+            month = local_day.month
+            monthly_seconds[month] += seconds
+            monthly_by_project[month][project_key] = (
+                monthly_by_project[month].get(project_key, 0) + seconds
+            )
+
+    months_to_emit = [target_month] if target_month else list(range(1, 13))
+    months_out = []
+    for m in months_to_emit:
+        secs = monthly_seconds[m]
+        months_out.append(
+            {
+                "month": m,
+                "month_name": date(target_year, m, 1).strftime("%B"),
+                "total_seconds": secs,
+                "total_hours": round(secs / 3600, 2),
+                "by_project": [
+                    {"project_key": pk, "seconds": s, "hours": round(s / 3600, 2)}
+                    for pk, s in sorted(monthly_by_project[m].items())
+                ],
+            }
+        )
+
+    if target_month:
+        total_seconds = monthly_seconds[target_month]
+    else:
+        total_seconds = sum(monthly_seconds.values())
+
+    return {
+        "year": target_year,
+        "month": target_month,
+        "account_id": resolved_account_id,
+        "total_seconds": total_seconds,
+        "total_hours": round(total_seconds / 3600, 2),
+        "months": months_out,
+    }
+
+
 class JiraProxyView(APIView):
     """
     Proxy verso le API Jira REST v3.
@@ -1036,6 +1161,59 @@ class JiraWorklogsTodayView(APIView):
             return Response(detail, status=e.response.status_code)
         except requests.exceptions.RequestException as e:
             return Response({"error": str(e)}, status=502)
+
+
+class JiraUserMonthlyWorklogView(APIView):
+    """
+    Restituisce la somma degli worklog mensili registrati da un utente su Jira.
+
+    Endpoint:
+        GET /api/jira/worklogs/user-monthly/?year=YYYY&account_id=AAA&month=MM
+        GET /api/jira/worklogs/user-monthly/?year=YYYY  <- usa l'utente corrente
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        year_raw = (request.GET.get("year") or "").strip()
+        if not year_raw:
+            return Response({"error": "Parametro year obbligatorio (YYYY)"}, status=400)
+
+        try:
+            target_year = int(year_raw)
+            if target_year < 1900 or target_year > 3000:
+                raise ValueError
+        except ValueError:
+            return Response({"error": "Formato year non valido (usa YYYY)"}, status=400)
+
+        month_raw = (request.GET.get("month") or "").strip()
+        target_month = None
+        if month_raw:
+            try:
+                target_month = int(month_raw)
+                if target_month < 1 or target_month > 12:
+                    raise ValueError
+            except ValueError:
+                return Response({"error": "Formato month non valido (usa 1-12)"}, status=400)
+
+        account_id = (request.GET.get("account_id") or "").strip() or ""
+
+        try:
+            payload = _jira_user_monthly_worklog_payload(
+                user=request.user,
+                target_year=target_year,
+                account_id=account_id,
+                target_month=target_month,
+            )
+            return Response(payload)
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
+        except requests.exceptions.Timeout:
+            return Response({"error": "Timeout connessione a Jira"}, status=504)
+        except requests.exceptions.HTTPError as exc:
+            return _jira_error_response(exc)
+        except requests.exceptions.RequestException as exc:
+            return Response({"error": str(exc)}, status=502)
 
 
 class JiraWorklogView(APIView):

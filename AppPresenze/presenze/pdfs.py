@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from importlib import import_module
 from io import BytesIO
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -294,14 +295,33 @@ class PresenzeMeseScorsoPDFView(APIView):
         contratto = user.contratti.filter(is_active=True).first()
         if contratto and contratto.ore_sett:
             expected_hours = expected_hours_for_month(
-        start_date=start_date,
-        end_date=end_date,
-        ore_sett=[Decimal(x) for x in contratto.ore_sett],
-    )
+                start_date=start_date,
+                end_date=end_date,
+                ore_sett=[Decimal(x) for x in contratto.ore_sett],
+            )
             if total_hours_internal.quantize(Decimal("0.01")) != expected_hours.quantize(Decimal("0.01")):
                 raise ValidationError(
                     {"detail": f"Ore inserite ({total_hours_internal:.2f}) non coerenti con il contratto ({expected_hours:.2f})."}
                 )
+
+        try:
+            jira_views = import_module("presenze.views.jira")
+            jira_payload = jira_views._jira_user_monthly_worklog_payload(
+                user=user,
+                target_year=start_date.year,
+                target_month=start_date.month,
+            )
+        except ValueError as exc:
+            raise ValidationError({"detail": f"Controllo ore Jira non disponibile: {exc}"})
+        except Exception as exc:
+            raise ValidationError({"detail": f"Errore durante il controllo ore Jira: {exc}"})
+
+        jira_total_seconds = int(jira_payload.get("total_seconds") or 0)
+        jira_hours = (Decimal(jira_total_seconds) / Decimal("3600")).quantize(Decimal("0.01"))
+        if total_hours_internal.quantize(Decimal("0.01")) != jira_hours:
+            raise ValidationError(
+                {"detail": f"Ore inserite ({total_hours_internal:.2f}) non coerenti con Jira ({jira_hours:.2f})."}
+            )
 
         nome = getattr(user, "nome", "") or ""
         cognome = getattr(user, "cognome", "") or ""
