@@ -1,5 +1,6 @@
 import {
   jiraSearch,
+  jiraCompletedHistory,
   jiraFiltersGet,
   jiraFiltersPost,
   jiraIssueTime,
@@ -14,6 +15,7 @@ import {
   parseScopePreset,
   type JiraScopeType,
   type JiraIssueTimeFilter,
+  type JiraCompletedHistoryResponse,
   type JiraYearWorklogResponse,
   type JiraStatusesResponse,
   type JiraUpdateStatePayload,
@@ -93,6 +95,19 @@ export async function useJiraWorklogsByYear(year: number | string): Promise<Jira
     throw new Error('Anno non valido');
   }
   return jiraWorklogsByYear(parsedYear);
+}
+
+export async function useJiraCompletedHistory(year: number | string = 'all'): Promise<JiraCompletedHistoryResponse> {
+  const rawYear = String(year ?? 'all').trim() || 'all';
+  if (rawYear.toLowerCase() === 'all') {
+    return jiraCompletedHistory('all');
+  }
+
+  const parsedYear = Number(rawYear);
+  if (!Number.isInteger(parsedYear) || parsedYear < 1900 || parsedYear > 3000) {
+    throw new Error('Anno non valido');
+  }
+  return jiraCompletedHistory(parsedYear);
 }
 
 export async function useJiraStatuses(scopeType?: JiraScopeType, scopeValue = ''): Promise<JiraStatusesResponse> {

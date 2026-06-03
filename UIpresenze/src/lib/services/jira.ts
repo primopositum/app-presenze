@@ -117,7 +117,35 @@ export type JiraYearWorklogProject = {
   issues: JiraYearWorklogIssue[];
 };
 
+export type JiraHistoryIssue = {
+  key: string;
+  fields?: {
+    summary?: string;
+    status?: { name?: string };
+    assignee?: { displayName?: string } | null;
+    issuetype?: { name?: string; subtask?: boolean } | null;
+    parent?: { key?: string; fields?: { summary?: string } } | null;
+    project?: { key?: string; name?: string };
+    timespent?: number | null;
+    aggregatetimespent?: number | null;
+    timeestimate?: number | null;
+    aggregatetimeestimate?: number | null;
+    timeoriginalestimate?: number | null;
+    aggregatetimeoriginalestimate?: number | null;
+    timetracking?: {
+      timeSpentSeconds?: number;
+      originalEstimateSeconds?: number;
+    } | null;
+    created?: string;
+    updated?: string;
+    resolutiondate?: string | null;
+    worklog_authors?: { displayName?: string; timeSpentSeconds?: number }[];
+    worklog_primary_author?: { displayName?: string; timeSpentSeconds?: number };
+  };
+};
+
 export type JiraYearWorklogResponse = {
+  view?: 'tree';
   year: number;
   jql: string;
   projects_count: number;
@@ -125,6 +153,24 @@ export type JiraYearWorklogResponse = {
   worklogs_count: number;
   total_seconds: number;
   projects: JiraYearWorklogProject[];
+};
+
+export type JiraCompletedHistoryResponse = {
+  view?: 'completed';
+  year: number | 'all';
+  jql: string;
+  total: number;
+  startAt: number;
+  maxResults: number;
+  issues: JiraHistoryIssue[];
+  worklog_enrich_error?: boolean;
+  worklog_enrich_meta?: {
+    enabled: boolean;
+    candidate_issues: number;
+    enriched_issues: number;
+    failed_issues: number;
+  };
+  worklog_enrich_logs?: { level: string; message: string; issue_key?: string }[];
 };
 
 export type JiraStatusInfo = {
@@ -228,7 +274,18 @@ export function jiraTimesheet(date: string) {
 }
 
 export function jiraWorklogsByYear(year: string | number) {
-  return request('/jira/worklogs/year/', { year: String(year ?? '').trim() }) as Promise<JiraYearWorklogResponse>;
+  return request('/jira/worklogs/year/', {
+    view: 'tree',
+    year: String(year ?? '').trim(),
+  }) as Promise<JiraYearWorklogResponse>;
+}
+
+export function jiraCompletedHistory(year: string | number = 'all') {
+  const normalizedYear = String(year ?? 'all').trim().toLowerCase();
+  return request('/jira/worklogs/year/', {
+    view: 'completed',
+    year: normalizedYear && normalizedYear !== 'all' ? normalizedYear : '',
+  }) as Promise<JiraCompletedHistoryResponse>;
 }
 
 export function jiraStatuses(scopeType = '', scopeValue = '') {

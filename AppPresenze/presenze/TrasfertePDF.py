@@ -66,7 +66,8 @@ def _italian_month_year(d: date) -> str:
 
 
 def _format_money(value: Decimal) -> str:
-    return f"{value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):.2f}".replace(".", ",")
+    amount = f"{value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):.2f}".replace(".", ",")
+    return f"{amount}\u00a0€"
 
 
 def _format_decimal(value: Decimal) -> str:
@@ -101,6 +102,18 @@ def _previous_month_range_from(base_date: date) -> Tuple[date, date]:
 def _replace_text_in_paragraph(paragraph, replacements: Dict[str, str]) -> None:
     text = "".join(run.text for run in paragraph.runs)
     for key, value in replacements.items():
+        if text == key and paragraph.runs:
+            target_idx = 0
+            for idx, run in enumerate(paragraph.runs):
+                run_text = (run.text or "").strip()
+                if run_text and run_text != "#":
+                    target_idx = idx
+                    break
+
+            for idx, run in enumerate(paragraph.runs):
+                run.text = value if idx == target_idx else ""
+            return
+
         text = text.replace(key, value)
 
     if paragraph.runs:

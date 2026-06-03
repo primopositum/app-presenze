@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
-  import { jiraSearch } from '$lib/services/jira';
+  import { createEventDispatcher } from 'svelte';
 
   type JiraIssue = {
     key: string;
@@ -21,6 +20,7 @@
         timeSpentSeconds?: number;
         originalEstimateSeconds?: number;
       } | null;
+      worklog_authors?: { displayName?: string; timeSpentSeconds?: number }[];
       created?: string;
       updated?: string;
       resolutiondate?: string | null;
@@ -38,15 +38,10 @@
   export let selectedProjectKeys: string[] = [];
   export let searchQuery = '';
   export let selectedYear = 'all';
+  export let loading = false;
+  export let error = '';
 
-  let loading = false;
-  let error = '';
-  let progress = 0;
-  let progressVisible = false;
-  let fetchRequestId = 0;
-  let progressHideTimer: ReturnType<typeof setTimeout> | null = null;
-  let mounted = false;
-  let lastLoadedYear = '';
+  const dispatch = createEventDispatcher<{ refresh: void }>();
 
   function clearSelection() {
     selectedProjectKeys = [];
@@ -54,6 +49,12 @@
 
   function taskTotalSeconds(fields?: JiraIssue['fields']) {
     if (!fields) return 0;
+    const worklogSeconds = (fields.worklog_authors || []).reduce(
+      (total, author) => total + Math.max(0, Number(author?.timeSpentSeconds || 0)),
+      0
+    );
+    if (worklogSeconds > 0) return worklogSeconds;
+
     return (
       fields.aggregatetimespent ??
       fields.timespent ??
@@ -73,11 +74,6 @@
     return Number.isInteger(rounded)
       ? `${rounded.toFixed(0)}h`
       : `${rounded.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}h`;
-  }
-
-  function normalizeSelection() {
-    const availableKeys = new Set(projects.map((p) => p.key));
-    selectedProjectKeys = selectedProjectKeys.filter((key) => availableKeys.has(key));
   }
 
   function toggleProject(key: string) {
@@ -104,68 +100,8 @@
     return Number.isFinite(year) ? year : null;
   }
 
-  async function fetchCompleted() {
-    const requestId = ++fetchRequestId;
-    if (progressHideTimer) {
-      clearTimeout(progressHideTimer);
-      progressHideTimer = null;
-    }
-    loading = true;
-    error = '';
-    progress = 0;
-    progressVisible = true;
-    try {
-      const PAGE_SIZE = 100;
-      let startAt = 0;
-      let total = Infinity;
-      let collected: JiraIssue[] = [];
-
-      const yearFilter =
-        selectedYear !== 'all'
-          ? ` AND resolutiondate >= "${selectedYear}-01-01" AND resolutiondate <= "${selectedYear}-12-31"`
-          : '';
-
-      while (startAt < total) {
-        if (requestId !== fetchRequestId) return;
-        const data = await jiraSearch({
-          jql: `(statusCategory = Done OR status in ("Completed","Completata"))${yearFilter} ORDER BY updated DESC`,
-          maxResults: PAGE_SIZE,
-          startAt,
-          fields:
-            'summary,status,assignee,issuetype,parent,project,timetracking,timespent,aggregatetimespent,timeestimate,aggregatetimeestimate,timeoriginalestimate,aggregatetimeoriginalestimate,created,updated,resolutiondate'
-        });
-
-        if (requestId !== fetchRequestId) return;
-        const batch = ((data?.issues || []) as JiraIssue[]);
-        const reportedTotal = Number(data?.total ?? 0);
-        total = Number.isFinite(reportedTotal) && reportedTotal >= 0 ? reportedTotal : 0;
-        collected = [...collected, ...batch];
-        startAt += PAGE_SIZE;
-
-        if (total > 0) {
-          progress = Math.min(Math.round((collected.length / total) * 100), 99);
-        } else {
-          progress = 0;
-        }
-        if (!batch.length) break;
-      }
-
-      progress = 100;
-      issuesData = collected;
-      normalizeSelection();
-      progressHideTimer = setTimeout(() => {
-        if (requestId === fetchRequestId) {
-          progressVisible = false;
-        }
-      }, 450);
-    } catch (e: any) {
-      error = String(e?.message || e || 'Errore caricamento');
-      progressVisible = false;
-    } finally {
-      if (requestId === fetchRequestId) {
-        loading = false;
-      }
-    }
+  function refreshCompleted() {
+    dispatch('refresh');
   }
 
   $: normalizedSearch = searchQuery.trim().toLowerCase();
@@ -215,21 +151,6 @@
     selectedProjectKeys = selectedProjectKeys.filter((key) => available.has(key));
   }
 
-  onMount(() => {
-    mounted = true;
-    lastLoadedYear = String(selectedYear || 'all');
-    void fetchCompleted();
-  });
-  onDestroy(() => {
-    if (progressHideTimer) {
-      clearTimeout(progressHideTimer);
-      progressHideTimer = null;
-    }
-  });
-  $: if (mounted && String(selectedYear || 'all') !== lastLoadedYear) {
-    lastLoadedYear = String(selectedYear || 'all');
-    void fetchCompleted();
-  }
 </script>
 
 <section class="completed-bar">
@@ -245,18 +166,18 @@
       <button type="button" class="ghost" on:click={clearSelection} disabled={loading || selectedCount === 0}>
         Pulisci
       </button>
-      <button type="button" on:click={fetchCompleted} disabled={loading}>{loading ? '...' : 'Aggiorna'}</button>
+      <button type="button" on:click={refreshCompleted} disabled={loading}>{loading ? '...' : 'Aggiorna'}</button>
     </div>
   </div>
 
-  {#if progressVisible}
+  {#if loading}
     <div class="progress-shell" aria-live="polite">
       <div class="progress-meta">
         <span>Caricamento issue completate</span>
-        <strong>{progress}%</strong>
+        <strong>...</strong>
       </div>
-      <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={progress}>
-        <div class="progress-fill" style={`width:${progress}%`}></div>
+      <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+        <div class="progress-fill"></div>
       </div>
     </div>
   {/if}
@@ -428,7 +349,7 @@
   }
   .progress-fill {
     height: 100%;
-    width: 0;
+    width: 100%;
     border-radius: inherit;
     background: linear-gradient(90deg, #22c55e, #16a34a 60%, #4ade80);
     box-shadow: 0 0 10px rgba(34, 197, 94, 0.35);

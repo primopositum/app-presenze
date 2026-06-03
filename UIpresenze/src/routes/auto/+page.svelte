@@ -10,6 +10,12 @@
     useUpdateAutomobile
   } from '$lib/hooks/useAutomobile';
   import type { Automobile, AutomobileCreate } from '$lib/services/automobili';
+  import {
+    getFavoriteAutomobileId,
+    isFavoriteAutomobile,
+    setFavoriteAutomobileId,
+    sortFavoriteAutomobileFirst
+  } from '$lib/services/automobilePreference';
 
   let items: Automobile[] = [];
   let loading = false;
@@ -20,6 +26,7 @@
   let selectedId: number | string | null = null;
   let bootstrapped = false;
   let isAuthed = false;
+  let favoriteAutoId = '';
 
   let marca = '';
   let alimentazione = '';
@@ -69,7 +76,8 @@
     try {
       const list = useAutomobiliList();
       const res = await list();
-      items = res.payload;
+      favoriteAutoId = getFavoriteAutomobileId();
+      items = sortFavoriteAutomobileFirst(res.payload, favoriteAutoId, getAutoId);
     } catch (e: any) {
       error = e?.message || 'Errore caricamento automobili';
     } finally {
@@ -84,11 +92,23 @@
       loading = true;
       const remove = useDeleteAutomobile({ pk: id });
       await remove();
+      if (String(id) === favoriteAutoId) {
+        favoriteAutoId = '';
+        setFavoriteAutomobileId(null);
+      }
       await loadAutomobili();
     } catch (e: any) {
       error = e?.message || 'Errore eliminazione automobile';
       loading = false;
     }
+  }
+
+  function handleFavorite(automobile: Automobile) {
+    const id = getAutoId(automobile);
+    if (id === null) return;
+    favoriteAutoId = isFavoriteAutomobile(id, favoriteAutoId) ? '' : String(id);
+    setFavoriteAutomobileId(favoriteAutoId || null);
+    items = sortFavoriteAutomobileFirst(items, favoriteAutoId, getAutoId);
   }
 
   function handleCoefficienteInput(event: Event) {
@@ -153,6 +173,7 @@
   }
 
   onMount(() => {
+    favoriteAutoId = getFavoriteAutomobileId();
     if (isAuthed && !bootstrapped) {
       bootstrapped = true;
       void loadAutomobili();
@@ -192,7 +213,13 @@
       <section class="cars-pane">
         <ul class="list">
           {#each items as item, idx (`${item.id ?? item.a_id ?? item.A_ID ?? idx}`)}
-            <AutoCard automobile={item} onDelete={handleDelete} onEdit={openEdit} />
+            <AutoCard
+              automobile={item}
+              favorite={isFavoriteAutomobile(getAutoId(item), favoriteAutoId)}
+              onDelete={handleDelete}
+              onEdit={openEdit}
+              onFavorite={handleFavorite}
+            />
           {/each}
         </ul>
       </section>

@@ -13,6 +13,10 @@
     import { auth } from '$lib/stores/auth';
     import { fetchUsers, type User } from '$lib/services/users';
     import { getAutomobili, updateAutomobileCoeff, type Automobile } from '$lib/services/automobili';
+    import {
+      getFavoriteAutomobileId,
+      sortFavoriteAutomobileFirst
+    } from '$lib/services/automobilePreference';
 
     let items: Trasferta[] = [];
     let loading: boolean = false;
@@ -36,6 +40,7 @@
     let toastOpen = false;
     let toastSuccess = true;
     let toastMessage = '';
+    let favoriteAutoId = '';
 
     $: isSuperuser = !!$auth.user?.is_superuser;
     $: currentUserId = $auth.user?.id ?? null;
@@ -81,7 +86,9 @@
       autoError = null;
       try {
         const list = await getAutomobili({ is_active: true });
-        automobili = list.length ? list : await getAutomobili();
+        favoriteAutoId = getFavoriteAutomobileId();
+        const source = list.length ? list : await getAutomobili();
+        automobili = sortFavoriteAutomobileFirst(source, favoriteAutoId, getAutoId);
         if (!selectedAutoId && automobili.length > 0) {
           const firstId = getAutoId(automobili[0]);
           selectedAutoId = firstId === null ? '' : String(firstId);
@@ -229,6 +236,7 @@
 
     onMount(() => {
         mounted = true;
+        favoriteAutoId = getFavoriteAutomobileId();
         void loadAutomobili();
     });
 

@@ -1,12 +1,14 @@
 <script lang="ts">
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
-  import { faTrash, faPenToSquare, faCar } from '@fortawesome/free-solid-svg-icons';
+  import { faTrash, faPenToSquare, faCar, faStar } from '@fortawesome/free-solid-svg-icons';
   import type { Automobile } from '$lib/services/automobili';
   import LoadReceipts from '$lib/components/LoadReceipts.svelte';
 
   export let automobile: Automobile;
   export let onDelete: ((automobile: Automobile) => void) | undefined;
   export let onEdit: ((automobile: Automobile) => void) | undefined;
+  export let onFavorite: ((automobile: Automobile) => void) | undefined;
+  export let favorite = false;
 const handleNavigation = () => {
     const url = "https://iam.aci.it/auth/realms/Cittadini/protocol/openid-connect/auth?client_id=CostiChilometrici_WEB&redirect_uri=https%3A%2F%2Fcostikm.aci.it&state=503cec0d-8574-43f6-84f4-d5191b331511&response_mode=fragment&response_type=code&scope=openid&nonce=dbc044a4-b191-41e7-80aa-666e9a58ff19";
     window.open(url, '_blank', 'noopener,noreferrer');
@@ -45,6 +47,23 @@ const handleNavigation = () => {
     >
       <FontAwesomeIcon icon={faCar} />
     </button>
+      <button
+        type="button"
+        class="inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-200"
+        class:border-yellow-300={favorite}
+        class:bg-yellow-100={favorite}
+        class:text-yellow-600={favorite}
+        class:border-auto-accent-200={!favorite}
+        class:bg-white={!favorite}
+        class:text-auto-accent-700={!favorite}
+        class:hover:bg-yellow-50={!favorite}
+        on:click={() => onFavorite?.(automobile)}
+        aria-label={favorite ? 'Automobile preferita' : 'Imposta automobile preferita'}
+        aria-pressed={favorite}
+        title={favorite ? 'Automobile preferita' : 'Imposta come preferita'}
+      >
+        <FontAwesomeIcon icon={faStar} class="text-xs" />
+      </button>
       <button
         type="button"
         class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-auto-accent-200 bg-white/80 text-auto-accent-700 transition-all duration-200 hover:bg-white hover:text-auto-accent-700"

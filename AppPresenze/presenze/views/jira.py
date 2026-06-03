@@ -645,6 +645,92 @@ def _year_worklog_jql(target_year: int) -> str:
     )
 
 
+def _completed_history_jql(target_year: int | None = None) -> str:
+    year_filter = ""
+    if target_year is not None:
+        year_filter = (
+            f' AND resolutiondate >= "{date(target_year, 1, 1).isoformat()}"'
+            f' AND resolutiondate <= "{date(target_year, 12, 31).isoformat()}"'
+        )
+    return f'(statusCategory = Done OR status in ("Completed","Completata")){year_filter} ORDER BY updated DESC'
+
+
+def _completed_history_fields() -> list[str]:
+    return [
+        "summary",
+        "status",
+        "assignee",
+        "issuetype",
+        "parent",
+        "project",
+        "timetracking",
+        "timespent",
+        "aggregatetimespent",
+        "timeestimate",
+        "aggregatetimeestimate",
+        "timeoriginalestimate",
+        "aggregatetimeoriginalestimate",
+        "created",
+        "updated",
+        "resolutiondate",
+    ]
+
+
+def _fetch_jira_search_all(domain: str, headers: dict, jql: str, fields: list[str], start_at: int = 0, page_size: int = 100):
+    search_url = f"https://{domain}/rest/api/3/search/jql"
+    collected_issues = []
+    total = 0
+    payload = {}
+    next_page_token = None
+
+    while True:
+        params = {
+            "jql": jql,
+            "fields": fields,
+            "maxResults": page_size,
+        }
+        if next_page_token:
+            params["nextPageToken"] = next_page_token
+        else:
+            params["startAt"] = max(0, int(start_at or 0))
+
+        response = requests.get(search_url, params=params, headers=headers, timeout=10)
+        response.raise_for_status()
+        page_payload = response.json() or {}
+        if not payload:
+            payload = page_payload
+
+        batch = page_payload.get("issues", [])
+        if isinstance(batch, list):
+            collected_issues.extend(batch)
+
+        total = int(page_payload.get("total", len(collected_issues)) or len(collected_issues))
+
+        # Controlla se ci sono altre pagine tramite token
+        next_page_token = page_payload.get("nextPageToken")
+        is_last = page_payload.get("isLast", True)
+
+        if is_last or not next_page_token or not batch:
+            break
+
+    payload["issues"] = collected_issues
+    payload["startAt"] = start_at
+    payload["maxResults"] = len(collected_issues)
+    payload["total"] = len(collected_issues)  # il total di Jira non è affidabile con token pagination
+    return payload
+
+
+def _completed_history_payload(domain: str, headers: dict, target_year: int | None = None):
+    jql = _completed_history_jql(target_year)
+    payload = _fetch_jira_search_all(domain, headers, jql, _completed_history_fields())
+    _enrich_completed_issues_with_worklog_authors(payload, domain, headers)
+    _sort_issues_by_priority(payload)
+    payload["view"] = "completed"
+    payload["year"] = target_year if target_year is not None else "all"
+    payload["jql"] = jql
+    return payload
+
+
 def _search_issues_for_year_worklog(domain: str, headers: dict, target_year: int):
     search_url = f"https://{domain}/rest/api/3/search/jql"
     jql = _year_worklog_jql(target_year)
@@ -698,16 +784,28 @@ def _build_year_worklog_payload(
         project_key = str(project.get("key") or "N/D").strip() or "N/D"
         project_name = str(project.get("name") or "Progetto non disponibile").strip() or "Progetto non disponibile"
 
+        worklogs = _fetch_issue_worklogs(domain, issue_key, headers)
+
+        # La issue viene inclusa solo se ha almeno un worklog nell'anno target.
+        # Ma una volta inclusa, portiamo TUTTI i suoi worklog.
+        has_worklog_in_target_year = any(
+            _local_date_from_started(str(wl.get("started") or "")) and
+            _local_date_from_started(str(wl.get("started") or "")).year == target_year
+            for wl in worklogs
+        )
+        if not has_worklog_in_target_year:
+            if progress_cb:
+                progress_cb(idx + 1, total)
+            continue
+
         issue_worklogs = []
         issue_total_seconds = 0
-        worklogs = _fetch_issue_worklogs(domain, issue_key, headers)
 
         for worklog in worklogs:
             started_value = str(worklog.get("started") or "")
             local_day = _local_date_from_started(started_value)
-            # Filtro preciso anno lato Python.
-            if not local_day or local_day.year != target_year:
-                continue
+            if not local_day:
+                continue  # worklog senza data valida: scartato
 
             seconds = int(worklog.get("timeSpentSeconds") or 0)
             author = worklog.get("author", {}) or {}
@@ -748,7 +846,7 @@ def _build_year_worklog_payload(
                     "issue_key": issue_key,
                     "issue_summary": fields.get("summary"),
                     "status": (fields.get("status", {}) or {}).get("name"),
-                    "assignee": (fields.get("assignee", {}) or {}).get("displayName"),
+                    "assignee": author.get("displayName"),
                     "worklogs_count": len(issue_worklogs),
                     "total_seconds": issue_total_seconds,
                     "worklogs": issue_worklogs,
@@ -773,7 +871,6 @@ def _build_year_worklog_payload(
         "total_seconds": total_seconds,
         "projects": projects,
     }
-
 ##########################################################################################################################################################################################################################################
 #functions
 ##########################################################################################################################################################################################################################################
@@ -1279,25 +1376,37 @@ class JiraUserMonthlyWorklogView(APIView):
 
 class JiraWorklogView(APIView):
     """
-    Restituisce i worklog Jira per un anno specifico, organizzati per progetto -> issue -> worklog.
+    Restituisce dati storico Jira filtrati.
 
     Endpoint:
-        GET /api/jira/worklogs/year/?year=YYYY
+        GET /api/jira/worklogs/year/?view=tree&year=YYYY
+        GET /api/jira/worklogs/year/?view=completed&year=YYYY|all
     """
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        view_mode = (request.GET.get("view") or "tree").strip().lower()
+        if view_mode not in {"tree", "completed"}:
+            return Response({"error": "Parametro view non valido (usa tree o completed)"}, status=400)
+
         year_raw = (request.GET.get("year") or "").strip()
-        if not year_raw:
+        if view_mode == "completed" and year_raw.lower() in {"", "all", "tutti"}:
+            year_raw = ""
+        if view_mode == "tree" and not year_raw:
             return Response({"error": "Parametro year obbligatorio (YYYY)"}, status=400)
 
+        target_year = None
         try:
-            target_year = int(year_raw)
-            if target_year < 1900 or target_year > 3000:
-                raise ValueError
+            if year_raw and year_raw.lower() != "all":
+                target_year = int(year_raw)
+                if target_year < 1900 or target_year > 3000:
+                    raise ValueError
         except ValueError:
             return Response({"error": "Formato year non valido (usa YYYY)"}, status=400)
+
+        if view_mode == "tree" and target_year is None:
+            return Response({"error": "Parametro year obbligatorio (YYYY)"}, status=400)
 
         creds, error_response = _jira_credentials_for_user(request.user)
         if error_response:
@@ -1306,11 +1415,15 @@ class JiraWorklogView(APIView):
         headers = _jira_headers(email, api_token)
 
         try:
+            if view_mode == "completed":
+                return Response(_completed_history_payload(domain, headers, target_year))
+
             issues, jql = _search_issues_for_year_worklog(domain, headers, target_year)
             payload = _build_year_worklog_payload(domain, headers, target_year, issues)
 
             return Response(
                 {
+                    "view": "tree",
                     "year": target_year,
                     "jql": jql,
                     **payload,
@@ -1427,7 +1540,7 @@ class JiraWorklogStreamView(APIView):
                                     "issue_key": issue_key,
                                     "issue_summary": fields.get("summary"),
                                     "status": (fields.get("status", {}) or {}).get("name"),
-                                    "assignee": (fields.get("assignee", {}) or {}).get("displayName"),
+                                    "assignee": author.get("displayName"),
                                     "worklogs_count": len(issue_worklogs),
                                     "total_seconds": issue_total_seconds,
                                     "worklogs": issue_worklogs,

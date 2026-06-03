@@ -16,6 +16,7 @@
         timeSpentSeconds?: number;
         originalEstimateSeconds?: number;
       } | null;
+      worklog_authors?: { displayName?: string; timeSpentSeconds?: number }[];
     };
   };
 
@@ -37,6 +38,12 @@
 
   function taskTotalSeconds(fields?: JiraIssue['fields']) {
     if (!fields) return 0;
+    const worklogSeconds = (fields.worklog_authors || []).reduce(
+      (total, author) => total + Math.max(0, Number(author?.timeSpentSeconds || 0)),
+      0
+    );
+    if (worklogSeconds > 0) return worklogSeconds;
+
     return (
       fields.aggregatetimespent ??
       fields.timespent ??
@@ -48,6 +55,35 @@
       fields.timetracking?.originalEstimateSeconds ??
       0
     );
+  }
+
+  function addGroupedSeconds(
+    acc: Record<string, { label: string; seconds: number }>,
+    id: string,
+    label: string,
+    seconds: number
+  ) {
+    if (!acc[id]) {
+      acc[id] = { label, seconds: 0 };
+    }
+    acc[id].seconds += Math.max(0, Number(seconds || 0));
+  }
+
+  function addIssueUserSeconds(acc: Record<string, { label: string; seconds: number }>, issue: JiraIssue) {
+    const authors = (issue.fields?.worklog_authors || [])
+      .map((author) => ({
+        name: String(author?.displayName || '').trim() || 'Unassigned',
+        seconds: Math.max(0, Number(author?.timeSpentSeconds || 0))
+      }))
+      .filter((author) => author.seconds > 0);
+
+    if (authors.length > 0) {
+      authors.forEach((author) => addGroupedSeconds(acc, author.name, author.name, author.seconds));
+      return;
+    }
+
+    const assigneeName = issue.fields?.assignee?.displayName || 'Unassigned';
+    addGroupedSeconds(acc, assigneeName, assigneeName, taskTotalSeconds(issue.fields));
   }
 
   function fmtHours(seconds: number) {
@@ -68,18 +104,14 @@
       : issues;
   $: chartMode = selectedProjectKeys.length > 0 ? 'user' : 'project';
   $: grouped = selectedIssues.reduce<Record<string, { label: string; seconds: number }>>((acc, issue) => {
-    const id =
-      chartMode === 'user'
-        ? issue.fields?.assignee?.displayName || 'Unassigned'
-        : issue.fields?.project?.key || 'N/D';
-    const label =
-      chartMode === 'user'
-        ? issue.fields?.assignee?.displayName || 'Unassigned'
-        : issue.fields?.project?.name || issue.fields?.project?.key || 'Progetto non disponibile';
-    if (!acc[id]) {
-      acc[id] = { label, seconds: 0 };
+    if (chartMode === 'user') {
+      addIssueUserSeconds(acc, issue);
+      return acc;
     }
-    acc[id].seconds += Math.max(0, Number(taskTotalSeconds(issue.fields) || 0));
+
+    const projectKey = issue.fields?.project?.key || 'N/D';
+    const projectName = issue.fields?.project?.name || issue.fields?.project?.key || 'Progetto non disponibile';
+    addGroupedSeconds(acc, projectKey, projectName, taskTotalSeconds(issue.fields));
     return acc;
   }, {});
   $: totalSeconds = sum(Object.values(grouped).map((v) => v.seconds));

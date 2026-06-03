@@ -15,6 +15,10 @@
     type Trasferta
   } from '$lib/services/trasferte';
   import { getAutomobili, updateAutomobileCoeff, type Automobile } from '$lib/services/automobili';
+  import {
+    getFavoriteAutomobileId,
+    sortFavoriteAutomobileFirst
+  } from '$lib/services/automobilePreference';
   import { useCreateSpese, useScontrini, useValidateTrasferta } from '$lib/hooks/useTrasferte';
   import type { User } from '$lib/services/users';
   import LoaderOverlay from '$lib/components/loader/LoaderOverlay.svelte';
@@ -63,6 +67,7 @@
   let toastOpen = false;
   let toastSuccess = true;
   let toastMessage = '';
+  let favoriteAutoId = '';
   type SpesaFormSubmit = SpesaCreate & {
     kmPercorsi?: number;
     coefficiente?: number;
@@ -212,7 +217,9 @@
     autoError = null;
     try {
       const list = await getAutomobili({ is_active: true });
-      automobili = list.length ? list : await getAutomobili();
+      favoriteAutoId = getFavoriteAutomobileId();
+      const source = list.length ? list : await getAutomobili();
+      automobili = sortFavoriteAutomobileFirst(source, favoriteAutoId, getAutoId);
     } catch (e: any) {
       autoError = e?.message || 'Errore caricamento automobili';
       automobili = [];
@@ -497,6 +504,7 @@
 
   onMount(() => {
     partenza = DEFAULT_PARTENZA;
+    favoriteAutoId = getFavoriteAutomobileId();
   });
 
   $: if (item?.utente_id) {

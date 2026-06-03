@@ -1,40 +1,20 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { useJiraWorklogsByYear } from '$lib/hooks/useJira';
-  import type { JiraYearWorklogResponse } from '$lib/services/jira';
+  import { useJiraCompletedHistory, useJiraWorklogsByYear } from '$lib/hooks/useJira';
+  import type { JiraHistoryIssue, JiraYearWorklogResponse } from '$lib/services/jira';
   import JiraCompletedBar from '$lib/components/Jira/JiraCompletedBar.svelte';
   import JiraHistoryCharts from '$lib/components/Jira/JiraHistoryCharts.svelte';
   import { ensureJiraControlLoaded, jiraControl } from '$lib/stores/jiraControl';
 
-  type JiraIssue = {
-    key: string;
-    fields?: {
-      summary?: string;
-      status?: { name?: string };
-      assignee?: { displayName?: string } | null;
-      issuetype?: { name?: string; subtask?: boolean } | null;
-      parent?: { key?: string; fields?: { summary?: string } } | null;
-      project?: { key?: string; name?: string };
-      timespent?: number | null;
-      aggregatetimespent?: number | null;
-      timeestimate?: number | null;
-      aggregatetimeestimate?: number | null;
-      timeoriginalestimate?: number | null;
-      aggregatetimeoriginalestimate?: number | null;
-      timetracking?: {
-        timeSpentSeconds?: number;
-        originalEstimateSeconds?: number;
-      } | null;
-      created?: string;
-      updated?: string;
-      resolutiondate?: string | null;
-    };
-  };
+  type JiraIssue = JiraHistoryIssue;
 
   let selectedProjectKeys: string[] = [];
   let searchQuery = '';
   let completedIssues: JiraIssue[] = [];
+  let completedLoading = false;
+  let completedError = '';
+  let completedRequestId = 0;
   let selectedYear = 'all';
   let yearlyWorklogData: JiraYearWorklogResponse | null = null;
   let yearlyWorklogLoading = false;
@@ -93,6 +73,25 @@
     }
   }
 
+  async function fetchCompletedHistory() {
+    const requestId = ++completedRequestId;
+    completedLoading = true;
+    completedError = '';
+    try {
+      const data = await useJiraCompletedHistory('all');
+      if (requestId !== completedRequestId) return;
+      completedIssues = data.issues || [];
+    } catch (e: any) {
+      if (requestId !== completedRequestId) return;
+      completedIssues = [];
+      completedError = String(e?.message || e || 'Errore caricamento issue completate');
+    } finally {
+      if (requestId === completedRequestId) {
+        completedLoading = false;
+      }
+    }
+  }
+
   $: availableYears = Array.from(
     new Set(
       completedIssues
@@ -120,7 +119,9 @@
     const jiraEnabled = await ensureJiraControlLoaded();
     if (!jiraEnabled) {
       goto('/', { replaceState: true });
+      return;
     }
+    void fetchCompletedHistory();
   });
 
   $: if ($jiraControl.loaded && !$jiraControl.enabled) {
@@ -172,6 +173,9 @@
         bind:selectedProjectKeys
         {searchQuery}
         {selectedYear}
+        loading={completedLoading}
+        error={completedError}
+        on:refresh={fetchCompletedHistory}
       />
     </div>
 
