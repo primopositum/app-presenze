@@ -21,6 +21,7 @@
   import SpeseCard from '$lib/components/SpeseCard.svelte';
   import FormSpesa from '$lib/components/FormSpesa.svelte';
   import ErrorCard from '$lib/components/ErrorCard.svelte';
+  import ToastState from '$lib/components/ToastState.svelte';
   import MapsPlugin from '$lib/components/MapsPlugin.svelte';
   import LoadReceipts from '$lib/components/LoadReceipts.svelte';
   import { timeEntryUser } from '$lib/stores/timeEntryUser';
@@ -59,6 +60,9 @@
   let isSuperuser = false;
   let refreshKey = 0;
   let isKmBandieraRossa = false;
+  let toastOpen = false;
+  let toastSuccess = true;
+  let toastMessage = '';
   type SpesaFormSubmit = SpesaCreate & {
     kmPercorsi?: number;
     coefficiente?: number;
@@ -119,6 +123,15 @@
     if (!selected) return null;
     const coeff = Number(selected.coefficiente);
     return Number.isFinite(coeff) ? coeff : null;
+  }
+
+  function showToast(message: string, success = true) {
+    toastSuccess = success;
+    toastMessage = message;
+    toastOpen = false;
+    setTimeout(() => {
+      toastOpen = true;
+    }, 0);
   }
 
   function removeTragittoSegmentsOnce(source: string[], segments: string[]): string[] {
@@ -186,6 +199,7 @@
         );
       }
       costoKmInput = String(updatedAuto.coefficiente ?? coeff);
+      showToast('Coefficiente automobile aggiornato.');
     } catch (e: any) {
       kmError = e?.message || 'Errore aggiornamento coefficiente automobile';
     } finally {
@@ -365,6 +379,7 @@
             );
           }
           costoKmInput = String(updatedAuto.coefficiente ?? coeff);
+          showToast('Coefficiente automobile aggiornato.');
         }
       }
 
@@ -439,8 +454,12 @@
       distanzaKm = Number.isFinite(manualKm) && manualKm >= 0 ? manualKm : null;
     }
 
-    const costoKm = Number(costoKmInput);
-    if (distanzaKm === null || Number.isNaN(costoKm) || costoKm <= 0) {
+    if (!selectedAutoId) {
+      kmError = 'Seleziona prima una automobile per la spesa Rimborso km.';
+      return;
+    }
+
+    if (distanzaKm === null) {
       kmError = 'dati chilometrici mancanti';
       return;
     }
@@ -455,13 +474,12 @@
     creatingSpesa = true;
     kmError = null;
     try {
-      const baseImporto = Number((distanzaKm * costoKm).toFixed(2));
-      const importo = isKmBandieraRossa ? Number((baseImporto * 2).toFixed(2)) : baseImporto;
+      const kmPercorsi = isKmBandieraRossa ? Number((distanzaKm * 2).toFixed(2)) : Number(distanzaKm.toFixed(2));
       const tragitto = isKmBandieraRossa
         ? [partenzaClean, arrivoClean, arrivoClean, partenzaClean]
         : [partenzaClean, arrivoClean];
       const { addSpesa } = useCreateSpese({ tId: item.id });
-      const created = await addSpesa({ type: 2, importo, tragitto });
+      const created = await addSpesa({ type: 2, importo: kmPercorsi, tragitto });
       await appendTragittoSegments(tragitto);
       spese = [created.payload, ...spese];
     } catch (e: any) {
@@ -647,7 +665,7 @@
                 class:border-red-600={isKmBandieraRossa}
                 class:bg-red-500={isKmBandieraRossa}
                 class:text-white={isKmBandieraRossa}
-                aria-label="Raddoppia importo chilometrico"
+                aria-label="Andata e ritorno"
                 aria-pressed={isKmBandieraRossa}
                 title="Andata e Ritorno"
                 on:click={() => (isKmBandieraRossa = !isKmBandieraRossa)}
@@ -811,6 +829,8 @@
   {/if}
   {/key}
 </div>
+
+<ToastState bind:open={toastOpen} success={toastSuccess} message={toastMessage} />
 
 <style>
   .validated-surface {

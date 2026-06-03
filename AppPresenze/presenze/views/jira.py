@@ -509,8 +509,30 @@ def _worklog_seconds_by_author(domain: str, issue_key: str, headers: dict):
 def _enrich_completed_issues_with_worklog_authors(search_payload, domain: str, headers: dict):
     if not isinstance(search_payload, dict):
         return
+    logs = search_payload.setdefault("worklog_enrich_logs", [])
+
+    def _push_log(level: str, message: str, issue_key: str = ""):
+        # Evita payload troppo grandi su errori massivi.
+        if not isinstance(logs, list):
+            return
+        if len(logs) >= 100:
+            if len(logs) == 100:
+                logs.append(
+                    {
+                        "level": "warning",
+                        "message": "Limite log raggiunto (100): ulteriori dettagli omessi.",
+                    }
+                )
+            return
+        row = {"level": level, "message": message}
+        if issue_key:
+            row["issue_key"] = issue_key
+        logs.append(row)
+
     issues = search_payload.get("issues")
     if not isinstance(issues, list):
+        _push_log("error", "Arricchimento Jira non eseguito: campo 'issues' mancante o non valido.")
+        search_payload["worklog_enrich_error"] = True
         return
 
     issue_rows = []
@@ -524,49 +546,85 @@ def _enrich_completed_issues_with_worklog_authors(search_payload, domain: str, h
         issue_rows.append((issue_key, fields))
 
     if not issue_rows:
+        search_payload["worklog_enrich_meta"] = {
+            "enabled": True,
+            "candidate_issues": 0,
+            "enriched_issues": 0,
+            "failed_issues": 0,
+        }
         return
 
     max_workers = min(_WORKLOG_ENRICH_MAX_WORKERS, len(issue_rows))
     if max_workers <= 1:
         # Fallback: mantiene il comportamento anche su ambienti con un solo worker.
         max_workers = 1
+    failed_issues = 0
+    enriched_issues = 0
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_map = {
-            executor.submit(_worklog_seconds_by_author, domain, issue_key, headers): fields
-            for issue_key, fields in issue_rows
-        }
-
-        for future in as_completed(future_map):
-            fields = future_map[future]
-            try:
-                totals = future.result()
-            except requests.exceptions.RequestException:
-                # Se una issue non e interrogabile, non bloccare l'intera risposta.
-                continue
-
-            if not totals:
-                continue
-
-            sorted_authors = sorted(
-                totals.items(),
-                key=lambda item: (-item[1], item[0].lower()),
-            )
-            workers = [
-                {"displayName": name, "timeSpentSeconds": seconds}
-                for name, seconds in sorted_authors
-            ]
-
-            # Manteniamo il contratto FE invariato: assignee.displayName esiste sempre.
-            top_name, top_seconds = sorted_authors[0]
-            fields["assignee"] = {"displayName": top_name}
-
-            # Metadati aggiuntivi utili per debug/estensioni future.
-            fields["worklog_authors"] = workers
-            fields["worklog_primary_author"] = {
-                "displayName": top_name,
-                "timeSpentSeconds": top_seconds,
+    try:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_map = {
+                executor.submit(_worklog_seconds_by_author, domain, issue_key, headers): (issue_key, fields)
+                for issue_key, fields in issue_rows
             }
+
+            for future in as_completed(future_map):
+                issue_key, fields = future_map[future]
+                try:
+                    totals = future.result()
+                except requests.exceptions.RequestException as exc:
+                    # Non bloccare l'intera risposta, ma esporre il motivo al frontend.
+                    failed_issues += 1
+                    _push_log(
+                        "error",
+                        f"Errore richiesta Jira durante lettura worklog: {exc}",
+                        issue_key=issue_key,
+                    )
+                    continue
+                except Exception as exc:
+                    failed_issues += 1
+                    _push_log(
+                        "error",
+                        f"Errore inatteso durante arricchimento worklog: {exc}",
+                        issue_key=issue_key,
+                    )
+                    continue
+
+                if not totals:
+                    continue
+
+                sorted_authors = sorted(
+                    totals.items(),
+                    key=lambda item: (-item[1], item[0].lower()),
+                )
+                workers = [
+                    {"displayName": name, "timeSpentSeconds": seconds}
+                    for name, seconds in sorted_authors
+                ]
+
+                # Manteniamo il contratto FE invariato: assignee.displayName esiste sempre.
+                top_name, top_seconds = sorted_authors[0]
+                fields["assignee"] = {"displayName": top_name}
+
+                # Metadati aggiuntivi utili per debug/estensioni future.
+                fields["worklog_authors"] = workers
+                fields["worklog_primary_author"] = {
+                    "displayName": top_name,
+                    "timeSpentSeconds": top_seconds,
+                }
+                enriched_issues += 1
+    except Exception as exc:
+        failed_issues = max(failed_issues, 1)
+        _push_log("error", f"Errore generale arricchimento Jira worklog: {exc}")
+
+    search_payload["worklog_enrich_meta"] = {
+        "enabled": True,
+        "candidate_issues": len(issue_rows),
+        "enriched_issues": enriched_issues,
+        "failed_issues": failed_issues,
+    }
+    if failed_issues > 0:
+        search_payload["worklog_enrich_error"] = True
 
 
 def _jira_current_account_id(domain: str, headers: dict):

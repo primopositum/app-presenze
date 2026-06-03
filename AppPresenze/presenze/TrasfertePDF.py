@@ -5,7 +5,7 @@ import hashlib
 import uuid
 from dataclasses import dataclass
 from datetime import date, timedelta
-from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO
 from pathlib import Path
 import subprocess
@@ -74,6 +74,21 @@ def _format_decimal(value: Decimal) -> str:
     if not normalized:
         normalized = "0"
     return normalized.replace(".", ",")
+
+
+def _unique_tragitto_places(tragitto: List[str]) -> List[str]:
+    places: List[str] = []
+    seen = set()
+    for raw_place in tragitto or []:
+        place = str(raw_place).strip()
+        if not place:
+            continue
+        key = " ".join(place.lower().split())
+        if key in seen:
+            continue
+        seen.add(key)
+        places.append(place)
+    return places
 
 
 def _previous_month_range_from(base_date: date) -> Tuple[date, date]:
@@ -225,17 +240,18 @@ def _build_rows_and_totals(trasferte: List[Trasferta]) -> Tuple[List[TrasfertaRo
 
     for tr in trasferte:
         grouped: Dict[int, Decimal] = {}
+        km_total = Decimal("0.00")
         for spesa in tr.spese.all():
-            grouped.setdefault(spesa.type, Decimal("0.00"))
-            grouped[spesa.type] += Decimal(str(spesa.importo))
+            value = Decimal(str(spesa.importo))
+            if spesa.type == Spesa.TrasfertaType.KM:
+                km_total += value
+            else:
+                grouped.setdefault(spesa.type, Decimal("0.00"))
+                grouped[spesa.type] += value
 
-        calc_total = grouped.get(Spesa.TrasfertaType.KM, Decimal("0.00"))
         coeff = Decimal(str(tr.automobile.coefficiente or Decimal("0.00"))) if tr.automobile else Decimal("0.00")
-        if coeff > 0:
-            km_total = (calc_total / coeff).quantize(Decimal("1"), rounding=ROUND_DOWN)
-        else:
-            km_total = Decimal("0.00")
-        tragitto_value = " / ".join([str(p).strip() for p in (tr.tragitto or []) if str(p).strip()])
+        calc_total = (km_total * coeff).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if coeff > 0 else Decimal("0.00")
+        tragitto_value = " / ".join(_unique_tragitto_places(tr.tragitto or []))
 
         row = TrasfertaRow(
             date=tr.data.strftime("%d/%m/%Y"),

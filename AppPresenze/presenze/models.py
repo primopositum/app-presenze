@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError
 from django.conf import settings
 from cryptography.fernet import Fernet
 import uuid
+from decimal import Decimal, ROUND_HALF_UP
 
 
 # ---------------------------
@@ -334,8 +335,15 @@ class Trasferta(models.Model):
     def totale_spese(self):
         if not self.pk:
             return 0
-        totale = self.spese.aggregate(totale=models.Sum("importo"))["totale"]
-        return totale or 0
+        totale = Decimal("0.00")
+        for spesa in self.spese.select_related("trasferta__automobile").all():
+            value = Decimal(str(spesa.importo or Decimal("0.00")))
+            if spesa.type == Spesa.TrasfertaType.KM:
+                coeff = Decimal(str(self.automobile.coefficiente or Decimal("0.00"))) if self.automobile else Decimal("0.00")
+                totale += (value * coeff).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            else:
+                totale += value
+        return totale
 
 
 # ---------------------------
