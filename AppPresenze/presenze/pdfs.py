@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 from collections import defaultdict
 import calendar
+import re
 from datetime import timedelta
 from dateutil.relativedelta import relativedelta
 
@@ -53,6 +54,13 @@ ITALIAN_MONTHS = [
     "novembre",
     "dicembre",
 ]
+
+
+def _safe_filename_part(value) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"\s+", "_", text)
+    text = re.sub(r"[^A-Za-z0-9_.-]", "", text)
+    return text or "utente"
 
 
 @dataclass
@@ -333,5 +341,10 @@ class PresenzeMeseScorsoPDFView(APIView):
 
         pdf_io = fill_pdf(PDF_TEMPLATE_PATH, full_name, days_data)
 
-        filename = f"presenze_{user.nome}_{user.cognome}_{start_date.strftime('%Y_%m')}.pdf"
+        nome_file = _safe_filename_part(user.nome)
+        cognome_file = _safe_filename_part(user.cognome)
+        if is_super:
+            nome_file = f"{nome_file}[{user.id}]"
+            cognome_file = f"{cognome_file}[{user.id}]"
+        filename = f"presenze_{nome_file}_{cognome_file}_{start_date.strftime('%Y_%m')}.pdf"
         return FileResponse(pdf_io, as_attachment=True, filename=filename)

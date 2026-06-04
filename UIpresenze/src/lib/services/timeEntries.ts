@@ -108,6 +108,14 @@ export function createTimeEntryRangeOverride(entry: TimeEntryRangeOverrideCreate
 }
 
 
+function filenameFromContentDisposition(header: string | null) {
+  if (!header) return null;
+  const utf8Match = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) return decodeURIComponent(utf8Match[1].replace(/"/g, ''));
+  const filenameMatch = header.match(/filename="?([^";]+)"?/i);
+  return filenameMatch?.[1] ?? null;
+}
+
 export async function getMeseScorsoPdf(params: { u_id?: number; date?: string; note?: string } = {}) {
   const qs = new URLSearchParams();
   if (params.u_id !== undefined) qs.set('u_id', String(params.u_id));
@@ -119,7 +127,10 @@ export async function getMeseScorsoPdf(params: { u_id?: number; date?: string; n
     const message = res.statusText || 'Request failed';
     throw new Error(message);
   }
-  return res.blob(); 
+  return {
+    blob: await res.blob(),
+    filename: filenameFromContentDisposition(res.headers.get('Content-Disposition'))
+  };
 }
 
 

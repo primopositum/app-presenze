@@ -95,7 +95,7 @@ export function useGeneratePDF(params: {
   u_id?: number;
   note?: string;
 }) {
-  return async (): Promise<{ ok: true; payload: Blob }> => {
+  return async (): Promise<{ ok: true; payload: { blob: Blob; filename: string | null } }> => {
     const pdf = await getMeseScorsoPdf({ date: params.date, u_id: params.u_id, note: params.note });
     return { ok: true, payload: pdf };
   };

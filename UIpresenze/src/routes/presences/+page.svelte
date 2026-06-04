@@ -270,10 +270,10 @@ export const loadData = async () => {
     error = null;
     try {
       const { payload } = await generatePdf();
-      const url = URL.createObjectURL(payload);
+      const url = URL.createObjectURL(payload.blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `presenze-${year}-${String(month).padStart(2, '0')}.pdf`;
+      link.download = payload.filename ?? `presenze-${year}-${String(month).padStart(2, '0')}.pdf`;
       document.body.appendChild(link);
       link.click();
       link.remove();
