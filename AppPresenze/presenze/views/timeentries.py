@@ -7,13 +7,91 @@ from django.db import transaction
 from django.utils import timezone
 from decimal import Decimal
 from datetime import date, timedelta
-from django.db.models import Q
+from django.db.models import Q, Sum
 from ..models import TimeEntry, Utente, Saldo, Contratto
 from ..serializer import TimeEntrySerializer, TimeEntryValidationSerializer
 from ..pdfs import PresenzeMeseScorsoPDFView
 
 def _is_staff_or_super(user):
     return user.is_staff or user.is_superuser
+
+def _decimal_to_number(value):
+    value = value.quantize(Decimal("0.01"))
+    if value == value.to_integral_value():
+        return int(value)
+    return float(value)
+
+def get_saldo_cumulativo_mensile(utente_id):
+    """
+    Ritorna il saldo cumulativo mese per mese per le entry di banca ore.
+    Esempio: gennaio +2, febbraio -3, marzo +5 -> [2, -1, 4].
+    """
+    rows = (
+        TimeEntry.objects
+        .filter(
+            utente_id=utente_id,
+            type__in=(
+                TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
+                TimeEntry.EntryType.PRELIEVO_BANCA_ORE,
+            ),
+        )
+        .values("data__year", "data__month", "type")
+        .annotate(total=Sum("ore_tot"))
+        .order_by("data__year", "data__month")
+    )
+
+    monthly_deltas = {}
+    for row in rows:
+        key = (row["data__year"], row["data__month"])
+        ore = Decimal(str(row["total"] or Decimal("0.00")))
+        delta = ore if row["type"] == TimeEntry.EntryType.VERSAMENTO_BANCA_ORE else -ore
+        monthly_deltas[key] = monthly_deltas.get(key, Decimal("0.00")) + delta
+
+    saldo = Decimal("0.00")
+    result = []
+    for key in sorted(monthly_deltas):
+        saldo += monthly_deltas[key]
+        result.append(_decimal_to_number(saldo))
+
+    return result
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def timeentry_saldo_cumulativo_mensile(request):
+    """
+    GET /presenze/api/time-entries/saldo-cumulativo-mensile/[?u_id=...]
+
+    Ritorna solo l'array cumulativo, ad esempio: {"result": [2, -1, 4]}.
+    """
+    utente_id_param = request.query_params.get("u_id")
+
+    if utente_id_param is None:
+        utente_id = request.user.id
+    else:
+        try:
+            utente_id = int(utente_id_param)
+        except (TypeError, ValueError):
+            return Response(
+                {"errors": "Parametro 'u_id' non valido."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    if not (request.user.is_superuser or request.user.id == utente_id):
+        return Response(
+            {"errors": "Non hai i permessi per vedere il saldo di questo utente."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if not Utente.objects.filter(pk=utente_id).exists():
+        return Response(
+            {"errors": f"Utente con id {utente_id} non trovato."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    return Response(
+        {"utente_id": utente_id, "result": get_saldo_cumulativo_mensile(utente_id)},
+        status=status.HTTP_200_OK,
+    )
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])

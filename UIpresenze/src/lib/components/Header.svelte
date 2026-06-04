@@ -84,6 +84,12 @@
       : saldoToShow;
   $: hbColor = mode === 'extra' && canUseExtra && extra?.color ? extra.color : undefined;
   $: hbSaldoDaChiamataUtente = mode === 'persistente';
+  $: hbSaldoCumulativoMensile =
+    mode === 'extra' && canUseExtra && Array.isArray(extra?.saldoCumulativoMensile)
+      ? extra.saldoCumulativoMensile
+      : [];
+  $: hbYear = mode === 'extra' && canUseExtra ? extra?.year : undefined;
+  $: hbMonth = mode === 'extra' && canUseExtra ? extra?.month : undefined;
 </script>
 
 <nav class="flex items-center justify-between px-8 py-4 bg-white-200">
@@ -171,6 +177,9 @@
         saldo={hbSaldo}
         color={hbColor}
         saldoDaChiamataUtente={hbSaldoDaChiamataUtente}
+        saldoCumulativoMensile={hbSaldoCumulativoMensile}
+        year={hbYear}
+        month={hbMonth}
       />
     </div>
   {/if}

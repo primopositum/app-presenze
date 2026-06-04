@@ -104,6 +104,7 @@
       11: 'bg-violet-500 text-white',        // Congedo mat/pat
       12: 'bg-gray-600 text-white',          // Sciopero
       14: 'bg-cyan-600 text-white',          // Visite mediche L.106/25
+      15: 'bg-rose-700 text-white',          // Ricovero presso struttura ospedaliera
       13: 'bg-emerald-500 text-white',       // Festività
     };
     return colors[type] || 'bg-gray-400 text-white';
@@ -125,6 +126,7 @@
       11: 'MAT',
       12: 'SCI',
       14: 'VMD',
+      15: 'RIC',
       13: 'FES',
     };
     return labels[type] || 'N/A';

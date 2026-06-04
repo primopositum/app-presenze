@@ -37,6 +37,7 @@
   import { jiraControl } from '$lib/stores/jiraControl';
   import { hourBalanceExtra } from '$lib/stores/hourBalanceExtra';
   import { useOneUserApi } from '$lib/hooks/useUserApi.js';
+  import { useSaldoCumulativoMensile } from '$lib/hooks/useTimeEntries';
   let loading = false;
   let error: string | null = null;
 
@@ -73,6 +74,7 @@
   let saldoValidatoOrig: number | string | null = null;
   let saldoTimeEntryVisuale: number | string | null = null;
   let saldoPersistenteVisuale: number | string | null = null;
+  let saldoCumulativoMensile: number[] = [];
 
   function splitYmd(dateStr: string) {
     const [y, m, d] = dateStr.split('-').map(Number);
@@ -99,6 +101,7 @@
     if (t === 12) return 'Sciopero';
     if (t === 13) return 'Festivita';
     if (t === 14) return 'Visite mediche L.106/25';
+    if (t === 15) return 'Ricovero presso struttura ospedaliera';
     return `Tipo ${t}`;
   }
 
@@ -151,10 +154,14 @@
 export const loadData = async () => {
     loading = true; error = null;
     try {
-      const data = await getTimeEntriesFromMonth({
-        date: new Date(year, month - 1, 1),
-        utenteId: userId ?? undefined
-      });
+      const [data, saldoCumulativo] = await Promise.all([
+        getTimeEntriesFromMonth({
+          date: new Date(year, month - 1, 1),
+          utenteId: userId ?? undefined
+        }),
+        useSaldoCumulativoMensile({ utenteId: userId ?? undefined })()
+      ]);
+      saldoCumulativoMensile = saldoCumulativo.payload;
       entries = (data?.results || []) as TimeEntry[];      
       const groupedByDate = entries.reduce<Record<string, { hours: number; validation_level: number; entries: TimeEntry[] }>>((acc, entry) => {
         const { y, m } = splitYmd(entry.data);
@@ -389,6 +396,9 @@ export const loadData = async () => {
   $: hourBalanceExtra.set({
     title: 'saldo mese',
     saldo: saldoPeriodo,
+    saldoCumulativoMensile,
+    year,
+    month,
     color: ['#EAFF3B', '#88FF78']
   });
   $: saldoValidatoOrig = $auth.user?.saldo?.valore_saldo_validato ?? null;

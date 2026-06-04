@@ -31,6 +31,7 @@ URL_TE_DETAIL        = lambda te_id: f"{BASE}/time-entries/{te_id}/"
 URL_TE_VALIDATION    = lambda te_id: f"{BASE}/time-entries/{te_id}/validation/"
 URL_TE_RANGE_OVERRIDE = f"{BASE}/time-entries/range-override/"
 URL_TE_BULK_VALIDATE  = f"{BASE}/time-entries/bulk-validate-month/"
+URL_TE_SALDO_CUMULATIVO = f"{BASE}/time-entries/saldo-cumulativo-mensile/"
 
 URL_TRASFERTA_CREATE = f"{BASE}/trasferte/create/"
 URL_TRASFERTA_UPDATE = lambda t_id: f"{BASE}/trasferte/{t_id}/"
@@ -484,6 +485,70 @@ class TestTimeEntryValidation(TestCase):
         saldo.refresh_from_db()
         self.assertEqual(saldo.valore_saldo_sospeso, Decimal("0.00"))
         self.assertEqual(saldo.valore_saldo_validato, Decimal("4.00"))
+
+
+class TestTimeEntrySaldoCumulativoMensile(TestCase):
+
+    def setUp(self):
+        self.utente = make_utente()
+        self.altro = make_utente(email="altro@test.com")
+        self.admin = make_utente(email="admin@test.com", is_superuser=True, is_staff=True)
+
+    def test_restituisce_saldo_cumulativo_mese_per_mese(self):
+        make_timeentry(
+            self.utente,
+            data=date(2025, 1, 6),
+            type=TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
+            ore_tot=Decimal("2.00"),
+        )
+        make_timeentry(
+            self.utente,
+            data=date(2025, 2, 6),
+            type=TimeEntry.EntryType.PRELIEVO_BANCA_ORE,
+            ore_tot=Decimal("3.00"),
+        )
+        make_timeentry(
+            self.utente,
+            data=date(2025, 3, 6),
+            type=TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
+            ore_tot=Decimal("5.00"),
+        )
+
+        res = auth_client(self.utente).get(URL_TE_SALDO_CUMULATIVO)
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["result"], [2, -1, 4])
+
+    def test_ignora_timeentry_non_banca_ore(self):
+        make_timeentry(
+            self.utente,
+            data=date(2025, 1, 6),
+            type=TimeEntry.EntryType.LAVORO_ORDINARIO,
+            ore_tot=Decimal("8.00"),
+        )
+
+        res = auth_client(self.utente).get(URL_TE_SALDO_CUMULATIVO)
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["result"], [])
+
+    def test_utente_normale_non_vede_saldo_altrui(self):
+        res = auth_client(self.altro).get(URL_TE_SALDO_CUMULATIVO, {"u_id": self.utente.id})
+
+        self.assertEqual(res.status_code, 403)
+
+    def test_admin_vede_saldo_altrui(self):
+        make_timeentry(
+            self.utente,
+            data=date(2025, 1, 6),
+            type=TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
+            ore_tot=Decimal("2.00"),
+        )
+
+        res = auth_client(self.admin).get(URL_TE_SALDO_CUMULATIVO, {"u_id": self.utente.id})
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["result"], [2])
 
 
 # ---------------------------------------------------------------------------

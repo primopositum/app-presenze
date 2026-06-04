@@ -3,12 +3,33 @@
   export let title: string;
   export let color: [string, string] | undefined;
   export let saldoDaChiamataUtente = false;
+  export let saldoCumulativoMensile: number[] = [];
+  export let year: number | undefined = undefined;
+  export let month: number | undefined = undefined;
+  const today = new Date();
 
   // Normalizzo sempre a number (NaN se non valido)
   $: saldoNum = saldo === null || saldo === undefined ? NaN : Number(saldo);
+  $: monthOffset =
+    year && month
+      ? (today.getFullYear() - year) * 12 + (today.getMonth() + 1 - month)
+      : 0;
+  $: saldoCumulativoCorretto =
+    saldoDaChiamataUtente || Number.isNaN(saldoNum)
+      ? []
+      : saldoCumulativoMensile
+          .map((value) => Number(value) - saldoNum)
+          .filter(Number.isFinite)
+          .reverse();
+  $: saldoVisualizzato =
+    !saldoDaChiamataUtente &&
+    monthOffset >= 0 &&
+    monthOffset < saldoCumulativoCorretto.length
+      ? saldoCumulativoCorretto[monthOffset]
+      : saldoNum;
 
   // Testo da mostrare (evita "NaNh")
-  $: saldoLabel = Number.isNaN(saldoNum) ? "--" : String(saldoNum);
+  $: saldoLabel = Number.isNaN(saldoVisualizzato) ? "--" : String(saldoVisualizzato);
   $: phrases =
     saldoLabel === "--"
       ? "Saldo non disponibile"

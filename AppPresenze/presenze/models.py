@@ -112,6 +112,7 @@ class TimeEntry(models.Model):
         SCIOPERO = 12, "Sciopero"
         FESTIVITA = 13, "Festività"
         VISITEMEDICHE = 14, "Visite mediche L.106/25"
+        RICOVERO = 15, "Ricovero presso struttura ospedaliera"
 
     class ValidationLevel(models.IntegerChoices):
         AUTO = 0, "Compilato automaticamente"

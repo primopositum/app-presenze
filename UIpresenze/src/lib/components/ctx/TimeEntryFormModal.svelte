@@ -39,7 +39,8 @@
     { value: 10, label: 'Permesso R.O.L.' },
     { value: 11, label: 'Congedo di maternita' },
     { value: 12, label: 'Sciopero' },
-    { value: 14, label: 'Visite mediche L.106/25' }
+    { value: 14, label: 'Visite mediche L.106/25' },
+    { value: 15, label: 'Ricovero presso struttura ospedaliera' }
   ];
   $: visibleTypeOptions =
     mode === 'create'

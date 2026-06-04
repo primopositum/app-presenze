@@ -8,6 +8,13 @@
   import { ensureJiraControlLoaded, jiraControl } from '$lib/stores/jiraControl';
 
   type JiraIssue = JiraHistoryIssue;
+  type CompletedHistoryCache = {
+    version: 1;
+    cachedAt: string;
+    issues: JiraIssue[];
+  };
+
+  const COMPLETED_HISTORY_CACHE_KEY = 'app-presenze:jira-history:completed:v1';
 
   let selectedProjectKeys: string[] = [];
   let searchQuery = '';
@@ -73,17 +80,113 @@
     }
   }
 
-  async function fetchCompletedHistory() {
+  function normalizeCompletedIssues(issues: JiraIssue[]): JiraIssue[] {
+    return (issues || [])
+      .map((issue) => {
+        const fields = issue.fields || {};
+        return {
+          key: String(issue.key || ''),
+          fields: {
+            summary: fields.summary,
+            status: fields.status ? { name: fields.status.name } : undefined,
+            assignee: fields.assignee?.displayName ? { displayName: fields.assignee.displayName } : null,
+            issuetype: fields.issuetype
+              ? { name: fields.issuetype.name, subtask: fields.issuetype.subtask }
+              : null,
+            parent: fields.parent
+              ? { key: fields.parent.key, fields: { summary: fields.parent.fields?.summary } }
+              : null,
+            project: fields.project ? { key: fields.project.key, name: fields.project.name } : undefined,
+            timespent: fields.timespent ?? null,
+            aggregatetimespent: fields.aggregatetimespent ?? null,
+            timeestimate: fields.timeestimate ?? null,
+            aggregatetimeestimate: fields.aggregatetimeestimate ?? null,
+            timeoriginalestimate: fields.timeoriginalestimate ?? null,
+            aggregatetimeoriginalestimate: fields.aggregatetimeoriginalestimate ?? null,
+            timetracking: fields.timetracking
+              ? {
+                  timeSpentSeconds: fields.timetracking.timeSpentSeconds,
+                  originalEstimateSeconds: fields.timetracking.originalEstimateSeconds
+                }
+              : null,
+            created: fields.created,
+            updated: fields.updated,
+            resolutiondate: fields.resolutiondate ?? null,
+            worklog_authors: (fields.worklog_authors || []).map((author) => ({
+              displayName: author.displayName,
+              timeSpentSeconds: author.timeSpentSeconds
+            })),
+            worklog_primary_author: fields.worklog_primary_author
+              ? {
+                  displayName: fields.worklog_primary_author.displayName,
+                  timeSpentSeconds: fields.worklog_primary_author.timeSpentSeconds
+                }
+              : undefined
+          }
+        };
+      })
+      .filter((issue) => issue.key);
+  }
+
+  function loadCompletedHistoryCache() {
+    try {
+      const raw = localStorage.getItem(COMPLETED_HISTORY_CACHE_KEY);
+      if (!raw) return false;
+
+      const payload = JSON.parse(raw) as Partial<CompletedHistoryCache>;
+      if (payload.version !== 1 || !Array.isArray(payload.issues)) {
+        localStorage.removeItem(COMPLETED_HISTORY_CACHE_KEY);
+        return false;
+      }
+
+      completedIssues = normalizeCompletedIssues(payload.issues);
+      try {
+        localStorage.setItem(
+          COMPLETED_HISTORY_CACHE_KEY,
+          JSON.stringify({
+            version: 1,
+            cachedAt: String(payload.cachedAt || new Date().toISOString()),
+            issues: completedIssues
+          } satisfies CompletedHistoryCache)
+        );
+      } catch {
+        void 0;
+      }
+      completedError = '';
+      return true;
+    } catch {
+      localStorage.removeItem(COMPLETED_HISTORY_CACHE_KEY);
+      return false;
+    }
+  }
+
+  function saveCompletedHistoryCache(issues: JiraIssue[]) {
+    const payload: CompletedHistoryCache = {
+      version: 1,
+      cachedAt: new Date().toISOString(),
+      issues,
+    };
+
+    try {
+      localStorage.setItem(COMPLETED_HISTORY_CACHE_KEY, JSON.stringify(payload));
+    } catch {
+      return;
+    }
+  }
+
+  async function fetchCompletedHistory(forceRefresh = false) {
+    if (!forceRefresh && loadCompletedHistoryCache()) return;
+
     const requestId = ++completedRequestId;
     completedLoading = true;
     completedError = '';
     try {
       const data = await useJiraCompletedHistory('all');
       if (requestId !== completedRequestId) return;
-      completedIssues = data.issues || [];
+      completedIssues = normalizeCompletedIssues(data.issues || []);
+      saveCompletedHistoryCache(completedIssues);
     } catch (e: any) {
       if (requestId !== completedRequestId) return;
-      completedIssues = [];
       completedError = String(e?.message || e || 'Errore caricamento issue completate');
     } finally {
       if (requestId === completedRequestId) {
@@ -175,7 +278,7 @@
         {selectedYear}
         loading={completedLoading}
         error={completedError}
-        on:refresh={fetchCompletedHistory}
+        on:refresh={() => fetchCompletedHistory(true)}
       />
     </div>
 
