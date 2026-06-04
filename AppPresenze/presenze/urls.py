@@ -27,7 +27,6 @@ api_urlpatterns = [
     path("time-entries/",                        views.timeentry_create,                    name="timeentry-create"),
     path("time-entries/range-override/",         views.timeentry_create_range_override,     name="timeentry-create-range-override"),
     path("time-entries/from-month/",             views.time_entries_from_month_to_previous,  name="timeentries-from-month"),
-    path("time-entries/saldo-cumulativo-mensile/", views.timeentry_saldo_cumulativo_mensile, name="timeentry-saldo-cumulativo-mensile"),
     path("time-entries/<int:te_id>/validation/", views.timeentry_update_validation_level,    name="timeentry-update-validation"),
     path("time-entries/<int:te_id>/",            views.timeentry_detail,                    name="timeentry-detail"),
     path("time-entries/bulk-validate-month/",    views.timeentry_bulk_validate_month,        name="timeentry-bulk-validate-month"),

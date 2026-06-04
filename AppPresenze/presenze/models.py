@@ -173,7 +173,11 @@ class Saldo(models.Model):
     )
 
     valore_saldo_validato = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    valore_saldo_sospeso = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    saldo_progressivo = ArrayField(
+        base_field=models.DecimalField(max_digits=10, decimal_places=2),
+        default=list,
+        blank=True,
+    )
 
     data_creaz = models.DateTimeField(default=timezone.now)
     data_upd = models.DateTimeField(auto_now=True)

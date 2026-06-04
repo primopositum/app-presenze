@@ -1,6 +1,5 @@
 import {
   createTimeEntryRangeOverride,
-  getSaldoCumulativoMensile,
   type TimeEntryRangeOverrideCreate
 } from '$lib/services/timeEntries';
 import { refreshProfileUser } from '$lib/services/users';
@@ -46,23 +45,3 @@ export function useRangeOverrideTimeEntries() {
     return { ok: true, payload: created };
   };
 }
-
-export function useSaldoCumulativoMensile(params: { utenteId?: number } = {}) {
-  return async (): Promise<{ ok: true; payload: number[] }> => {
-    let payload: number[] = [];
-
-    try {
-      const data = await getSaldoCumulativoMensile(params);
-      payload = Array.isArray(data?.result)
-        ? data.result.map((value) => Number(value)).filter(Number.isFinite)
-        : [];
-    } catch (e) {
-      if ((e as Error & { status?: number }).status !== 404) {
-        throw e;
-      }
-    }
-
-    return { ok: true, payload };
-  };
-}
-

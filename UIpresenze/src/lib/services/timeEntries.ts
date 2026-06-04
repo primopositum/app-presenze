@@ -55,10 +55,6 @@ export type BulkValidationUpdate = {
   u_id?: number;
   data: string; // YYYY-MM-DD
 };
-export type SaldoCumulativoMensileResponse = {
-  utente_id: number;
-  result: number[];
-};
 /**
  * Regola sessione:
  * - superuser -> NON passa u_id
@@ -93,18 +89,6 @@ export function getTimeEntriesFromMonth(params: {
   }
 
   return request(`/time-entries/from-month/?${qs.toString()}`);
-}
-
-export function getSaldoCumulativoMensile(params: { utenteId?: number } = {}) {
-  const qs = new URLSearchParams();
-  const uId = resolveUId(params.utenteId);
-  if (uId !== undefined) {
-    qs.set('u_id', String(uId));
-  }
-
-  return request(
-    `/time-entries/saldo-cumulativo-mensile/${qs.toString() ? `?${qs.toString()}` : ''}`
-  ) as Promise<SaldoCumulativoMensileResponse>;
 }
 
 export function createTimeEntry(entry: TimeEntryCreate) {

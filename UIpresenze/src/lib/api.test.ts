@@ -346,7 +346,7 @@ describe('Profile Service (getProfile)', () => {
 			email: 'test@example.com',
 			nome: 'Test',
 			cognome: 'User',
-			saldo: { valore_saldo_validato: '10.00' }
+			saldo: { valore_saldo_validato: '10.00', saldo_progressivo: [] }
 		};
 		
 		mockFetch.mockResolvedValueOnce({

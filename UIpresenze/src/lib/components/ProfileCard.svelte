@@ -255,8 +255,7 @@
         const saldoOriginale = Number(user.saldo.valore_saldo_validato) || 0;
         if (editSaldo !== saldoOriginale) {
           payload.saldo = {
-            valore_saldo_validato: String(editSaldo),
-            valore_saldo_sospeso: String(Number(user.saldo?.valore_saldo_sospeso) || 0)
+            valore_saldo_validato: String(editSaldo)
           };
         }
       }

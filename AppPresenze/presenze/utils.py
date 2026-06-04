@@ -20,9 +20,9 @@ def update_saldo_for_timeentry(timeentry, operation="add"):
     else:  # PRELIEVO
         delta = -ore if operation == "add" else ore
 
-    if timeentry.validation_level == TimeEntry.ValidationLevel.VALIDATO_ADMIN:
-        saldo.valore_saldo_validato += delta
-    else:
-        saldo.valore_saldo_sospeso += delta
+    if timeentry.validation_level != TimeEntry.ValidationLevel.VALIDATO_ADMIN:
+        return
 
-    saldo.save(update_fields=["valore_saldo_validato", "valore_saldo_sospeso", "data_upd"])
+    saldo.valore_saldo_validato += delta
+
+    saldo.save(update_fields=["valore_saldo_validato", "data_upd"])

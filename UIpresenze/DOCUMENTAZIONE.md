@@ -96,7 +96,6 @@ UIpresenze/
 │   │   │   └── users.ts          # Gestione utenti
 │   │   └── stores/               # Store Svelte per stato globale
 │   │       ├── auth.ts           # Stato autenticazione
-│   │       ├── hourBalanceExtra.ts
 │   │       ├── timeEntryReload.ts
 │   │       └── timeEntryUser.ts
 │   ├── routes/                   # Routing SvelteKit (file-based)
@@ -409,8 +408,8 @@ type User = {
   is_superuser?: boolean;
   saldo: {
     data: string;
-    valore_saldo_sospeso: string;
     valore_saldo_validato: string;
+    saldo_progressivo: Array<string | number>;
   };
   contratti: Contratto[];
 };
@@ -465,18 +464,6 @@ type AuthState = {
 ### `timeEntryUser.ts` - Utente Corrente (Presenze)
 
 Store dedicato per il contesto presenze. Mantiene i dati utente sincronizzati con il modulo presenze.
-
-### `hourBalanceExtra.ts` - Saldo Extra
-
-Permette di mostrare un saldo ore "aggiuntivo" (es. saldo del mese corrente non ancora validato).
-
-```typescript
-type HourBalanceExtra = {
-  title: string;
-  saldo: number;
-  color?: [string, string];  // Gradiente colori
-};
-```
 
 ### `timeEntryReload.ts` - Trigger Ricarica
 

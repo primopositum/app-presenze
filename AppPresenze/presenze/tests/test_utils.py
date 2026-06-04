@@ -19,7 +19,7 @@ class TestUpdateSaldoTipoIrrilevante(TestCase):
     def setUp(self):
         self.utente = make_utente()
         self.saldo = make_saldo(self.utente, validato=Decimal("10.00"),
-                                sospeso=Decimal("5.00"))
+                                saldo_progressivo=[Decimal("10.00")])
 
     def test_lavoro_ordinario_non_modifica_saldo(self):
         te = make_timeentry(self.utente, type=TimeEntry.EntryType.LAVORO_ORDINARIO,
@@ -28,7 +28,7 @@ class TestUpdateSaldoTipoIrrilevante(TestCase):
 
         self.saldo.refresh_from_db()
         self.assertEqual(self.saldo.valore_saldo_validato, Decimal("10.00"))
-        self.assertEqual(self.saldo.valore_saldo_sospeso, Decimal("5.00"))
+        self.assertEqual(self.saldo.saldo_progressivo, [Decimal("10.00")])
 
     def test_ferie_non_modifica_saldo(self):
         te = make_timeentry(self.utente, type=TimeEntry.EntryType.FERIE, ore_tot=8)
@@ -36,7 +36,7 @@ class TestUpdateSaldoTipoIrrilevante(TestCase):
 
         self.saldo.refresh_from_db()
         self.assertEqual(self.saldo.valore_saldo_validato, Decimal("10.00"))
-        self.assertEqual(self.saldo.valore_saldo_sospeso, Decimal("5.00"))
+        self.assertEqual(self.saldo.saldo_progressivo, [Decimal("10.00")])
 
 
 class TestUpdateSaldoVersamento(TestCase):
@@ -48,25 +48,25 @@ class TestUpdateSaldoVersamento(TestCase):
 
     def setUp(self):
         self.utente = make_utente()
-        self.saldo = make_saldo(self.utente, sospeso=Decimal("10.00"))
+        self.saldo = make_saldo(self.utente)
 
-    def test_versamento_add_aumenta_saldo_sospeso(self):
+    def test_versamento_add_auto_non_modifica_saldo(self):
         te = make_timeentry(self.utente, type=TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
                             ore_tot=Decimal("3.00"),
                             validation_level=TimeEntry.ValidationLevel.AUTO)
         update_saldo_for_timeentry(te, operation="add")
 
         self.saldo.refresh_from_db()
-        self.assertEqual(self.saldo.valore_saldo_sospeso, Decimal("13.00"))
+        self.assertEqual(self.saldo.valore_saldo_validato, Decimal("0.00"))
 
-    def test_versamento_remove_diminuisce_saldo_sospeso(self):
+    def test_versamento_remove_auto_non_modifica_saldo(self):
         te = make_timeentry(self.utente, type=TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
                             ore_tot=Decimal("3.00"),
                             validation_level=TimeEntry.ValidationLevel.AUTO)
         update_saldo_for_timeentry(te, operation="remove")
 
         self.saldo.refresh_from_db()
-        self.assertEqual(self.saldo.valore_saldo_sospeso, Decimal("7.00"))
+        self.assertEqual(self.saldo.valore_saldo_validato, Decimal("0.00"))
 
     def test_versamento_add_aumenta_saldo_validato(self):
         te = make_timeentry(self.utente, type=TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
@@ -76,7 +76,6 @@ class TestUpdateSaldoVersamento(TestCase):
 
         self.saldo.refresh_from_db()
         self.assertEqual(self.saldo.valore_saldo_validato, Decimal("4.00"))
-        self.assertEqual(self.saldo.valore_saldo_sospeso, Decimal("10.00"))
 
     def test_versamento_remove_diminuisce_saldo_validato(self):
         self.saldo.valore_saldo_validato = Decimal("10.00")
@@ -100,25 +99,25 @@ class TestUpdateSaldoPrelievo(TestCase):
 
     def setUp(self):
         self.utente = make_utente()
-        self.saldo = make_saldo(self.utente, sospeso=Decimal("10.00"))
+        self.saldo = make_saldo(self.utente)
 
-    def test_prelievo_add_diminuisce_saldo_sospeso(self):
+    def test_prelievo_add_auto_non_modifica_saldo(self):
         te = make_timeentry(self.utente, type=TimeEntry.EntryType.PRELIEVO_BANCA_ORE,
                             ore_tot=Decimal("2.00"),
                             validation_level=TimeEntry.ValidationLevel.AUTO)
         update_saldo_for_timeentry(te, operation="add")
 
         self.saldo.refresh_from_db()
-        self.assertEqual(self.saldo.valore_saldo_sospeso, Decimal("8.00"))
+        self.assertEqual(self.saldo.valore_saldo_validato, Decimal("0.00"))
 
-    def test_prelievo_remove_aumenta_saldo_sospeso(self):
+    def test_prelievo_remove_auto_non_modifica_saldo(self):
         te = make_timeentry(self.utente, type=TimeEntry.EntryType.PRELIEVO_BANCA_ORE,
                             ore_tot=Decimal("2.00"),
                             validation_level=TimeEntry.ValidationLevel.AUTO)
         update_saldo_for_timeentry(te, operation="remove")
 
         self.saldo.refresh_from_db()
-        self.assertEqual(self.saldo.valore_saldo_sospeso, Decimal("12.00"))
+        self.assertEqual(self.saldo.valore_saldo_validato, Decimal("0.00"))
 
     def test_prelievo_add_diminuisce_saldo_validato(self):
         self.saldo.valore_saldo_validato = Decimal("10.00")
@@ -131,7 +130,6 @@ class TestUpdateSaldoPrelievo(TestCase):
 
         self.saldo.refresh_from_db()
         self.assertEqual(self.saldo.valore_saldo_validato, Decimal("7.00"))
-        self.assertEqual(self.saldo.valore_saldo_sospeso, Decimal("10.00"))
 
     def test_prelievo_remove_aumenta_saldo_validato(self):
         self.saldo.valore_saldo_validato = Decimal("10.00")

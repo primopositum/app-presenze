@@ -42,7 +42,6 @@ src/
 │   │   └── users.ts        # Users service
 │   └── stores/             # Svelte stores
 │       ├── auth.ts         # Authentication state
-│       ├── hourBalanceExtra.ts
 │       ├── timeEntryReload.ts
 │       └── timeEntryUser.ts
 ├── routes/

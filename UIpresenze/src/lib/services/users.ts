@@ -54,8 +54,8 @@ export type DecimalString = `${number}` | string;
 export type Saldo = {
   id?: number;
   data: string;
-  valore_saldo_sospeso: DecimalString;   
   valore_saldo_validato: DecimalString;
+  saldo_progressivo: Array<DecimalString | number>;
 };
 
 
@@ -88,7 +88,7 @@ export type User = {
   contratti: Contratto[]
 };
 
-export type SaldoUpdatePayload = Partial<Pick<Saldo, 'valore_saldo_validato' | 'valore_saldo_sospeso'>>;
+export type SaldoUpdatePayload = Partial<Pick<Saldo, 'valore_saldo_validato'>>;
 export type ContrattoUpdatePayload = Partial<
   Pick<Contratto, 'data_ass' | 'data_fine' | 'is_active' | 'tipologia' | 'ore_sett'>
 >;

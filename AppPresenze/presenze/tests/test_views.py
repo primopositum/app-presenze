@@ -31,7 +31,6 @@ URL_TE_DETAIL        = lambda te_id: f"{BASE}/time-entries/{te_id}/"
 URL_TE_VALIDATION    = lambda te_id: f"{BASE}/time-entries/{te_id}/validation/"
 URL_TE_RANGE_OVERRIDE = f"{BASE}/time-entries/range-override/"
 URL_TE_BULK_VALIDATE  = f"{BASE}/time-entries/bulk-validate-month/"
-URL_TE_SALDO_CUMULATIVO = f"{BASE}/time-entries/saldo-cumulativo-mensile/"
 
 URL_TRASFERTA_CREATE = f"{BASE}/trasferte/create/"
 URL_TRASFERTA_UPDATE = lambda t_id: f"{BASE}/trasferte/{t_id}/"
@@ -462,9 +461,10 @@ class TestTimeEntryValidation(TestCase):
         )
         saldo = Saldo.objects.get(utente=self.utente)
         self.assertEqual(saldo.valore_saldo_validato, Decimal("4.00"))
-    def test_validazione_admin_sposta_da_sospeso_a_validato(self):
+        self.assertEqual(saldo.saldo_progressivo, [Decimal("4.00")])
+
+    def test_validazione_admin_appende_saldo_progressivo(self):
         saldo = Saldo.objects.get(utente=self.utente)
-        saldo.valore_saldo_sospeso = Decimal("4.00")
         saldo.valore_saldo_validato = Decimal("0.00")
         saldo.save()
 
@@ -483,73 +483,8 @@ class TestTimeEntryValidation(TestCase):
         self.assertEqual(res.status_code, 200)
 
         saldo.refresh_from_db()
-        self.assertEqual(saldo.valore_saldo_sospeso, Decimal("0.00"))
         self.assertEqual(saldo.valore_saldo_validato, Decimal("4.00"))
-
-
-class TestTimeEntrySaldoCumulativoMensile(TestCase):
-
-    def setUp(self):
-        self.utente = make_utente()
-        self.altro = make_utente(email="altro@test.com")
-        self.admin = make_utente(email="admin@test.com", is_superuser=True, is_staff=True)
-
-    def test_restituisce_saldo_cumulativo_mese_per_mese(self):
-        make_timeentry(
-            self.utente,
-            data=date(2025, 1, 6),
-            type=TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
-            ore_tot=Decimal("2.00"),
-        )
-        make_timeentry(
-            self.utente,
-            data=date(2025, 2, 6),
-            type=TimeEntry.EntryType.PRELIEVO_BANCA_ORE,
-            ore_tot=Decimal("3.00"),
-        )
-        make_timeentry(
-            self.utente,
-            data=date(2025, 3, 6),
-            type=TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
-            ore_tot=Decimal("5.00"),
-        )
-
-        res = auth_client(self.utente).get(URL_TE_SALDO_CUMULATIVO)
-
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data["result"], [2, -1, 4])
-
-    def test_ignora_timeentry_non_banca_ore(self):
-        make_timeentry(
-            self.utente,
-            data=date(2025, 1, 6),
-            type=TimeEntry.EntryType.LAVORO_ORDINARIO,
-            ore_tot=Decimal("8.00"),
-        )
-
-        res = auth_client(self.utente).get(URL_TE_SALDO_CUMULATIVO)
-
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data["result"], [])
-
-    def test_utente_normale_non_vede_saldo_altrui(self):
-        res = auth_client(self.altro).get(URL_TE_SALDO_CUMULATIVO, {"u_id": self.utente.id})
-
-        self.assertEqual(res.status_code, 403)
-
-    def test_admin_vede_saldo_altrui(self):
-        make_timeentry(
-            self.utente,
-            data=date(2025, 1, 6),
-            type=TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
-            ore_tot=Decimal("2.00"),
-        )
-
-        res = auth_client(self.admin).get(URL_TE_SALDO_CUMULATIVO, {"u_id": self.utente.id})
-
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data["result"], [2])
-
+        self.assertEqual(saldo.saldo_progressivo, [Decimal("4.00")])
 
 # ---------------------------------------------------------------------------
 # Trasferta views
@@ -1468,6 +1403,7 @@ class TestTimeEntryBulkValidateMonth(TestCase):
  
         saldo = Saldo.objects.get(utente=self.utente)
         self.assertEqual(saldo.valore_saldo_validato, Decimal("5.00"))
+        self.assertEqual(saldo.saldo_progressivo, [Decimal("5.00")])
         self.assertEqual(res.data["delta_saldo_validato"], "5.00")
 
     def test_superuser_seconda_chiamata_non_riapplica_delta(self):
@@ -1495,6 +1431,7 @@ class TestTimeEntryBulkValidateMonth(TestCase):
 
         saldo = Saldo.objects.get(utente=self.utente)
         self.assertEqual(saldo.valore_saldo_validato, Decimal("5.00"))
+        self.assertEqual(saldo.saldo_progressivo, [Decimal("5.00")])
 
     def test_superuser_aggiorna_saldo_per_prelievo_negativo(self):
         make_timeentry(
@@ -1512,6 +1449,7 @@ class TestTimeEntryBulkValidateMonth(TestCase):
  
         saldo = Saldo.objects.get(utente=self.utente)
         self.assertEqual(saldo.valore_saldo_validato, Decimal("-3.00"))
+        self.assertEqual(saldo.saldo_progressivo, [Decimal("-3.00")])
  
     def test_superuser_saldo_netto_versamento_e_prelievo(self):
         # 5h versamento + 2h prelievo = +3h netto
@@ -1536,6 +1474,7 @@ class TestTimeEntryBulkValidateMonth(TestCase):
  
         saldo = Saldo.objects.get(utente=self.utente)
         self.assertEqual(saldo.valore_saldo_validato, Decimal("3.00"))
+        self.assertEqual(saldo.saldo_progressivo, [Decimal("3.00")])
  
     def test_superuser_non_tocca_entry_a_livello_0(self):
         make_timeentry(
@@ -1552,6 +1491,8 @@ class TestTimeEntryBulkValidateMonth(TestCase):
  
         te = TimeEntry.objects.get(utente=self.utente)
         self.assertEqual(te.validation_level, TimeEntry.ValidationLevel.AUTO)
+        saldo = Saldo.objects.get(utente=self.utente)
+        self.assertEqual(saldo.saldo_progressivo, [])
  
     # --- Validazione input ---
  

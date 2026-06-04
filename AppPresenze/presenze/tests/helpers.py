@@ -41,11 +41,11 @@ def make_utente(email="test@test.com", nome="Mario", cognome="Rossi",
 # Saldo
 # ---------------------------------------------------------------------------
 
-def make_saldo(utente, validato=Decimal("0.00"), sospeso=Decimal("0.00")):
+def make_saldo(utente, validato=Decimal("0.00"), saldo_progressivo=None):
     return Saldo.objects.create(
         utente=utente,
         valore_saldo_validato=validato,
-        valore_saldo_sospeso=sospeso,
+        saldo_progressivo=saldo_progressivo or [],
     )
 
 

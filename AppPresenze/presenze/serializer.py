@@ -272,7 +272,7 @@ class TimeEntryValidationSerializer(serializers.ModelSerializer):
 class SaldoMiniSerializer(serializers.ModelSerializer):
     class Meta:
         model = Saldo
-        fields = ("valore_saldo_validato", "valore_saldo_sospeso")
+        fields = ("valore_saldo_validato", "saldo_progressivo")
 
 class ContrattoMiniSerializer(serializers.ModelSerializer):
     class Meta:

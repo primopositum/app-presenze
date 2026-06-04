@@ -8,11 +8,12 @@
   import { faHouse, faKey, faHammer, faUsers } from '@fortawesome/free-solid-svg-icons';
   import HourBalance from './HourBalance.svelte';
   import { timeEntryUser } from '$lib/stores/timeEntryUser';
-  import { hourBalanceExtra } from '$lib/stores/hourBalanceExtra';
   import ChangePasswordCard from '$lib/components/ChangePasswordCard.svelte';
 
   $: saldoValidato = $auth.user?.saldo?.valore_saldo_validato ?? null;
   $: saldoTimeEntryUser = $timeEntryUser.user?.saldo?.valore_saldo_validato ?? null;
+  $: saldoProgressivoAuth = $auth.user?.saldo?.saldo_progressivo ?? [];
+  $: saldoProgressivoTimeEntryUser = $timeEntryUser.user?.saldo?.saldo_progressivo ?? [];
   $: isHomeRoute = $page.url.pathname === '/';
   $: isPresencesRoute = $page.url.pathname.startsWith('/presences');
   $: isProfileRoute = $page.url.pathname === '/profilo';
@@ -20,20 +21,16 @@
   $: canToggleAllProfiles = isProfileRoute && !!$auth.user?.is_superuser;
   $: canShowHourBalanceRoute = isHomeRoute || isPresencesRoute;
 
-  $: extra = $hourBalanceExtra ?? null;
-  $: canShowExtra = !!extra && extra.saldo !== undefined && extra.saldo !== null;
-  $: canUseExtra = isPresencesRoute && canShowExtra;
-  let mode: 'persistente' | 'extra' = 'extra';
   let open = false;
   let successMessage: string | null = null;
   let successTimer: ReturnType<typeof setTimeout> | null = null;
-  const toNumber = (v: unknown) => {
-    const n = typeof v === 'string' ? Number(v) : (v as number);
-    return Number.isFinite(n) ? n : 0;
-  };
   $: saldoToShow =
     $auth.user?.is_superuser && isPresencesRoute ? saldoTimeEntryUser : saldoValidato;
+  $: saldoProgressivoToShow =
+    $auth.user?.is_superuser && isPresencesRoute ? saldoProgressivoTimeEntryUser : saldoProgressivoAuth;
   $: showSaldo = $auth.isAuthed && canShowHourBalanceRoute && saldoToShow !== null;
+  $: hbYear = Number($page.url.searchParams.get('year')) || new Date().getFullYear();
+  $: hbMonth = Number($page.url.searchParams.get('month')) || new Date().getMonth() + 1;
   
   async function handleLogout() {
     stopAutoRefresh();
@@ -60,36 +57,12 @@
     goto(target, { replaceState: true, noScroll: true, keepFocus: true });
   }
     // $: showProfileButton = page.url.pathname !== '/profilo';
-  function toggle() {
-    if (!canUseExtra) return;
-    mode = mode === 'persistente' ? 'extra' : 'persistente';
-  }
-
   function handlePasswordChanged(message: string) {
     open = false;
     successMessage = message;
     if (successTimer) clearTimeout(successTimer);
     successTimer = setTimeout(() => (successMessage = null), 3000);
   }
-
-  $: if (!canUseExtra && mode !== 'persistente') {
-    mode = 'persistente';
-  }
-
-  $: hbTitle =
-    mode === 'extra' && canUseExtra && extra?.title ? extra.title : 'saldo persistente';
-  $: hbSaldo =
-    mode === 'extra' && canUseExtra && extra?.saldo !== undefined && extra?.saldo !== null
-      ? toNumber(extra.saldo)
-      : saldoToShow;
-  $: hbColor = mode === 'extra' && canUseExtra && extra?.color ? extra.color : undefined;
-  $: hbSaldoDaChiamataUtente = mode === 'persistente';
-  $: hbSaldoCumulativoMensile =
-    mode === 'extra' && canUseExtra && Array.isArray(extra?.saldoCumulativoMensile)
-      ? extra.saldoCumulativoMensile
-      : [];
-  $: hbYear = mode === 'extra' && canUseExtra ? extra?.year : undefined;
-  $: hbMonth = mode === 'extra' && canUseExtra ? extra?.month : undefined;
 </script>
 
 <nav class="flex items-center justify-between px-8 py-4 bg-white-200">
@@ -171,13 +144,10 @@
 
 
   {#if showSaldo}
-    <div class={`hide-mobile-saldo ${canUseExtra ? 'cursor-pointer' : 'cursor-default'}`} on:click={toggle}>
+    <div class="hide-mobile-saldo">
       <HourBalance
-        title={hbTitle}
-        saldo={hbSaldo}
-        color={hbColor}
-        saldoDaChiamataUtente={hbSaldoDaChiamataUtente}
-        saldoCumulativoMensile={hbSaldoCumulativoMensile}
+        saldo={saldoToShow}
+        saldoProgressivo={saldoProgressivoToShow}
         year={hbYear}
         month={hbMonth}
       />

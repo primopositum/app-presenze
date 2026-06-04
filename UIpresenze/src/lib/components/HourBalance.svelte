@@ -1,11 +1,8 @@
 <script lang="ts">
-  export let saldo: number;
-  export let title: string;
-  export let color: [string, string] | undefined;
-  export let saldoDaChiamataUtente = false;
-  export let saldoCumulativoMensile: number[] = [];
-  export let year: number | undefined = undefined;
-  export let month: number | undefined = undefined;
+  export let saldo: number | string | null;
+  export let saldoProgressivo: Array<number | string> = [];
+  export let year: number;
+  export let month: number;
   const today = new Date();
 
   // Normalizzo sempre a number (NaN se non valido)
@@ -14,18 +11,13 @@
     year && month
       ? (today.getFullYear() - year) * 12 + (today.getMonth() + 1 - month)
       : 0;
-  $: saldoCumulativoCorretto =
-    saldoDaChiamataUtente || Number.isNaN(saldoNum)
-      ? []
-      : saldoCumulativoMensile
-          .map((value) => Number(value) - saldoNum)
-          .filter(Number.isFinite)
-          .reverse();
+  $: saldoProgressivoReverse = saldoProgressivo
+    .map((value) => Number(value))
+    .filter(Number.isFinite)
+    .reverse();
   $: saldoVisualizzato =
-    !saldoDaChiamataUtente &&
-    monthOffset >= 0 &&
-    monthOffset < saldoCumulativoCorretto.length
-      ? saldoCumulativoCorretto[monthOffset]
+    monthOffset >= 0 && monthOffset < saldoProgressivoReverse.length
+      ? saldoProgressivoReverse[monthOffset]
       : saldoNum;
 
   // Testo da mostrare (evita "NaNh")
@@ -33,23 +25,17 @@
   $: phrases =
     saldoLabel === "--"
       ? "Saldo non disponibile"
-      : saldoDaChiamataUtente
-        ? "Saldo ore complessivo di ore validate"
-        : "Saldo ore relativo del mese corrente";
+      : "Saldo ore progressivo validato";
 </script>
 
 <div
   class="card"
-  style={`--hb-c1: ${color?.[0] ?? '#03a9f4'}; --hb-c2: ${color?.[1] ?? '#ff0058'};`}
+  style={`--hb-c1: #03a9f4; --hb-c2: #ff0058;`}
 >
   <b></b>
 
   <div class="default-label">
-    {#if saldoDaChiamataUtente}
-      Saldo V: {saldoLabel}h
-    {:else}
-      Saldo: {saldoLabel}h
-    {/if}
+    Saldo V: {saldoLabel}h
   </div>
 
   <div class="content">

@@ -35,9 +35,7 @@
   import ErrorCard from '$lib/components/ErrorCard.svelte';
   import Useractivity from '$lib/components/Jira/JiraUserActivity.svelte';
   import { jiraControl } from '$lib/stores/jiraControl';
-  import { hourBalanceExtra } from '$lib/stores/hourBalanceExtra';
   import { useOneUserApi } from '$lib/hooks/useUserApi.js';
-  import { useSaldoCumulativoMensile } from '$lib/hooks/useTimeEntries';
   let loading = false;
   let error: string | null = null;
 
@@ -74,7 +72,6 @@
   let saldoValidatoOrig: number | string | null = null;
   let saldoTimeEntryVisuale: number | string | null = null;
   let saldoPersistenteVisuale: number | string | null = null;
-  let saldoCumulativoMensile: number[] = [];
 
   function splitYmd(dateStr: string) {
     const [y, m, d] = dateStr.split('-').map(Number);
@@ -124,7 +121,28 @@
     return total;
   }
 
+  function readMonthQuery() {
+    const qYear = Number($page.url.searchParams.get('year'));
+    const qMonth = Number($page.url.searchParams.get('month'));
+    if (Number.isInteger(qYear) && qYear > 0 && Number.isInteger(qMonth) && qMonth >= 1 && qMonth <= 12) {
+      year = qYear;
+      month = qMonth;
+    }
+  }
+
+  function syncMonthQuery() {
+    const params = new URLSearchParams($page.url.searchParams);
+    params.set('year', String(year));
+    params.set('month', String(month));
+    goto(`${$page.url.pathname}?${params.toString()}`, {
+      replaceState: true,
+      noScroll: true,
+      keepFocus: true
+    });
+  }
+
   onMount(() => {
+    readMonthQuery();
     timeEntryUser.init();
   });
 
@@ -154,14 +172,10 @@
 export const loadData = async () => {
     loading = true; error = null;
     try {
-      const [data, saldoCumulativo] = await Promise.all([
-        getTimeEntriesFromMonth({
-          date: new Date(year, month - 1, 1),
-          utenteId: userId ?? undefined
-        }),
-        useSaldoCumulativoMensile({ utenteId: userId ?? undefined })()
-      ]);
-      saldoCumulativoMensile = saldoCumulativo.payload;
+      const data = await getTimeEntriesFromMonth({
+        date: new Date(year, month - 1, 1),
+        utenteId: userId ?? undefined
+      });
       entries = (data?.results || []) as TimeEntry[];      
       const groupedByDate = entries.reduce<Record<string, { hours: number; validation_level: number; entries: TimeEntry[] }>>((acc, entry) => {
         const { y, m } = splitYmd(entry.data);
@@ -211,14 +225,14 @@ export const loadData = async () => {
     if (month === 1) { month = 12; year -= 1; } else { month -= 1; }
     selectedDate = null;
     selectedDayForbidType3 = false;
-    loadData();
+    syncMonthQuery();
   }
 
   function nextMonth() {
     if (month === 12) { month = 1; year += 1; } else { month += 1; }
     selectedDate = null;
     selectedDayForbidType3 = false;
-    loadData();
+    syncMonthQuery();
   }
 
   async function handleValidateMonth() {
@@ -343,6 +357,8 @@ export const loadData = async () => {
 
   $: if (userId) {
     $timeEntryReload;
+    year;
+    month;
     loadData();
   }
 
@@ -393,14 +409,6 @@ export const loadData = async () => {
     return acc;
   }, 0);
 
-  $: hourBalanceExtra.set({
-    title: 'saldo mese',
-    saldo: saldoPeriodo,
-    saldoCumulativoMensile,
-    year,
-    month,
-    color: ['#EAFF3B', '#88FF78']
-  });
   $: saldoValidatoOrig = $auth.user?.saldo?.valore_saldo_validato ?? null;
   $: saldoTimeEntryVisuale = $timeEntryUser.user?.saldo?.valore_saldo_validato ?? null;
   $: saldoPersistenteVisuale = $auth.user?.is_superuser ? saldoTimeEntryVisuale : saldoValidatoOrig;
