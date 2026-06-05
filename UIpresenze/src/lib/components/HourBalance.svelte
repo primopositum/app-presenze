@@ -3,190 +3,259 @@
 
   export let saldoRecords: SaldoRecord[] = [];
   export let periodo: string;
+  export let saldoMese: number | string = 0;
+
+  type CardPosition = 'is-front' | 'is-left' | 'is-right';
+
+  let cardPositions: CardPosition[] = ['is-front', 'is-right', 'is-left'];
 
   function toFiniteNumber(value: unknown) {
     const n = Number(value);
     return Number.isFinite(n) ? n : NaN;
   }
 
-  function formatSaldo(value: number) {
-    if (Number.isNaN(value)) return '--';
-    return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, '');
+  function formatSaldo(value: unknown) {
+    const n = toFiniteNumber(value);
+    if (Number.isNaN(n)) return '--';
+    return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, '');
+  }
+
+  function rotateFront() {
+    cardPositions = cardPositions.map((position) => {
+      if (position === 'is-front') return 'is-left';
+      if (position === 'is-left') return 'is-right';
+      return 'is-front';
+    });
+  }
+
+  function handleCardClick(index: number) {
+    const clickedPosition = cardPositions[index];
+    if (clickedPosition === 'is-front') {
+      rotateFront();
+      return;
+    }
+
+    const frontIndex = cardPositions.findIndex((position) => position === 'is-front');
+    const nextPositions: CardPosition[] = [...cardPositions];
+    const oldFrontPosition = clickedPosition === 'is-left' ? 'is-right' : 'is-left';
+    nextPositions[index] = 'is-front';
+    if (frontIndex >= 0) nextPositions[frontIndex] = oldFrontPosition;
+
+    const thirdIndex = nextPositions.findIndex((position, currentIndex) =>
+      currentIndex !== index && currentIndex !== frontIndex && position !== 'is-front'
+    );
+    if (thirdIndex >= 0) {
+      nextPositions[thirdIndex] = oldFrontPosition === 'is-left' ? 'is-right' : 'is-left';
+    }
+    cardPositions = nextPositions;
   }
 
   $: latestRecord = saldoRecords[saldoRecords.length - 1] ?? null;
   $: periodoRecord = saldoRecords.find((record) => record.periodo === periodo) ?? null;
-  $: latestValue = latestRecord ? toFiniteNumber(latestRecord.saldo) : NaN;
-  $: periodoValue = periodoRecord ? toFiniteNumber(periodoRecord.saldo) : NaN;
-  $: latestLabel = formatSaldo(latestValue);
-  $: periodoLabel = formatSaldo(periodoValue);
-  $: phrases =
-    periodoLabel === "--"
-      ? "Saldo non disponibile"
-      : "Saldo ore progressivo validato";
+  $: latestLabel = formatSaldo(latestRecord?.saldo);
+  $: periodoLabel = formatSaldo(periodoRecord?.saldo);
+  $: meseLabel = formatSaldo(saldoMese);
+
+  $: cards = [
+    {
+      tone: 'bg-blue',
+      value: latestLabel,
+      title: 'saldo a oggi',
+      description: latestRecord?.periodo ? `ultimo record ${latestRecord.periodo}` : 'nessun record'
+    },
+    {
+      tone: 'bg-gold',
+      value: periodoLabel,
+      title: `card al ${periodo}`,
+      description: 'saldo progressivo validato'
+    },
+    {
+      tone: 'bg-purple',
+      value: meseLabel,
+      title: `stato mese ${periodo}`,
+      description: 'versamenti - prelievi'
+    }
+  ];
 </script>
 
-<div
-  class="card"
-  style={`--hb-c1: #03a9f4; --hb-c2: #ff0058;`}
->
-  <b></b>
-
-  <div class="default-label">
-    Saldo V: {latestLabel}h
+<section class="balance-scene" aria-label="Saldo ore">
+  <div class="wrap-card">
+    {#each cards as card, index}
+      <button
+        type="button"
+        class={`balance-card ${card.tone} ${cardPositions[index]}`}
+        aria-label={`${card.title}: ${card.value} ore`}
+        on:click={() => handleCardClick(index)}
+      >
+        <span class="card-value">{card.value}h</span>
+        <span class="card-title">{card.title}</span>
+        <span class="card-desc">{card.description}</span>
+      </button>
+    {/each}
   </div>
 
-  <div class="content">
-    <ul class="sci">
-      <li class="saldo">{periodoLabel}h</li>
-    </ul>
-
-    <p class="title">
-      Saldo ore<br />
-      <span class="text">{phrases}</span>
-    </p>
+  <div class="lines" aria-hidden="true">
+    <div class="line"></div>
+    <div class="line"></div>
   </div>
-</div>
+</section>
 
 <style>
-  .card {
+  .balance-scene {
     position: fixed;
-    bottom: 16px;
-    right: 16px;
-    width: clamp(140px, 40vw, 190px);
-    height: clamp(120px, 35vw, 150px);
-    background: #f00;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    border-radius: 14px;
-    overflow: hidden;
-  }
-
-  .card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(315deg, var(--hb-c1), var(--hb-c2));
-    border-radius: inherit;
-  }
-
-  .card::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(315deg, var(--hb-c1), var(--hb-c2));
-    border-radius: inherit;
-    filter: blur(30px);
-  }
-
-  .card b {
-    position: absolute;
-    inset: 6px;
-    background: rgba(0, 0, 0, 0.6);
-    z-index: 2;
-    border-radius: inherit;
-  }
-
-  .card .content {
-    position: absolute;
-    z-index: 3;
-    bottom: 0;
+    right: 18px;
+    bottom: 18px;
+    z-index: 1500;
     display: flex;
     flex-direction: column;
     align-items: center;
-    transform: scale(0);
-    transition: 0.5s;
+    gap: 10px;
+    user-select: none;
   }
 
-  .card:hover .content {
-    transform: scale(1);
-    bottom: 25px;
+  .wrap-card {
+    position: relative;
+    width: 330px;
+    height: 150px;
   }
 
-  .card .default-label {
+  .balance-card {
     position: absolute;
-    z-index: 3;
-    color: #fff;
-    font-weight: 600;
-    font-size: 1.1em;
-    letter-spacing: 0.05em;
-    transition: 0.3s ease;
-  }
-
-  .card:hover .default-label {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-
-  .content .title {
-    position: relative;
-    color: #fff;
-    font-weight: 500;
-    line-height: 1em;
-    font-size: 1em;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    text-align: center;
-  }
-
-  .content .saldo {
-    position: relative;
-    color: #fff;
-    font-weight: 700;
-    line-height: 1em;
-    font-size: 2em;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    text-align: center;
-  }
-
-  .content .title span {
-    font-weight: 300;
-    font-size: 0.50em;
-  }
-
-  .content .sci {
-    position: relative;
+    width: 112px;
+    height: 148px;
     display: flex;
-    justify-content: center;
+    flex-direction: column;
     align-items: center;
-    gap: 8px;
-    margin-top: 5px;
+    justify-content: center;
+    gap: 9px;
+    border: 0;
+    border-radius: 14px;
+    padding: 14px 10px;
+    color: #fff;
+    text-align: center;
+    cursor: pointer;
+    overflow: hidden;
+    transition:
+      transform 0.55s cubic-bezier(0.75, 0, 0, 1.01),
+      left 0.55s cubic-bezier(0.75, 0, 0, 1.01),
+      top 0.55s cubic-bezier(0.75, 0, 0, 1.01),
+      box-shadow 0.2s ease;
   }
 
-  .sci li {
-    list-style: none;
+  .balance-card:focus-visible {
+    outline: 3px solid rgba(15, 23, 42, 0.35);
+    outline-offset: 3px;
   }
 
-  @media (max-width: 520px) {
-    .card {
-      bottom: 12px;
+  .balance-card.is-front {
+    z-index: 3;
+    top: 0;
+    left: 109px;
+    transform: rotate(0deg);
+    box-shadow: 0 18px 35px rgba(15, 23, 42, 0.22);
+  }
+
+  .balance-card.is-left {
+    z-index: 1;
+    top: 24px;
+    left: 20px;
+    transform: rotate(-15deg);
+    box-shadow: 0 10px 22px rgba(15, 23, 42, 0.16);
+  }
+
+  .balance-card.is-right {
+    z-index: 1;
+    top: 24px;
+    left: 198px;
+    transform: rotate(15deg);
+    box-shadow: 0 10px 22px rgba(15, 23, 42, 0.16);
+  }
+
+  .card-value {
+    font-size: 29px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+    word-break: break-word;
+  }
+
+  .card-title {
+    max-width: 100%;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.15;
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+
+  .card-desc {
+    max-width: 100%;
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.25;
+    color: rgba(255, 255, 255, 0.78);
+  }
+
+  .bg-gold {
+    background: radial-gradient(circle, #fff08a 0%, #f5b225 44%, #b98206 100%);
+  }
+
+  .bg-blue {
+    background: radial-gradient(circle, #8ef9fc 0%, #20a4f6 44%, #0851c0 100%);
+  }
+
+  .bg-purple {
+    background: radial-gradient(circle, #e08bed 0%, #c923ec 44%, #7d068e 100%);
+  }
+
+  .lines {
+    position: relative;
+    width: 330px;
+    height: 14px;
+  }
+
+  .line {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .line::before {
+    content: "";
+    position: absolute;
+    width: 100%;
+    height: 4px;
+    background: linear-gradient(to right, transparent, #2f69f2, transparent);
+    filter: blur(3px);
+  }
+
+  .line::after {
+    content: "";
+    position: absolute;
+    width: 100%;
+    height: 1px;
+    background: linear-gradient(to right, transparent, #6366f1, transparent);
+  }
+
+  .line:nth-child(2)::before {
+    width: 50%;
+    background: linear-gradient(to right, transparent, #84ccfc, transparent);
+  }
+
+  .line:nth-child(2)::after {
+    width: 50%;
+    background: linear-gradient(to right, transparent, #14d3f5, transparent);
+  }
+
+  @media (max-width: 900px) {
+    .balance-scene {
       right: 12px;
-      width: min(180px, calc(100vw - 24px));
-      height: 130px;
-    }
-
-    .card:hover .content {
-      bottom: 18px;
-    }
-
-    .card .default-label {
-      font-size: 0.95em;
-    }
-
-    .content .saldo {
-      font-size: 1.6em;
-    }
-
-    .content .title {
-      font-size: 0.9em;
+      bottom: 12px;
+      transform: scale(0.86);
+      transform-origin: bottom right;
     }
   }
 </style>

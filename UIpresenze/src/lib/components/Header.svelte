@@ -12,6 +12,7 @@
   import ChangePasswordCard from '$lib/components/ChangePasswordCard.svelte';
   import { useSaldoApi } from '$lib/hooks/useSaldoApi';
   import type { SaldoRecord } from '$lib/services/saldo';
+  import { getTimeEntriesFromMonth, type TimeEntry } from '$lib/services/timeEntries';
 
   $: isHomeRoute = $page.url.pathname === '/';
   $: isPresencesRoute = $page.url.pathname.startsWith('/presences');
@@ -24,6 +25,7 @@
   let successMessage: string | null = null;
   let successTimer: ReturnType<typeof setTimeout> | null = null;
   let saldoRecords: SaldoRecord[] = [];
+  let saldoMese = 0;
   let saldoLoadKey = '';
   $: saldoUserId =
     $auth.user?.is_superuser && isPresencesRoute
@@ -35,16 +37,36 @@
   $: hbPeriodo = `${String(hbMonth).padStart(2, '0')}-${hbYear}`;
   $: {
     const reloadVersion = $timeEntryReload;
-    const nextKey = `${saldoUserId ?? 'none'}|${reloadVersion}`;
+    const nextKey = `${saldoUserId ?? 'none'}|${hbPeriodo}|${reloadVersion}`;
     if (showSaldo && saldoUserId && nextKey !== saldoLoadKey) {
       saldoLoadKey = nextKey;
-      loadSaldo(saldoUserId);
+      loadSaldo(saldoUserId, hbYear, hbMonth);
     }
   }
 
-  async function loadSaldo(userId: number) {
+  function timeEntryMonthDelta(entries: TimeEntry[], year: number, month: number) {
+    return entries.reduce((acc, entry) => {
+      const [entryYear, entryMonth] = entry.data.split('-').map(Number);
+      if (entryYear !== year || entryMonth !== month) return acc;
+      const hours = Number(entry.ore_tot) || 0;
+      if (entry.type === 3) return acc + hours;
+      if (entry.type === 4) return acc - hours;
+      return acc;
+    }, 0);
+  }
+
+  async function loadSaldo(userId: number, year: number, month: number) {
     const result = await useSaldoApi(userId);
     saldoRecords = result.records;
+    try {
+      const entriesPayload = await getTimeEntriesFromMonth({
+        date: new Date(year, month - 1, 1),
+        utenteId: userId
+      });
+      saldoMese = timeEntryMonthDelta((entriesPayload?.results ?? []) as TimeEntry[], year, month);
+    } catch {
+      saldoMese = 0;
+    }
   }
   
   async function handleLogout() {
@@ -163,6 +185,7 @@
       <HourBalance
         saldoRecords={saldoRecords}
         periodo={hbPeriodo}
+        saldoMese={saldoMese}
       />
     </div>
   {/if}
