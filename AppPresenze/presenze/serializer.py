@@ -5,6 +5,7 @@ from decimal import Decimal
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q
+from .saldo_utils import decimal_to_json_number
 
 class UtenteSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False)
@@ -269,10 +270,51 @@ class TimeEntryValidationSerializer(serializers.ModelSerializer):
         model = TimeEntry
         fields = ["validation_level"]
 
+class SaldoRecordSerializer(serializers.Serializer):
+    periodo = serializers.RegexField(regex=r"^(0[1-9]|1[0-2])-\d{4}$")
+    saldo = serializers.FloatField()
+    aggiornatoIl = serializers.DateTimeField(required=False)
+    validazioni = serializers.IntegerField(min_value=1, required=False)
+
+
 class SaldoMiniSerializer(serializers.ModelSerializer):
+    utente_id = serializers.IntegerField(source="utente_id", read_only=True)
+    saldo = SaldoRecordSerializer(many=True, required=False)
+
     class Meta:
         model = Saldo
-        fields = ("valore_saldo_validato", "saldo_progressivo")
+        fields = ("utente_id", "saldo")
+
+    def validate_saldo(self, value):
+        periods = [record["periodo"] for record in value]
+        if len(periods) != len(set(periods)):
+            raise serializers.ValidationError("Ogni periodo deve comparire una sola volta.")
+        return value
+
+    def _json_records(self, records):
+        result = []
+        for record in records:
+            next_record = {
+                "periodo": record["periodo"],
+                "saldo": decimal_to_json_number(record["saldo"]),
+                "validazioni": int(record.get("validazioni") or 1),
+            }
+            aggiornato_il = record.get("aggiornatoIl")
+            if aggiornato_il is not None:
+                next_record["aggiornatoIl"] = aggiornato_il.isoformat()
+            result.append(next_record)
+        return result
+
+    def update(self, instance, validated_data):
+        if "saldo" in validated_data:
+            instance.saldo = self._json_records(validated_data["saldo"])
+        instance.save()
+        return instance
+
+
+class SaldoPatchSerializer(serializers.Serializer):
+    periodo = serializers.RegexField(regex=r"^(0[1-9]|1[0-2])-\d{4}$")
+    saldo = serializers.FloatField()
 
 class ContrattoMiniSerializer(serializers.ModelSerializer):
     class Meta:

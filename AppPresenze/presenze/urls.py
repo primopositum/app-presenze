@@ -18,6 +18,7 @@ api_urlpatterns = [
     path("refresh/",  views.api_refresh, name="refresh"),
     path("logout/",   views.api_logout,  name="logout"),
     path("users/",    views.users_list,  name="users-list"),
+    path("saldo/<int:u_id>/", views.saldo_detail, name="saldo-detail"),
     path("signatures/", views.signature_create, name="signature-create"),
     path("showSignatures/", views.signature_latest, name="signature-latest"),
 

@@ -172,8 +172,7 @@ class TestSaldoModel(TestCase):
 
     def test_creazione_saldo(self):
         saldo = Saldo.objects.create(utente=self.utente)
-        self.assertEqual(saldo.valore_saldo_validato, 0)
-        self.assertEqual(saldo.saldo_progressivo, [])
+        self.assertEqual(saldo.saldo, [])
 
     def test_saldo_one_to_one_non_permette_duplicati(self):
         Saldo.objects.create(utente=self.utente)

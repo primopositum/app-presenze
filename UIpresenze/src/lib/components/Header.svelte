@@ -8,12 +8,11 @@
   import { faHouse, faKey, faHammer, faUsers } from '@fortawesome/free-solid-svg-icons';
   import HourBalance from './HourBalance.svelte';
   import { timeEntryUser } from '$lib/stores/timeEntryUser';
+  import { timeEntryReload } from '$lib/stores/timeEntryReload';
   import ChangePasswordCard from '$lib/components/ChangePasswordCard.svelte';
+  import { useSaldoApi } from '$lib/hooks/useSaldoApi';
+  import type { SaldoRecord } from '$lib/services/saldo';
 
-  $: saldoValidato = $auth.user?.saldo?.valore_saldo_validato ?? null;
-  $: saldoTimeEntryUser = $timeEntryUser.user?.saldo?.valore_saldo_validato ?? null;
-  $: saldoProgressivoAuth = $auth.user?.saldo?.saldo_progressivo ?? [];
-  $: saldoProgressivoTimeEntryUser = $timeEntryUser.user?.saldo?.saldo_progressivo ?? [];
   $: isHomeRoute = $page.url.pathname === '/';
   $: isPresencesRoute = $page.url.pathname.startsWith('/presences');
   $: isProfileRoute = $page.url.pathname === '/profilo';
@@ -24,13 +23,29 @@
   let open = false;
   let successMessage: string | null = null;
   let successTimer: ReturnType<typeof setTimeout> | null = null;
-  $: saldoToShow =
-    $auth.user?.is_superuser && isPresencesRoute ? saldoTimeEntryUser : saldoValidato;
-  $: saldoProgressivoToShow =
-    $auth.user?.is_superuser && isPresencesRoute ? saldoProgressivoTimeEntryUser : saldoProgressivoAuth;
-  $: showSaldo = $auth.isAuthed && canShowHourBalanceRoute && saldoToShow !== null;
+  let saldoRecords: SaldoRecord[] = [];
+  let saldoLoadKey = '';
+  $: saldoUserId =
+    $auth.user?.is_superuser && isPresencesRoute
+      ? $timeEntryUser.user?.id ?? null
+      : $auth.user?.id ?? null;
+  $: showSaldo = $auth.isAuthed && canShowHourBalanceRoute && saldoUserId !== null;
   $: hbYear = Number($page.url.searchParams.get('year')) || new Date().getFullYear();
   $: hbMonth = Number($page.url.searchParams.get('month')) || new Date().getMonth() + 1;
+  $: hbPeriodo = `${String(hbMonth).padStart(2, '0')}-${hbYear}`;
+  $: {
+    const reloadVersion = $timeEntryReload;
+    const nextKey = `${saldoUserId ?? 'none'}|${reloadVersion}`;
+    if (showSaldo && saldoUserId && nextKey !== saldoLoadKey) {
+      saldoLoadKey = nextKey;
+      loadSaldo(saldoUserId);
+    }
+  }
+
+  async function loadSaldo(userId: number) {
+    const result = await useSaldoApi(userId);
+    saldoRecords = result.records;
+  }
   
   async function handleLogout() {
     stopAutoRefresh();
@@ -146,10 +161,8 @@
   {#if showSaldo}
     <div class="hide-mobile-saldo">
       <HourBalance
-        saldo={saldoToShow}
-        saldoProgressivo={saldoProgressivoToShow}
-        year={hbYear}
-        month={hbMonth}
+        saldoRecords={saldoRecords}
+        periodo={hbPeriodo}
       />
     </div>
   {/if}

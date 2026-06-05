@@ -8,7 +8,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from ..models import Utente, Saldo, Contratto
-from ..serializer import UtenteSerializer, SaldoMiniSerializer, ContrattoMiniSerializer
+from ..serializer import UtenteSerializer, ContrattoMiniSerializer
 
 
 def _is_staff_or_super(user):
@@ -199,10 +199,10 @@ def user_profile(request):
     saldo_payload = payload.get("saldo", None)
     contratti_payload = payload.get("contratti", None)
 
-    if saldo_payload is not None and not is_admin:
+    if saldo_payload is not None:
         return Response(
-            {"errors": "Solo admin e superuser possono modificare il saldo."},
-            status=status.HTTP_403_FORBIDDEN
+            {"errors": "Il saldo va modificato tramite l'endpoint dedicato."},
+            status=status.HTTP_400_BAD_REQUEST
         )
 
     if contratti_payload is not None and not is_admin:
@@ -217,21 +217,6 @@ def user_profile(request):
             if not serializer.is_valid():
                 return Response({"errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
             serializer.save()
-
-        if saldo_payload is not None:
-            if not isinstance(saldo_payload, dict):
-                return Response(
-                    {"saldo": "Formato non valido: atteso oggetto JSON."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            try:
-                saldo_obj = Saldo.objects.select_for_update().get(utente=target_user)
-            except Saldo.DoesNotExist:
-                saldo_obj = Saldo.objects.create(utente=target_user)
-            saldo_serializer = SaldoMiniSerializer(saldo_obj, data=saldo_payload, partial=True)
-            if not saldo_serializer.is_valid():
-                return Response({"saldo": saldo_serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
-            saldo_serializer.save()
 
         if contratti_payload is not None:
             # Supporta sia un oggetto singolo che una lista (usa il primo elemento valido).

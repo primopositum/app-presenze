@@ -36,6 +36,8 @@
   import Useractivity from '$lib/components/Jira/JiraUserActivity.svelte';
   import { jiraControl } from '$lib/stores/jiraControl';
   import { useOneUserApi } from '$lib/hooks/useUserApi.js';
+  import { useSaldoApi } from '$lib/hooks/useSaldoApi';
+  import type { SaldoRecord } from '$lib/services/saldo';
   let loading = false;
   let error: string | null = null;
 
@@ -69,9 +71,7 @@
   let currentNoteEntry: TimeEntry | null = null;
   let saldoVisuale = 0;
   let saldoValidatoVisuale = 0;
-  let saldoValidatoOrig: number | string | null = null;
-  let saldoTimeEntryVisuale: number | string | null = null;
-  let saldoPersistenteVisuale: number | string | null = null;
+  let saldoRecords: SaldoRecord[] = [];
 
   function splitYmd(dateStr: string) {
     const [y, m, d] = dateStr.split('-').map(Number);
@@ -100,6 +100,10 @@
     if (t === 14) return 'Visite mediche L.106/25';
     if (t === 15) return 'Ricovero presso struttura ospedaliera';
     return `Tipo ${t}`;
+  }
+
+  function latestSaldoValue(records: SaldoRecord[]) {
+    return records[records.length - 1]?.saldo ?? 0;
   }
 
   function getActiveOreSett(contratti?: Array<any>) {
@@ -213,7 +217,13 @@ export const loadData = async () => {
         }))
       }));
       await refreshProfileUser();
-      await useOneUserApi($timeEntryUser.user?.id)
+      await useOneUserApi($timeEntryUser.user?.id);
+      if (userId) {
+        const saldoResult = await useSaldoApi(userId);
+        saldoRecords = saldoResult.records;
+      } else {
+        saldoRecords = [];
+      }
     } catch (e: any) {
       error = e?.message || 'Errore caricamento';
     } finally {
@@ -242,6 +252,7 @@ export const loadData = async () => {
     try {
       await updateValidationLevel();
       await loadData();
+      timeEntryReload.bump();
     } catch (e: any) {
       error = e?.message || 'Errore validazione';
     } finally {
@@ -409,10 +420,7 @@ export const loadData = async () => {
     return acc;
   }, 0);
 
-  $: saldoValidatoOrig = $auth.user?.saldo?.valore_saldo_validato ?? null;
-  $: saldoTimeEntryVisuale = $timeEntryUser.user?.saldo?.valore_saldo_validato ?? null;
-  $: saldoPersistenteVisuale = $auth.user?.is_superuser ? saldoTimeEntryVisuale : saldoValidatoOrig;
-  $: saldoValidatoVisuale = toNumber(saldoPersistenteVisuale);
+  $: saldoValidatoVisuale = toNumber(latestSaldoValue(saldoRecords));
   $: saldoVisuale = toNumber(saldoPeriodo);
 
   $: totalMonthHours = entries.reduce((acc, entry) => {

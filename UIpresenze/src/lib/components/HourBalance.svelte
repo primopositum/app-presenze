@@ -1,29 +1,27 @@
 <script lang="ts">
-  export let saldo: number | string | null;
-  export let saldoProgressivo: Array<number | string> = [];
-  export let year: number;
-  export let month: number;
-  const today = new Date();
+  import type { SaldoRecord } from '$lib/services/saldo';
 
-  // Normalizzo sempre a number (NaN se non valido)
-  $: saldoNum = saldo === null || saldo === undefined ? NaN : Number(saldo);
-  $: monthOffset =
-    year && month
-      ? (today.getFullYear() - year) * 12 + (today.getMonth() + 1 - month)
-      : 0;
-  $: saldoProgressivoReverse = saldoProgressivo
-    .map((value) => Number(value))
-    .filter(Number.isFinite)
-    .reverse();
-  $: saldoVisualizzato =
-    monthOffset >= 0 && monthOffset < saldoProgressivoReverse.length
-      ? saldoProgressivoReverse[monthOffset]
-      : saldoNum;
+  export let saldoRecords: SaldoRecord[] = [];
+  export let periodo: string;
 
-  // Testo da mostrare (evita "NaNh")
-  $: saldoLabel = Number.isNaN(saldoVisualizzato) ? "--" : String(saldoVisualizzato);
+  function toFiniteNumber(value: unknown) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : NaN;
+  }
+
+  function formatSaldo(value: number) {
+    if (Number.isNaN(value)) return '--';
+    return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, '');
+  }
+
+  $: latestRecord = saldoRecords[saldoRecords.length - 1] ?? null;
+  $: periodoRecord = saldoRecords.find((record) => record.periodo === periodo) ?? null;
+  $: latestValue = latestRecord ? toFiniteNumber(latestRecord.saldo) : NaN;
+  $: periodoValue = periodoRecord ? toFiniteNumber(periodoRecord.saldo) : NaN;
+  $: latestLabel = formatSaldo(latestValue);
+  $: periodoLabel = formatSaldo(periodoValue);
   $: phrases =
-    saldoLabel === "--"
+    periodoLabel === "--"
       ? "Saldo non disponibile"
       : "Saldo ore progressivo validato";
 </script>
@@ -35,12 +33,12 @@
   <b></b>
 
   <div class="default-label">
-    Saldo V: {saldoLabel}h
+    Saldo V: {latestLabel}h
   </div>
 
   <div class="content">
     <ul class="sci">
-      <li class="saldo">{saldoLabel}h</li>
+      <li class="saldo">{periodoLabel}h</li>
     </ul>
 
     <p class="title">

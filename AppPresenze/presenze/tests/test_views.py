@@ -25,6 +25,7 @@ URL_PROFILE          = f"{BASE}/profile/"
 URL_CHANGE_PASSWORD  = f"{BASE}/change-password/"
 URL_CREATE_ACCOUNT   = f"{BASE}/create-account/"
 URL_DELETE_ACCOUNT   = f"{BASE}/delete-account/"
+URL_SALDO            = lambda u_id: f"{BASE}/saldo/{u_id}/"
 
 URL_TE_CREATE        = f"{BASE}/time-entries/"
 URL_TE_DETAIL        = lambda te_id: f"{BASE}/time-entries/{te_id}/"
@@ -42,6 +43,49 @@ URL_SPESA_MANAGE     = lambda s_id: f"{BASE}/spese/{s_id}/"
 
 URL_SCONTRINI_LIST   = lambda t_id: f"{BASE}/trasferte/{t_id}/scontrini/"
 URL_SCONTRINO_DELETE = lambda t_id, filename: f"{BASE}/trasferte/{t_id}/scontrini/{filename}/delete/"
+
+
+class TestSaldoEndpoint(TestCase):
+    def setUp(self):
+        self.utente = make_utente()
+        self.admin = make_utente(email="admin@test.com", is_superuser=True, is_staff=True)
+        make_saldo(self.utente)
+
+    def test_owner_legge_saldo(self):
+        res = auth_client(self.utente).get(URL_SALDO(self.utente.id))
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["utente_id"], self.utente.id)
+        self.assertEqual(res.data["saldo"], [])
+
+    def test_utente_non_modifica_saldo(self):
+        res = auth_client(self.utente).patch(
+            URL_SALDO(self.utente.id),
+            {"periodo": "05-2026", "saldo": 12},
+            format="json",
+        )
+
+        self.assertEqual(res.status_code, 403)
+
+    def test_admin_upsert_saldo_stesso_periodo(self):
+        client = auth_client(self.admin)
+
+        res1 = client.patch(
+            URL_SALDO(self.utente.id),
+            {"periodo": "05-2026", "saldo": 12},
+            format="json",
+        )
+        res2 = client.patch(
+            URL_SALDO(self.utente.id),
+            {"periodo": "05-2026", "saldo": 15},
+            format="json",
+        )
+
+        self.assertEqual(res1.status_code, 200)
+        self.assertEqual(res2.status_code, 200)
+        self.assertEqual(len(res2.data["saldo"]), 1)
+        self.assertEqual(res2.data["saldo"][0]["saldo"], 15.0)
+        self.assertEqual(res2.data["saldo"][0]["validazioni"], 2)
 
 
 # ---------------------------------------------------------------------------
@@ -460,12 +504,12 @@ class TestTimeEntryValidation(TestCase):
             format="json"
         )
         saldo = Saldo.objects.get(utente=self.utente)
-        self.assertEqual(saldo.valore_saldo_validato, Decimal("4.00"))
-        self.assertEqual(saldo.saldo_progressivo, [Decimal("4.00")])
+        self.assertEqual(saldo.saldo[-1]["saldo"], 4)
+        self.assertEqual(saldo.saldo[-1]["validazioni"], 1)
 
-    def test_validazione_admin_appende_saldo_progressivo(self):
+    def test_validazione_admin_upsert_saldo_mensile(self):
         saldo = Saldo.objects.get(utente=self.utente)
-        saldo.valore_saldo_validato = Decimal("0.00")
+        saldo.saldo = []
         saldo.save()
 
         te = make_timeentry(
@@ -483,8 +527,8 @@ class TestTimeEntryValidation(TestCase):
         self.assertEqual(res.status_code, 200)
 
         saldo.refresh_from_db()
-        self.assertEqual(saldo.valore_saldo_validato, Decimal("4.00"))
-        self.assertEqual(saldo.saldo_progressivo, [Decimal("4.00")])
+        self.assertEqual(saldo.saldo[-1]["saldo"], 4)
+        self.assertEqual(saldo.saldo[-1]["validazioni"], 1)
 
 # ---------------------------------------------------------------------------
 # Trasferta views
@@ -1402,8 +1446,8 @@ class TestTimeEntryBulkValidateMonth(TestCase):
         self.assertEqual(res.status_code, 200)
  
         saldo = Saldo.objects.get(utente=self.utente)
-        self.assertEqual(saldo.valore_saldo_validato, Decimal("5.00"))
-        self.assertEqual(saldo.saldo_progressivo, [Decimal("5.00")])
+        self.assertEqual(saldo.saldo[-1]["periodo"], "01-2025")
+        self.assertEqual(saldo.saldo[-1]["saldo"], 5)
         self.assertEqual(res.data["delta_saldo_validato"], "5.00")
 
     def test_superuser_seconda_chiamata_non_riapplica_delta(self):
@@ -1430,8 +1474,7 @@ class TestTimeEntryBulkValidateMonth(TestCase):
         self.assertEqual(res2.data["delta_saldo_validato"], "0.00")
 
         saldo = Saldo.objects.get(utente=self.utente)
-        self.assertEqual(saldo.valore_saldo_validato, Decimal("5.00"))
-        self.assertEqual(saldo.saldo_progressivo, [Decimal("5.00")])
+        self.assertEqual(saldo.saldo[-1]["saldo"], 5)
 
     def test_superuser_aggiorna_saldo_per_prelievo_negativo(self):
         make_timeentry(
@@ -1448,8 +1491,7 @@ class TestTimeEntryBulkValidateMonth(TestCase):
         self.assertEqual(res.status_code, 200)
  
         saldo = Saldo.objects.get(utente=self.utente)
-        self.assertEqual(saldo.valore_saldo_validato, Decimal("-3.00"))
-        self.assertEqual(saldo.saldo_progressivo, [Decimal("-3.00")])
+        self.assertEqual(saldo.saldo[-1]["saldo"], -3)
  
     def test_superuser_saldo_netto_versamento_e_prelievo(self):
         # 5h versamento + 2h prelievo = +3h netto
@@ -1473,8 +1515,7 @@ class TestTimeEntryBulkValidateMonth(TestCase):
         }, format="json")
  
         saldo = Saldo.objects.get(utente=self.utente)
-        self.assertEqual(saldo.valore_saldo_validato, Decimal("3.00"))
-        self.assertEqual(saldo.saldo_progressivo, [Decimal("3.00")])
+        self.assertEqual(saldo.saldo[-1]["saldo"], 3)
  
     def test_superuser_non_tocca_entry_a_livello_0(self):
         make_timeentry(
@@ -1492,7 +1533,7 @@ class TestTimeEntryBulkValidateMonth(TestCase):
         te = TimeEntry.objects.get(utente=self.utente)
         self.assertEqual(te.validation_level, TimeEntry.ValidationLevel.AUTO)
         saldo = Saldo.objects.get(utente=self.utente)
-        self.assertEqual(saldo.saldo_progressivo, [])
+        self.assertEqual(saldo.saldo, [])
  
     # --- Validazione input ---
  

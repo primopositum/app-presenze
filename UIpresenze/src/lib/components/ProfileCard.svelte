@@ -45,6 +45,8 @@
   $: isSuperProfile = user?.is_superuser === true;
   $: contractOreSett = activeContract?.ore_sett ?? user.contratti?.[0]?.ore_sett ?? [];
   $: contractWeeklyHours = (contractOreSett ?? []).reduce((sum, value) => sum + toHours(value), 0);
+  $: latestSaldoRecord = user.saldo?.saldo?.[user.saldo.saldo.length - 1] ?? null;
+  $: latestSaldoValue = latestSaldoRecord?.saldo ?? null;
 
   // ── edit state ────────────────────────────────────────────────────────
 
@@ -66,7 +68,6 @@
   let editNome      = '';
   let editCognome   = '';
   let editEmail     = '';
-  let editSaldo     = 0;
   let editIsActive  = false;
   let editTipologia = '';
   let jiraTokenLoading = false;
@@ -141,7 +142,6 @@
     editNome      = user.nome      ?? '';
     editCognome   = user.cognome   ?? '';
     editEmail     = user.email     ?? '';
-    editSaldo     = Number(user.saldo?.valore_saldo_validato) || 0;
     editIsActive  = activeContract?.is_active ?? false;
     editTipologia = activeContract?.tipologia ?? '';
   }
@@ -251,14 +251,6 @@
     }
 
     if (isAdmin) {
-      if (user.saldo) {
-        const saldoOriginale = Number(user.saldo.valore_saldo_validato) || 0;
-        if (editSaldo !== saldoOriginale) {
-          payload.saldo = {
-            valore_saldo_validato: String(editSaldo)
-          };
-        }
-      }
       if (activeContract) {
         if (editTipologia !== (activeContract.tipologia ?? '') || editIsActive !== activeContract.is_active) {
           payload.contratti = [{
@@ -585,19 +577,9 @@
                 </div>
                 <span class="text-xs text-zinc-500 font-semibold tracking-wide">Saldo ore</span>
               </div>
-              {#if editing && isAdmin}
-                <input
-                  bind:value={editSaldo}
-                  type="number"
-                  step="0.5"
-                  class="edit-input w-24 text-right font-mono text-sm"
-                  placeholder="0"
-                />
-              {:else}
-                <span class="text-sm font-black {isSuperProfile ? 'text-fuchsia-600' : 'text-orange-600'} font-mono tabular-nums">
-                  {fmtSaldo(editing ? editSaldo : user.saldo?.valore_saldo_validato)}
-                </span>
-              {/if}
+              <span class="text-sm font-black {isSuperProfile ? 'text-fuchsia-600' : 'text-orange-600'} font-mono tabular-nums">
+                {fmtSaldo(latestSaldoValue)}
+              </span>
             </div>
 
             <div class="flex items-center justify-between px-3.5 py-3 rounded-xl bg-zinc-50 border border-zinc-100">

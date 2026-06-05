@@ -2,6 +2,7 @@ import { apiBase, authFetch } from '$lib/api';
 import { get } from 'svelte/store';
 import { auth } from '$lib/stores/auth';
 import { timeEntryUser } from '$lib/stores/timeEntryUser';
+import type { Saldo } from '$lib/services/saldo';
 
 const BASE = apiBase();
 
@@ -51,14 +52,6 @@ async function request(path: string, opts: Opts = {}) {
 export type DecimalString = `${number}` | string; 
 
 
-export type Saldo = {
-  id?: number;
-  data: string;
-  valore_saldo_validato: DecimalString;
-  saldo_progressivo: Array<DecimalString | number>;
-};
-
-
 export type OreSett = [
   DecimalString, // lun
   DecimalString, // mar
@@ -88,7 +81,6 @@ export type User = {
   contratti: Contratto[]
 };
 
-export type SaldoUpdatePayload = Partial<Pick<Saldo, 'valore_saldo_validato'>>;
 export type ContrattoUpdatePayload = Partial<
   Pick<Contratto, 'data_ass' | 'data_fine' | 'is_active' | 'tipologia' | 'ore_sett'>
 >;
@@ -99,7 +91,6 @@ export type UpdateAccountPayload = Partial<
   id?: number;
   user_id?: number;
   dati_anagrafici?: Record<string, unknown> | string | null;
-  saldo?: SaldoUpdatePayload;
   contratti?: ContrattoUpdatePayload | ContrattoUpdatePayload[];
 };
 

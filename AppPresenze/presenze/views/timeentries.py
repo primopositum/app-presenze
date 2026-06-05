@@ -11,12 +11,10 @@ from django.db.models import Q
 from ..models import TimeEntry, Utente, Saldo, Contratto
 from ..serializer import TimeEntrySerializer, TimeEntryValidationSerializer
 from ..pdfs import PresenzeMeseScorsoPDFView
+from ..saldo_utils import apply_saldo_delta, periodo_from_date
 
 def _is_staff_or_super(user):
     return user.is_staff or user.is_superuser
-
-def _append_saldo_progressivo(saldo):
-    saldo.saldo_progressivo = list(saldo.saldo_progressivo or []) + [saldo.valore_saldo_validato]
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -528,9 +526,8 @@ def timeentry_update_validation_level(request, te_id: int):
             saldo = Saldo.objects.select_for_update().get(utente=te.utente)
             ore = Decimal(str(te.ore_tot))
             delta = ore if te.type == TimeEntry.EntryType.VERSAMENTO_BANCA_ORE else -ore
-            saldo.valore_saldo_validato += delta
-            _append_saldo_progressivo(saldo)
-            saldo.save(update_fields=["valore_saldo_validato", "saldo_progressivo", "data_upd"])
+            apply_saldo_delta(saldo, periodo_from_date(te.data), delta)
+            saldo.save(update_fields=["saldo", "data_upd"])
 
     return Response(TimeEntrySerializer(te).data, status=status.HTTP_200_OK)
 
@@ -545,7 +542,7 @@ def timeentry_bulk_validate_month(request):
       Body: { "utente_id": 5, "data": "2026-01-15" }
       - Aggiorna validation_level da 1 a 2 (VALIDATO_UTENTE -> VALIDATO_ADMIN)
         per tutte le TimeEntry dell'utente nel mese indicato con validation_level=1
-      - Aggiorna SOLO saldo validato (valore_saldo_validato) per type 3/4
+      - Aggiorna SOLO saldo validato per type 3/4
 
     Caso 2 - Utente normale:
       Body: { "data": "2026-01-15" }
@@ -650,9 +647,8 @@ def timeentry_bulk_validate_month(request):
             # 2c. Lock e aggiornamento saldo (solo delta realmente applicato)
             if total_delta != Decimal("0.00"):
                 saldo = Saldo.objects.select_for_update().get(utente_id=utente_id)
-                saldo.valore_saldo_validato += total_delta
-                _append_saldo_progressivo(saldo)
-                saldo.save(update_fields=["valore_saldo_validato", "saldo_progressivo", "data_upd"])
+                apply_saldo_delta(saldo, periodo_from_date(data_date), total_delta)
+                saldo.save(update_fields=["saldo", "data_upd"])
         return Response({
             "message": f"Aggiornate {count_updated} TimeEntry da validation_level 1 a 2.",
             "utente_id": utente_id,

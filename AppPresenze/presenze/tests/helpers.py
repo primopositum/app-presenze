@@ -41,11 +41,21 @@ def make_utente(email="test@test.com", nome="Mario", cognome="Rossi",
 # Saldo
 # ---------------------------------------------------------------------------
 
-def make_saldo(utente, validato=Decimal("0.00"), saldo_progressivo=None):
+def make_saldo(utente, validato=Decimal("0.00"), saldo_progressivo=None, saldo=None):
+    records = saldo
+    if records is None:
+        if saldo_progressivo:
+            records = [
+                {"periodo": f"{idx:02d}-2025", "saldo": float(value), "validazioni": 1}
+                for idx, value in enumerate(saldo_progressivo, start=1)
+            ]
+        elif Decimal(str(validato)) != Decimal("0.00"):
+            records = [{"periodo": "01-2025", "saldo": float(validato), "validazioni": 1}]
+        else:
+            records = []
     return Saldo.objects.create(
         utente=utente,
-        valore_saldo_validato=validato,
-        saldo_progressivo=saldo_progressivo or [],
+        saldo=records,
     )
 
 

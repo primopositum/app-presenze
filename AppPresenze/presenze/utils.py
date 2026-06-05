@@ -1,6 +1,7 @@
 from .models import  TimeEntry, Saldo
 from decimal import Decimal
 from django.db import transaction
+from .saldo_utils import apply_saldo_delta, periodo_from_date
 
 @transaction.atomic
 def update_saldo_for_timeentry(timeentry, operation="add"):
@@ -23,6 +24,5 @@ def update_saldo_for_timeentry(timeentry, operation="add"):
     if timeentry.validation_level != TimeEntry.ValidationLevel.VALIDATO_ADMIN:
         return
 
-    saldo.valore_saldo_validato += delta
-
-    saldo.save(update_fields=["valore_saldo_validato", "data_upd"])
+    apply_saldo_delta(saldo, periodo_from_date(timeentry.data), delta)
+    saldo.save(update_fields=["saldo", "data_upd"])
