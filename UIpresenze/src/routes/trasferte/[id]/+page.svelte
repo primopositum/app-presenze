@@ -41,6 +41,7 @@
     calcolaDistanza: (a1?: string, a2?: string) => Promise<number | null>;
     hasError: () => boolean;
     getErrorMessage: () => string;
+    getRouteTragitto: () => string[];
   } | null = null;
   let distanzaKm: number | null = null;
   let distanzaKmInput = '';
@@ -482,9 +483,12 @@
     kmError = null;
     try {
       const kmPercorsi = isKmBandieraRossa ? Number((distanzaKm * 2).toFixed(2)) : Number(distanzaKm.toFixed(2));
+      const routeTragitto = mapRef?.getRouteTragitto() ?? [];
+      const normalizedPartenza = routeTragitto[0] ?? partenzaClean;
+      const normalizedArrivo = routeTragitto[1] ?? arrivoClean;
       const tragitto = isKmBandieraRossa
-        ? [partenzaClean, arrivoClean, arrivoClean, partenzaClean]
-        : [partenzaClean, arrivoClean];
+        ? [normalizedPartenza, normalizedArrivo, normalizedArrivo, normalizedPartenza]
+        : [normalizedPartenza, normalizedArrivo];
       const { addSpesa } = useCreateSpese({ tId: item.id });
       const created = await addSpesa({ type: 2, importo: kmPercorsi, tragitto });
       await appendTragittoSegments(tragitto);

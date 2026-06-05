@@ -14,12 +14,11 @@
   import type { SaldoRecord } from '$lib/services/saldo';
   import { getTimeEntriesFromMonth, type TimeEntry } from '$lib/services/timeEntries';
 
-  $: isHomeRoute = $page.url.pathname === '/';
   $: isPresencesRoute = $page.url.pathname.startsWith('/presences');
   $: isProfileRoute = $page.url.pathname === '/profilo';
   $: showAllProfiles = $page.url.searchParams.get('show_all_users') === '1';
   $: canToggleAllProfiles = isProfileRoute && !!$auth.user?.is_superuser;
-  $: canShowHourBalanceRoute = isHomeRoute || isPresencesRoute;
+  $: canShowHourBalanceRoute = isPresencesRoute;
 
   let open = false;
   let successMessage: string | null = null;

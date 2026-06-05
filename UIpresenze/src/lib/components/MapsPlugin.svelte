@@ -23,6 +23,10 @@
   // Posizioni risolte direttamente dalle Places API (priorità sul geocoder)
   let placeLocationA: google.maps.LatLng | null = null;
   let placeLocationB: google.maps.LatLng | null = null;
+  let provinciaA: string | null = null;
+  let provinciaB: string | null = null;
+  let comuneA: string | null = null;
+  let comuneB: string | null = null;
 
   let distance: string | null = null;
   let duration: string | null = null;
@@ -107,7 +111,7 @@
 
       const autocompleteOptions: google.maps.places.AutocompleteOptions = {
         // Nessun filtro su 'types' → restituisce anche stadi, aziende, POI, ecc.
-        fields: ['geometry', 'name', 'formatted_address'],
+        fields: ['geometry', 'name', 'formatted_address', 'address_components'],
         // Leggero bias verso l'Italia senza escludere il resto
         componentRestrictions: { country: [] } // [] = mondiale; metti ['it'] per limitare all'Italia
       };
@@ -120,12 +124,22 @@
         const place = autocompleteA.getPlace();
         placeLocationA = place.geometry?.location ?? null;
         if (place.name) address1 = place.formatted_address ?? place.name;
+        if (place.address_components) {
+          const placeInfo = extractComuneAndProvincia(place.address_components);
+          comuneA = placeInfo.comune;
+          provinciaA = placeInfo.provincia;
+        }
       });
 
       autocompleteB.addListener('place_changed', () => {
         const place = autocompleteB.getPlace();
         placeLocationB = place.geometry?.location ?? null;
         if (place.name) address2 = place.formatted_address ?? place.name;
+        if (place.address_components) {
+          const placeInfo = extractComuneAndProvincia(place.address_components);
+          comuneB = placeInfo.comune;
+          provinciaB = placeInfo.provincia;
+        }
       });
       // ────────────────────────────────────────────────────────────────────
 
@@ -160,12 +174,41 @@
     if (directionsRenderer) directionsRenderer.setMap(null);
   });
 
+  function extractComuneAndProvincia(components: google.maps.GeocoderAddressComponent[]) {
+    const get = (type: string) => components.find((component) => component.types.includes(type));
+
+    const comune =
+      get('locality')?.long_name ??
+      get('administrative_area_level_3')?.long_name ??
+      null;
+
+    const provincia = get('administrative_area_level_2');
+
+    return {
+      comune,
+      provincia: provincia?.short_name ?? null
+    };
+  }
+
+  function formatRoutePlace(comune: string | null, provincia: string | null, fallback: string) {
+    if (comune && provincia) return `${comune} (${provincia})`;
+    if (comune) return comune;
+    if (provincia) return `(${provincia})`;
+    return fallback.trim();
+  }
+
   /** Geocoder usato solo come fallback se l'utente non seleziona dal menu Places */
-  function geocodeAddress(address: string): Promise<google.maps.LatLng> {
+  function geocodeAddress(address: string): Promise<{
+    location: google.maps.LatLng;
+    components: google.maps.GeocoderAddressComponent[];
+  }> {
     return new Promise((resolve, reject) => {
       geocoder.geocode({ address, region: 'IT' }, (results, status) => {
         if (status === 'OK' && results && results[0]) {
-          resolve(results[0].geometry.location);
+          resolve({
+            location: results[0].geometry.location,
+            components: results[0].address_components
+          });
         } else {
           reject(new Error(`Indirizzo non trovato: "${address}"`));
         }
@@ -210,8 +253,18 @@
   }
 
   export async function calcolaDistanza(a1?: string, a2?: string): Promise<number | null> {
-    if (a1 !== undefined) { address1 = a1; placeLocationA = null; }
-    if (a2 !== undefined) { address2 = a2; placeLocationB = null; }
+    if (a1 !== undefined) {
+      address1 = a1;
+      placeLocationA = null;
+      comuneA = null;
+      provinciaA = null;
+    }
+    if (a2 !== undefined) {
+      address2 = a2;
+      placeLocationB = null;
+      comuneB = null;
+      provinciaB = null;
+    }
 
     if (!mapReady || !directionsRenderer || !directionsService || !geocoder) {
       error = 'Mappa in inizializzazione, riprova tra un istante.';
@@ -233,10 +286,34 @@
 
     try {
       // Usa la location Places se disponibile, altrimenti cade sul geocoder
-      const [locA, locB] = await Promise.all([
-        placeLocationA ? Promise.resolve(placeLocationA) : geocodeAddress(address1),
-        placeLocationB ? Promise.resolve(placeLocationB) : geocodeAddress(address2)
+      const [resA, resB] = await Promise.all([
+        placeLocationA
+          ? Promise.resolve({
+              location: placeLocationA,
+              components: [] as google.maps.GeocoderAddressComponent[]
+            })
+          : geocodeAddress(address1),
+        placeLocationB
+          ? Promise.resolve({
+              location: placeLocationB,
+              components: [] as google.maps.GeocoderAddressComponent[]
+            })
+          : geocodeAddress(address2)
       ]);
+
+      const locA = resA.location;
+      const locB = resB.location;
+
+      if (!provinciaA && resA.components.length) {
+        const placeInfo = extractComuneAndProvincia(resA.components);
+        comuneA = placeInfo.comune;
+        provinciaA = placeInfo.provincia;
+      }
+      if (!provinciaB && resB.components.length) {
+        const placeInfo = extractComuneAndProvincia(resB.components);
+        comuneB = placeInfo.comune;
+        provinciaB = placeInfo.provincia;
+      }
 
       const km = await new Promise<number | null>((resolve) => {
         directionsService.route(
@@ -276,10 +353,24 @@
     return error;
   }
 
+  export function getRouteTragitto(): string[] {
+    return [
+      formatRoutePlace(comuneA, provinciaA, address1),
+      formatRoutePlace(comuneB, provinciaB, address2)
+    ].filter((place) => place.length > 0);
+  }
+
   // Reset della location salvata se l'utente modifica manualmente il testo
   function onInput(field: 'A' | 'B') {
-    if (field === 'A') placeLocationA = null;
-    else placeLocationB = null;
+    if (field === 'A') {
+      placeLocationA = null;
+      comuneA = null;
+      provinciaA = null;
+    } else {
+      placeLocationB = null;
+      comuneB = null;
+      provinciaB = null;
+    }
   }
 </script>
 
@@ -344,6 +435,16 @@
             <div class="result-value">{duration}</div>
           </div>
         </div>
+        {#if comuneA || comuneB}
+          <div class="result-luoghi">
+            {#if comuneA}
+              <span class="luogo-tag">A: {formatRoutePlace(comuneA, provinciaA, address1)}</span>
+            {/if}
+            {#if comuneB}
+              <span class="luogo-tag">B: {formatRoutePlace(comuneB, provinciaB, address2)}</span>
+            {/if}
+          </div>
+        {/if}
         <div class="result-note">calcolata su strade reali via Google Maps</div>
       </div>
     {/if}
@@ -548,6 +649,22 @@
     font-weight: 600;
     color: #c9b99a;
     line-height: 1.1;
+  }
+
+  .result-luoghi {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 14px;
+  }
+
+  .luogo-tag {
+    border: 1px solid rgba(201, 185, 154, 0.25);
+    border-radius: 8px;
+    color: #d8ccb5;
+    font-size: 0.78rem;
+    line-height: 1.25;
+    padding: 7px 9px;
   }
 
   .result-note {
