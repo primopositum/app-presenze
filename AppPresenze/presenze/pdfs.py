@@ -173,6 +173,17 @@ def build_days_data(entries: List[TimeEntry], start_date, end_date) -> Tuple[Dic
     return out, internal_total
 
 
+def total_work_hours_for_jira_check(entries: List[TimeEntry]) -> Decimal:
+    work_entry_types = (
+        TimeEntry.EntryType.LAVORO_ORDINARIO,
+        TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
+    )
+    return sum(
+        (Decimal(te.ore_tot) for te in entries if te.type in work_entry_types),
+        Decimal("0.00"),
+    )
+
+
 def fill_pdf(template_path: Path, full_name: str, days_data: Dict[int, DayData]) -> BytesIO:
     if not template_path.exists():
         raise Http404(f"Template PDF non trovato: {template_path}")
@@ -336,6 +347,7 @@ class PresenzeMeseScorsoPDFView(APIView):
 
         # Aggrega valori
         days_data, total_hours_internal = build_days_data(entries, start_date, end_date)
+        jira_check_hours = total_work_hours_for_jira_check(entries)
 
         contratto = user.contratti.filter(is_active=True).first()
         if contratto and contratto.ore_sett:
@@ -372,10 +384,10 @@ class PresenzeMeseScorsoPDFView(APIView):
 
             jira_total_seconds = int(jira_payload.get("total_seconds") or 0)
             jira_hours = (Decimal(jira_total_seconds) / Decimal("3600")).quantize(Decimal("0.01"))
-            user_hours = total_hours_internal.quantize(Decimal("0.01"))
+            user_hours = jira_check_hours.quantize(Decimal("0.01"))
             if jira_hours < user_hours:
                 raise ValidationError(
-                    {"detail": f"Ore Jira ({jira_hours:.2f}) inferiori alle ore inserite ({user_hours:.2f})."}
+                    {"detail": f"Ore Jira ({jira_hours:.2f}) inferiori alle ore effettive di lavoro inserite ({user_hours:.2f})."}
                 )
 
         nome = getattr(user, "nome", "") or ""
