@@ -662,6 +662,7 @@ def _completed_history_fields() -> list[str]:
         "assignee",
         "issuetype",
         "parent",
+        "subtasks",
         "project",
         "timetracking",
         "timespent",
@@ -720,10 +721,56 @@ def _fetch_jira_search_all(domain: str, headers: dict, jql: str, fields: list[st
     return payload
 
 
+def _nest_subtasks_into_parents(payload: dict) -> None:
+    """Annida le sottotask completate nelle rispettive issue parent presenti."""
+    issues = payload.get("issues")
+    if not isinstance(issues, list):
+        return
+
+    issue_map = {
+        str(issue.get("key") or "").strip(): issue
+        for issue in issues
+        if isinstance(issue, dict) and str(issue.get("key") or "").strip()
+    }
+
+    top_level = []
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+
+        fields = issue.get("fields")
+        if not isinstance(fields, dict):
+            fields = {}
+            issue["fields"] = fields
+
+        parent = fields.get("parent")
+        parent_key = str((parent or {}).get("key") or "").strip() if isinstance(parent, dict) else ""
+        parent_issue = issue_map.get(parent_key)
+
+        if parent_issue is not None and parent_issue is not issue:
+            parent_fields = parent_issue.get("fields")
+            if not isinstance(parent_fields, dict):
+                parent_fields = {}
+                parent_issue["fields"] = parent_fields
+
+            enriched_subtasks = parent_fields.get("subtasks_enriched")
+            if not isinstance(enriched_subtasks, list):
+                enriched_subtasks = []
+                parent_fields["subtasks_enriched"] = enriched_subtasks
+            enriched_subtasks.append(issue)
+            continue
+
+        top_level.append(issue)
+
+    payload["issues"] = top_level
+    payload["total"] = len(top_level)
+
+
 def _completed_history_payload(domain: str, headers: dict, target_year: int | None = None):
     jql = _completed_history_jql(target_year)
     payload = _fetch_jira_search_all(domain, headers, jql, _completed_history_fields())
     _enrich_completed_issues_with_worklog_authors(payload, domain, headers)
+    _nest_subtasks_into_parents(payload)
     _sort_issues_by_priority(payload)
     payload["view"] = "completed"
     payload["year"] = target_year if target_year is not None else "all"

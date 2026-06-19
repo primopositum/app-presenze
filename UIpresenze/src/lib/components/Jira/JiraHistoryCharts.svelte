@@ -29,12 +29,39 @@
     color: string;
   };
 
+  type ChartTooltip = {
+    row: ChartRow;
+    x: number;
+    y: number;
+  };
+
   export let issues: JiraIssue[] = [];
   export let selectedProjectKeys: string[] = [];
 
   const donutSize = 220;
   const outerRadius = 86;
   const innerRadius = 50;
+  let chartTooltip: ChartTooltip | null = null;
+
+  function showChartTooltip(event: MouseEvent, row: ChartRow) {
+    const tooltipWidth = 220;
+    const tooltipHeight = 76;
+    const gap = 12;
+    const x = Math.min(event.clientX + gap, window.innerWidth - tooltipWidth - gap);
+    const y = event.clientY + tooltipHeight + gap > window.innerHeight
+      ? event.clientY - tooltipHeight - gap
+      : event.clientY + gap;
+
+    chartTooltip = {
+      row,
+      x: Math.max(gap, x),
+      y: Math.max(gap, y)
+    };
+  }
+
+  function hideChartTooltip() {
+    chartTooltip = null;
+  }
 
   function taskTotalSeconds(fields?: JiraIssue['fields']) {
     if (!fields) return 0;
@@ -176,7 +203,16 @@
         <svg width={donutSize} height={donutSize} viewBox="0 0 220 220" role="img" aria-label={selectedProjectKeys.length > 0 ? 'Distribuzione ore per utente' : 'Distribuzione ore per progetto'}>
           <g transform="translate(110,110)">
             {#each arcs as slice (slice.data.id)}
-              <path d={arcPath(slice) || ''} fill={slice.data.color} stroke="#fff" stroke-width="1.5"></path>
+              <path
+                class="chart-segment"
+                d={arcPath(slice) || ''}
+                fill={slice.data.color}
+                stroke="#fff"
+                stroke-width="1.5"
+                on:mouseenter={(event) => showChartTooltip(event, slice.data)}
+                on:mousemove={(event) => showChartTooltip(event, slice.data)}
+                on:mouseleave={hideChartTooltip}
+              ></path>
             {/each}
           </g>
         </svg>
@@ -199,6 +235,7 @@
           <g transform={`translate(${labelColumnWidth},10)`}>
             {#each chartRows as row (row.id)}
               <rect
+                class="chart-bar"
                 y={yScale(row.id) || 0}
                 x="0"
                 width={xScale(row.hours)}
@@ -206,6 +243,9 @@
                 rx="6"
                 fill={row.color}
                 opacity="0.88"
+                on:mouseenter={(event) => showChartTooltip(event, row)}
+                on:mousemove={(event) => showChartTooltip(event, row)}
+                on:mouseleave={hideChartTooltip}
               ></rect>
               <text x="-10" y={(yScale(row.id) || 0) + yScale.bandwidth() / 2 + 4} text-anchor="end" class="axis-label">{row.label}</text>
               <text x={xScale(row.hours) + 8} y={(yScale(row.id) || 0) + yScale.bandwidth() / 2 + 4} class="axis-value">
@@ -216,6 +256,18 @@
         </svg>
       </div>
     </article>
+  {/if}
+
+  {#if chartTooltip}
+    <div
+      class="chart-tooltip"
+      style={`left:${chartTooltip.x}px; top:${chartTooltip.y}px;`}
+      role="tooltip"
+    >
+      <strong>{chartTooltip.row.label}</strong>
+      <span>{chartTooltip.row.percent.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}% del totale</span>
+      <small>{fmtHours(chartTooltip.row.seconds)}</small>
+    </div>
   {/if}
 </section>
 
@@ -355,6 +407,51 @@
 
   .axis-value {
     fill: #0f172a;
+  }
+
+  .chart-segment,
+  .chart-bar {
+    cursor: pointer;
+    transition: opacity 140ms ease;
+  }
+
+  .chart-segment:hover,
+  .chart-bar:hover {
+    opacity: 0.72;
+  }
+
+  .chart-tooltip {
+    position: fixed;
+    z-index: 1000;
+    display: grid;
+    gap: 2px;
+    width: max-content;
+    max-width: 220px;
+    padding: 8px 10px;
+    border: 1px solid #cbd5e1;
+    border-radius: 7px;
+    background: #ffffff;
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.18);
+    color: #0f172a;
+    font-family: var(--font-mono);
+    pointer-events: none;
+  }
+
+  .chart-tooltip strong {
+    overflow: hidden;
+    font-size: 0.72rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chart-tooltip span {
+    font-size: 0.72rem;
+    font-weight: 700;
+  }
+
+  .chart-tooltip small {
+    color: #475569;
+    font-size: 0.66rem;
   }
 
   @media (max-width: 1200px) {

@@ -9,6 +9,8 @@
       assignee?: { displayName?: string } | null;
       issuetype?: { name?: string; subtask?: boolean } | null;
       parent?: { key?: string; fields?: { summary?: string } } | null;
+      subtasks?: JiraIssue[];
+      subtasks_enriched?: JiraIssue[];
       project?: { key?: string; name?: string };
       timespent?: number | null;
       aggregatetimespent?: number | null;
@@ -89,6 +91,13 @@
     return Boolean(issueType?.subtask) || typeName.includes('sub-task') || typeName.includes('subtask') || Boolean(issue.fields?.parent);
   }
 
+  function flattenIssues(issues: JiraIssue[]): JiraIssue[] {
+    return (issues || []).flatMap((issue) => [
+      issue,
+      ...flattenIssues(issue.fields?.subtasks_enriched || [])
+    ]);
+  }
+
   function issueYear(issue: JiraIssue) {
     const dateValue =
       issue.fields?.resolutiondate ||
@@ -106,10 +115,11 @@
 
   $: normalizedSearch = searchQuery.trim().toLowerCase();
   $: normalizedYear = selectedYear === 'all' ? 'all' : String(selectedYear);
+  $: flattenedIssues = flattenIssues(issuesData);
   $: yearFilteredIssues =
     normalizedYear === 'all'
-      ? issuesData
-      : issuesData.filter((issue) => String(issueYear(issue) || '') === normalizedYear);
+      ? flattenedIssues
+      : flattenedIssues.filter((issue) => String(issueYear(issue) || '') === normalizedYear);
   $: projects = Object.values(
     yearFilteredIssues.reduce<Record<string, ProjectSummary>>((acc, issue) => {
       const projectKey = issue.fields?.project?.key || 'N/D';

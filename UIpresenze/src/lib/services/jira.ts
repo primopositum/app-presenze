@@ -30,6 +30,19 @@ export type JiraTimesheetActivity = {
   comment?: string;
 };
 
+export type JiraCreatedWorklogResponse = {
+  id?: string;
+  started?: string;
+  timeSpent?: string;
+  timeSpentSeconds?: number;
+  author?: { displayName?: string };
+};
+
+export type JiraWorklogCreatedEvent = {
+  day: string;
+  activity: JiraTimesheetActivity;
+};
+
 export type JiraTimesheetResponse = {
   date: string;
   utente_email?: string;
@@ -159,13 +172,17 @@ export type JiraYearWorklogProject = {
 };
 
 export type JiraHistoryIssue = {
+  id?: string;
   key: string;
+  self?: string;
   fields?: {
     summary?: string;
     status?: { name?: string };
     assignee?: { displayName?: string } | null;
     issuetype?: { name?: string; subtask?: boolean } | null;
     parent?: { key?: string; fields?: { summary?: string } } | null;
+    subtasks?: JiraHistoryIssue[];
+    subtasks_enriched?: JiraHistoryIssue[];
     project?: { key?: string; name?: string };
     timespent?: number | null;
     aggregatetimespent?: number | null;
@@ -382,7 +399,11 @@ export function jiraIssueTime(issueKey: string, filter: JiraIssueTimeFilter = {}
 }
 
 export function jiraAddWorklog(issueKey: string, payload: JiraWorklogPayload) {
-  return requestJson(`/jira/time/${encodeURIComponent(issueKey)}/log/`, 'POST', payload as unknown as Record<string, unknown>);
+  return requestJson(
+    `/jira/time/${encodeURIComponent(issueKey)}/log/`,
+    'POST',
+    payload as unknown as Record<string, unknown>
+  ) as Promise<JiraCreatedWorklogResponse>;
 }
 
 export function jiraUpdateWorklog(issueKey: string, worklogId: string | number, payload: JiraWorklogPayload) {
@@ -390,7 +411,7 @@ export function jiraUpdateWorklog(issueKey: string, worklogId: string | number, 
     `/jira/time/${encodeURIComponent(issueKey)}/log/${encodeURIComponent(String(worklogId))}/`,
     'PUT',
     payload as unknown as Record<string, unknown>
-  );
+  ) as Promise<JiraCreatedWorklogResponse>;
 }
 
 export function jiraDeleteWorklog(issueKey: string, worklogId: string | number) {

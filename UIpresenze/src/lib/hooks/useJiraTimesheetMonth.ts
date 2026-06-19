@@ -5,6 +5,7 @@ import {
   type JiraTimesheetActivity,
   type JiraTimesheetMonthResponse,
   type JiraTimesheetParams,
+  type JiraTimesheetResponse,
 } from '$lib/services/jira';
 
 type LoadMonthInput = {
@@ -12,6 +13,10 @@ type LoadMonthInput = {
   month: number;
   email?: string | null;
   force?: boolean;
+};
+
+type RefreshDayOptions = {
+  silent?: boolean;
 };
 
 const monthCache = new Map<string, JiraTimesheetMonthResponse>();
@@ -50,6 +55,79 @@ function userKeyForDay(payload: JiraTimesheetMonthResponse | null, email?: strin
 
   const firstUser = payload?.users?.[0];
   return firstUser?.utente_email || firstUser?.jira_email || '';
+}
+
+function mergeDailyIntoMonth(
+  current: JiraTimesheetMonthResponse,
+  day: string,
+  email: string,
+  daily: JiraTimesheetResponse
+) {
+  const next = cloneMonthPayload(current);
+  const userKey = userKeyForDay(next, email) || daily.utente_email || daily.jira_email || email;
+  const existingDay = next.days?.[day] || { date: day, count: 0, users: {} };
+  const previousUserCount = existingDay.users?.[userKey]?.count || 0;
+  const nextUserCount = daily.activities?.length || 0;
+
+  next.days = {
+    ...next.days,
+    [day]: {
+      ...existingDay,
+      count: Math.max(0, (existingDay.count || 0) - previousUserCount + nextUserCount),
+      users: {
+        ...(existingDay.users || {}),
+        [userKey]: {
+          utente_email: daily.utente_email,
+          jira_email: daily.jira_email,
+          count: nextUserCount,
+          activities: daily.activities || [],
+        },
+      },
+    },
+  };
+  next.count = Math.max(0, (next.count || 0) - previousUserCount + nextUserCount);
+
+  let matchedUser = false;
+  next.users = (next.users || []).map((user) => {
+    const matches =
+      normalizeEmail(user.utente_email) === normalizeEmail(userKey) ||
+      normalizeEmail(user.jira_email) === normalizeEmail(userKey);
+    if (!matches) return user;
+    matchedUser = true;
+    return {
+      ...user,
+      count: Math.max(0, (user.count || 0) - previousUserCount + nextUserCount),
+      days: {
+        ...(user.days || {}),
+        [day]: {
+          date: day,
+          count: nextUserCount,
+          activities: daily.activities || [],
+        },
+      },
+    };
+  });
+
+  if (!matchedUser && userKey) {
+    next.users = [
+      ...next.users,
+      {
+        utente_email: daily.utente_email || userKey,
+        jira_email: daily.jira_email,
+        count: nextUserCount,
+        days: {
+          [day]: {
+            date: day,
+            count: nextUserCount,
+            activities: daily.activities || [],
+          },
+        },
+      },
+    ];
+    next.users_count = next.users.length;
+  }
+
+  return next;
 }
 
 export function getJiraActivitiesForDay(
@@ -120,66 +198,84 @@ export function useJiraTimesheetMonthCache() {
     }
   }
 
-  async function refreshDay(day: string, emailOverride?: string | null) {
+  function injectWorklogIntoCache(
+    day: string,
+    activity: JiraTimesheetActivity,
+    emailOverride?: string | null
+  ) {
     const email = String(emailOverride ?? activeEmail ?? '').trim();
     const key = cacheKey(activeYear, activeMonth, email);
-    if (!day || !activeYear || !activeMonth) return null;
+    if (!day || !activeYear || !activeMonth) return false;
 
-    const daily = await jiraTimesheet(day, paramsForEmail(email));
     const current = monthCache.get(key);
-    if (!current) {
-      await loadMonth({ year: activeYear, month: activeMonth, email, force: true });
-      return daily;
-    }
+    if (!current) return false;
 
-    const next = cloneMonthPayload(current);
-    const userKey = userKeyForDay(next, email) || daily.utente_email || daily.jira_email || email;
-    const existingDay = next.days?.[day] || { date: day, count: 0, users: {} };
-    const previousUserCount = existingDay.users?.[userKey]?.count || 0;
-    const nextUserCount = daily.activities?.length || 0;
-
-    next.days = {
-      ...next.days,
-      [day]: {
-        ...existingDay,
-        count: Math.max(0, (existingDay.count || 0) - previousUserCount + nextUserCount),
-        users: {
-          ...(existingDay.users || {}),
-          [userKey]: {
-            utente_email: daily.utente_email,
-            jira_email: daily.jira_email,
-            count: nextUserCount,
-            activities: daily.activities || [],
-          },
-        },
-      },
-    };
-    next.count = Math.max(0, (next.count || 0) - previousUserCount + nextUserCount);
-
-    next.users = (next.users || []).map((user) => {
-      const matches =
-        normalizeEmail(user.utente_email) === normalizeEmail(userKey) ||
-        normalizeEmail(user.jira_email) === normalizeEmail(userKey);
-      if (!matches) return user;
-      return {
-        ...user,
-        count: Math.max(0, (user.count || 0) - previousUserCount + nextUserCount),
-        days: {
-          ...(user.days || {}),
-          [day]: {
-            date: day,
-            count: nextUserCount,
-            activities: daily.activities || [],
-          },
-        },
-      };
+    const userKey = userKeyForDay(current, email) || email;
+    const existingDay = current.days?.[day];
+    const existingUser = existingDay?.users?.[userKey];
+    const existingActivities = existingUser?.activities || [];
+    const worklogId = String(activity.worklog_id || '').trim();
+    const activities = [
+      activity,
+      ...existingActivities.filter(
+        (item) => !worklogId || String(item.worklog_id || '').trim() !== worklogId
+      ),
+    ];
+    const next = mergeDailyIntoMonth(current, day, email, {
+      date: day,
+      utente_email: existingUser?.utente_email || userKey || undefined,
+      jira_email: existingUser?.jira_email || email || undefined,
+      count: activities.length,
+      activities,
     });
 
     monthCache.set(key, next);
     if (activeKey === key) {
       data.set(next);
     }
-    return daily;
+    return true;
+  }
+
+  async function refreshDay(
+    day: string,
+    emailOverride?: string | null,
+    options: RefreshDayOptions = {}
+  ) {
+    const email = String(emailOverride ?? activeEmail ?? '').trim();
+    const key = cacheKey(activeYear, activeMonth, email);
+    if (!day || !activeYear || !activeMonth) return null;
+
+    if (!options.silent) {
+      loading.set(true);
+      error.set('');
+    }
+    try {
+      const daily = await jiraTimesheet(day, paramsForEmail(email));
+      const current = monthCache.get(key);
+      if (!current) {
+        if (!options.silent) {
+          await loadMonth({ year: activeYear, month: activeMonth, email, force: true });
+        }
+        return daily;
+      }
+
+      const next = mergeDailyIntoMonth(current, day, email, daily);
+
+      monthCache.set(key, next);
+      if (activeKey === key) {
+        data.set(next);
+      }
+      return daily;
+    } catch (e: any) {
+      if (!options.silent && activeKey === key) {
+        error.set(String(e?.message || e || 'Errore aggiornamento worklog Jira'));
+      }
+      throw e;
+    } finally {
+      if (!options.silent && activeKey === key) {
+        loading.set(false);
+      }
+    }
   }
 
   return {
@@ -187,6 +283,7 @@ export function useJiraTimesheetMonthCache() {
     loading,
     error,
     loadMonth,
+    injectWorklogIntoCache,
     refreshDay,
   };
 }

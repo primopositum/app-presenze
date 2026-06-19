@@ -9,12 +9,12 @@
 
   type JiraIssue = JiraHistoryIssue;
   type CompletedHistoryCache = {
-    version: 1;
+    version: 2;
     cachedAt: string;
     issues: JiraIssue[];
   };
 
-  const COMPLETED_HISTORY_CACHE_KEY = 'app-presenze:jira-history:completed:v1';
+  const COMPLETED_HISTORY_CACHE_KEY = 'app-presenze:jira-history:completed:v2';
 
   let selectedProjectKeys: string[] = [];
   let searchQuery = '';
@@ -80,52 +80,68 @@
     }
   }
 
+  function normalizeCompletedIssue(issue: JiraIssue): JiraIssue | null {
+    const key = String(issue?.key || '');
+    if (!key) return null;
+
+    const fields = issue.fields || {};
+    return {
+      id: issue.id,
+      key,
+      self: issue.self,
+      fields: {
+        summary: fields.summary,
+        status: fields.status ? { name: fields.status.name } : undefined,
+        assignee: fields.assignee?.displayName ? { displayName: fields.assignee.displayName } : null,
+        issuetype: fields.issuetype
+          ? { name: fields.issuetype.name, subtask: fields.issuetype.subtask }
+          : null,
+        parent: fields.parent
+          ? { key: fields.parent.key, fields: { summary: fields.parent.fields?.summary } }
+          : null,
+        subtasks: normalizeCompletedIssues(fields.subtasks || []),
+        subtasks_enriched: normalizeCompletedIssues(fields.subtasks_enriched || []),
+        project: fields.project ? { key: fields.project.key, name: fields.project.name } : undefined,
+        timespent: fields.timespent ?? null,
+        aggregatetimespent: fields.aggregatetimespent ?? null,
+        timeestimate: fields.timeestimate ?? null,
+        aggregatetimeestimate: fields.aggregatetimeestimate ?? null,
+        timeoriginalestimate: fields.timeoriginalestimate ?? null,
+        aggregatetimeoriginalestimate: fields.aggregatetimeoriginalestimate ?? null,
+        timetracking: fields.timetracking
+          ? {
+              timeSpentSeconds: fields.timetracking.timeSpentSeconds,
+              originalEstimateSeconds: fields.timetracking.originalEstimateSeconds
+            }
+          : null,
+        created: fields.created,
+        updated: fields.updated,
+        resolutiondate: fields.resolutiondate ?? null,
+        worklog_authors: (fields.worklog_authors || []).map((author) => ({
+          displayName: author.displayName,
+          timeSpentSeconds: author.timeSpentSeconds
+        })),
+        worklog_primary_author: fields.worklog_primary_author
+          ? {
+              displayName: fields.worklog_primary_author.displayName,
+              timeSpentSeconds: fields.worklog_primary_author.timeSpentSeconds
+            }
+          : undefined
+      }
+    };
+  }
+
   function normalizeCompletedIssues(issues: JiraIssue[]): JiraIssue[] {
     return (issues || [])
-      .map((issue) => {
-        const fields = issue.fields || {};
-        return {
-          key: String(issue.key || ''),
-          fields: {
-            summary: fields.summary,
-            status: fields.status ? { name: fields.status.name } : undefined,
-            assignee: fields.assignee?.displayName ? { displayName: fields.assignee.displayName } : null,
-            issuetype: fields.issuetype
-              ? { name: fields.issuetype.name, subtask: fields.issuetype.subtask }
-              : null,
-            parent: fields.parent
-              ? { key: fields.parent.key, fields: { summary: fields.parent.fields?.summary } }
-              : null,
-            project: fields.project ? { key: fields.project.key, name: fields.project.name } : undefined,
-            timespent: fields.timespent ?? null,
-            aggregatetimespent: fields.aggregatetimespent ?? null,
-            timeestimate: fields.timeestimate ?? null,
-            aggregatetimeestimate: fields.aggregatetimeestimate ?? null,
-            timeoriginalestimate: fields.timeoriginalestimate ?? null,
-            aggregatetimeoriginalestimate: fields.aggregatetimeoriginalestimate ?? null,
-            timetracking: fields.timetracking
-              ? {
-                  timeSpentSeconds: fields.timetracking.timeSpentSeconds,
-                  originalEstimateSeconds: fields.timetracking.originalEstimateSeconds
-                }
-              : null,
-            created: fields.created,
-            updated: fields.updated,
-            resolutiondate: fields.resolutiondate ?? null,
-            worklog_authors: (fields.worklog_authors || []).map((author) => ({
-              displayName: author.displayName,
-              timeSpentSeconds: author.timeSpentSeconds
-            })),
-            worklog_primary_author: fields.worklog_primary_author
-              ? {
-                  displayName: fields.worklog_primary_author.displayName,
-                  timeSpentSeconds: fields.worklog_primary_author.timeSpentSeconds
-                }
-              : undefined
-          }
-        };
-      })
-      .filter((issue) => issue.key);
+      .map(normalizeCompletedIssue)
+      .filter((issue): issue is JiraIssue => issue !== null);
+  }
+
+  function flattenCompletedIssues(issues: JiraIssue[]): JiraIssue[] {
+    return (issues || []).flatMap((issue) => [
+      issue,
+      ...flattenCompletedIssues(issue.fields?.subtasks_enriched || [])
+    ]);
   }
 
   function loadCompletedHistoryCache() {
@@ -134,7 +150,7 @@
       if (!raw) return false;
 
       const payload = JSON.parse(raw) as Partial<CompletedHistoryCache>;
-      if (payload.version !== 1 || !Array.isArray(payload.issues)) {
+      if (payload.version !== 2 || !Array.isArray(payload.issues)) {
         localStorage.removeItem(COMPLETED_HISTORY_CACHE_KEY);
         return false;
       }
@@ -144,7 +160,7 @@
         localStorage.setItem(
           COMPLETED_HISTORY_CACHE_KEY,
           JSON.stringify({
-            version: 1,
+            version: 2,
             cachedAt: String(payload.cachedAt || new Date().toISOString()),
             issues: completedIssues
           } satisfies CompletedHistoryCache)
@@ -162,7 +178,7 @@
 
   function saveCompletedHistoryCache(issues: JiraIssue[]) {
     const payload: CompletedHistoryCache = {
-      version: 1,
+      version: 2,
       cachedAt: new Date().toISOString(),
       issues,
     };
@@ -195,9 +211,10 @@
     }
   }
 
+  $: flattenedCompletedIssues = flattenCompletedIssues(completedIssues);
   $: availableYears = Array.from(
     new Set(
-      completedIssues
+      flattenedCompletedIssues
         .map((issue) => issueYear(issue))
         .filter((year): year is number => year !== null)
     )
@@ -205,8 +222,8 @@
 
   $: chartIssues =
     selectedYear === 'all'
-      ? completedIssues
-      : completedIssues.filter((issue) => String(issueYear(issue) || '') === selectedYear);
+      ? flattenedCompletedIssues
+      : flattenedCompletedIssues.filter((issue) => String(issueYear(issue) || '') === selectedYear);
   $: if (selectedYear === 'all') {
     yearlyWorklogData = null;
     yearlyWorklogError = '';

@@ -2,6 +2,7 @@
   export let phrase1 = '';
   export let phrase2 = '';
   export let phrase3 = '';
+  export let phrase4 = '';
 </script>
 
 <div class="notification-card" role="status" aria-live="polite">
@@ -13,6 +14,9 @@
   {/if}
   {#if phrase3}
     <p>{phrase3}</p>
+  {/if}
+  {#if phrase4}
+    <p>{phrase4}</p>
   {/if}
 </div>
 

@@ -1,7 +1,17 @@
 <script lang="ts">
-  import { jiraTimesheet, jiraDeleteWorklog, jiraAddWorklog, jiraUpdateWorklog, type JiraTimesheetActivity } from '$lib/services/jira';
+  import { onDestroy } from 'svelte';
+  import {
+    jiraTimesheet,
+    jiraDeleteWorklog,
+    jiraAddWorklog,
+    jiraUpdateWorklog,
+    type JiraCreatedWorklogResponse,
+    type JiraTimesheetActivity,
+    type JiraWorklogCreatedEvent
+  } from '$lib/services/jira';
   import JiraWorklogCard from '$lib/components/Jira/JiraWorklogCard.svelte';
   import ConfirmCard from '$lib/components/ConfirmCard.svelte';
+  import ToastState from '$lib/components/ToastState.svelte';
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
   import { faTrash } from '@fortawesome/free-solid-svg-icons';
 
@@ -11,19 +21,42 @@
   export let activities: JiraTimesheetActivity[] = [];
   export let loading = false;
   export let error = '';
-  export let onRefreshDay: ((day: string) => Promise<void>) | null = null;
+  export let onRefreshDay: ((day: string, silent?: boolean) => Promise<void>) | null = null;
+  export let onInjectWorklog: ((day: string, activity: JiraTimesheetActivity) => boolean) | null = null;
 
   let deletingWorklogId = '';
   let worklogActionError = '';
   let completeActionError = '';
   let completeActionSuccess = '';
   let completing = false;
+  let toastOpen = false;
+  let toastSuccess = true;
+  let toastMessage = '';
   let deleteConfirmTarget: { issueKey: string; worklogId: string } | null = null;
+  const backgroundRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const COMPLETE_ISSUE_KEY = 'AM-1';
+
+  onDestroy(() => {
+    backgroundRefreshTimers.forEach((timer) => clearTimeout(timer));
+    backgroundRefreshTimers.clear();
+  });
 
   function toNumber(value: unknown) {
     const n = Number(value);
     return Number.isFinite(n) ? n : 0;
+  }
+
+  function showToast(message: string, success: boolean) {
+    toastSuccess = success;
+    toastMessage = message;
+    toastOpen = false;
+    setTimeout(() => {
+      toastOpen = true;
+    }, 0);
+  }
+
+  function handleWorklogToast(event: CustomEvent<{ success: boolean; message: string }>) {
+    showToast(event.detail.message, event.detail.success);
   }
 
   function parseTimeToSeconds(timeStr?: string): number {
@@ -63,8 +96,7 @@
     return (seconds / 3600).toFixed(2);
   }
 
-  async function refreshAfterWorklogCreate(event?: CustomEvent<string>) {
-    const targetDay = String(event?.detail || day || '').trim();
+  async function refreshDayImmediately(targetDay: string) {
     if (!targetDay) return;
     if (onRefreshDay) {
       await onRefreshDay(targetDay);
@@ -82,6 +114,51 @@
     } finally {
       loading = false;
     }
+  }
+
+  function scheduleBackgroundRefresh(targetDay: string) {
+    const existingTimer = backgroundRefreshTimers.get(targetDay);
+    if (existingTimer) clearTimeout(existingTimer);
+
+    const timer = setTimeout(() => {
+      backgroundRefreshTimers.delete(targetDay);
+      if (onRefreshDay) {
+        void onRefreshDay(targetDay, true).catch(() => undefined);
+        return;
+      }
+      void refreshDayImmediately(targetDay).catch(() => undefined);
+    }, 2000);
+    backgroundRefreshTimers.set(targetDay, timer);
+  }
+
+  function applyOptimisticWorklog(detail: JiraWorklogCreatedEvent) {
+    const targetDay = String(detail.day || '').trim();
+    if (!targetDay) return;
+
+    const activity = detail.activity;
+    const injected = onInjectWorklog?.(targetDay, activity) ?? false;
+    if (!injected) {
+      const worklogId = String(activity.worklog_id || '').trim();
+      activities = [
+        activity,
+        ...activities.filter(
+          (item) => !worklogId || String(item.worklog_id || '').trim() !== worklogId
+        )
+      ];
+    }
+    scheduleBackgroundRefresh(targetDay);
+  }
+
+  async function refreshAfterWorklogCreate(event?: CustomEvent<JiraWorklogCreatedEvent>) {
+    const targetDay = String(event?.detail?.day || day || '').trim();
+    if (!targetDay) return;
+
+    if (event?.detail?.activity) {
+      applyOptimisticWorklog(event.detail);
+      return;
+    }
+
+    await refreshDayImmediately(targetDay);
   }
 
   function secondsToJiraTimeSpent(totalSeconds: number) {
@@ -146,15 +223,31 @@
     completing = true;
     try {
       const started = buildStartedForDay(day, am1Entry?.started);
+      let result: JiraCreatedWorklogResponse;
       if (am1Entry?.worklog_id) {
-        await jiraUpdateWorklog(COMPLETE_ISSUE_KEY, am1Entry.worklog_id, { timeSpent, started });
+        result = await jiraUpdateWorklog(COMPLETE_ISSUE_KEY, am1Entry.worklog_id, { timeSpent, started });
       } else {
-        await jiraAddWorklog(COMPLETE_ISSUE_KEY, { timeSpent, started });
+        result = await jiraAddWorklog(COMPLETE_ISSUE_KEY, { timeSpent, started });
       }
-      await refreshAfterWorklogCreate();
+      applyOptimisticWorklog({
+        day,
+        activity: {
+          ...am1Entry,
+          issue_key: COMPLETE_ISSUE_KEY,
+          issue_summary: am1Entry?.issue_summary || '',
+          worklog_id: String(result?.id || am1Entry?.worklog_id || `optimistic-${Date.now()}`),
+          author: result?.author?.displayName || am1Entry?.author,
+          started: result?.started || started,
+          time_spent: result?.timeSpent || timeSpent,
+          time_spent_seconds: result?.timeSpentSeconds ?? missingSeconds,
+          comment: am1Entry?.comment || ''
+        }
+      });
       completeActionSuccess = `Completamento registrato su ${COMPLETE_ISSUE_KEY}: ${timeSpent}.`;
+      showToast(completeActionSuccess, true);
     } catch (e: any) {
       completeActionError = String(e?.message || e || `Errore completamento su ${COMPLETE_ISSUE_KEY}`);
+      showToast(completeActionError, false);
     } finally {
       completing = false;
     }
@@ -199,6 +292,8 @@
   let rawCoveragePercent = 0;
   let worklogCreationBlocked = false;
   let worklogBlockReason = '';
+  let worklogInputBlocked = false;
+  let worklogInputBlockReason = '';
   let segments: Array<{
     key: string;
     worklogId: string;
@@ -223,6 +318,10 @@
   $: worklogBlockReason = worklogCreationBlocked
     ? `Copertura Jira gia al ${rawCoveragePercent.toFixed(1)}%: inserimento bloccato.`
     : '';
+  $: worklogInputBlocked = loading || worklogCreationBlocked;
+  $: worklogInputBlockReason = loading
+    ? 'Aggiornamento attivita Jira in corso. Attendi il completamento.'
+    : worklogBlockReason;
   $: completeButtonDisabled = !day || loading || expectedSeconds <= 0 || completing;
   $: segments = activities.map((item, idx) => {
     const seconds = activitySeconds(item);
@@ -257,9 +356,10 @@
     <div class="worklog-card-col">
       <JiraWorklogCard
         {day}
-        blocked={worklogCreationBlocked}
-        blockedReason={worklogBlockReason}
+        blocked={worklogInputBlocked}
+        blockedReason={worklogInputBlockReason}
         on:created={refreshAfterWorklogCreate}
+        on:notify={handleWorklogToast}
       />
     </div>
     {#if !worklogBlockReason}
@@ -336,6 +436,8 @@
     </div>
   {/if}
 </section>
+
+<ToastState bind:open={toastOpen} success={toastSuccess} message={toastMessage} />
 
 {#if deleteConfirmTarget}
   <div

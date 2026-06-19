@@ -72,6 +72,7 @@
   let generatePdf = useGeneratePDF({ date: '' });
   let generatingPdf = false;
   let totalMonthHours = 0;
+  let actualWorkedMonthHours = 0;
   let expectedMonthHours = 0;
   let noteDraft = '';
   let noteInitial = '';
@@ -399,8 +400,12 @@ export const loadData = async () => {
     });
   }
 
-  async function refreshJiraDay(day: string) {
-    await jiraTimesheetMonth.refreshDay(day, selectedJiraEmail);
+  async function refreshJiraDay(day: string, silent = false) {
+    await jiraTimesheetMonth.refreshDay(day, selectedJiraEmail, { silent });
+  }
+
+  function injectJiraWorklog(day: string, activity: JiraTimesheetActivity) {
+    return jiraTimesheetMonth.injectWorklogIntoCache(day, activity, selectedJiraEmail);
   }
 
   $: if (userId) {
@@ -489,6 +494,12 @@ export const loadData = async () => {
     if (entry.type === 3) return acc;
     return acc + (Number(entry.ore_tot) || 0);
   }, 0);
+  $: actualWorkedMonthHours = entries.reduce((acc, entry) => {
+    const { y, m } = splitYmd(entry.data);
+    if (y !== year || m !== month) return acc;
+    if (entry.type !== 1 && entry.type !== 3) return acc;
+    return acc + (Number(entry.ore_tot) || 0);
+  }, 0);
   $: activeOreSett = getActiveOreSett(($timeEntryUser.user as any)?.contratti);
   $: expectedMonthHours = calcExpectedMonthHours(year, month, activeOreSett);
 </script>
@@ -506,9 +517,10 @@ export const loadData = async () => {
   <div class="w-full max-w-7xl mx-auto px-3 sm:px-4 relative">
     <div class="pointer-events-auto absolute left-3 top-2 z-30 max-sm:hidden">
       <HippoSign
-        phrase1={`Ore svolte nel mese corrente: ${totalMonthHours} h`}
+        phrase1={`Ore compilate nel mese corrente: ${totalMonthHours} h`}
         phrase2={`Ore da dare questo mese: ${expectedMonthHours} h`}
         phrase3={`Ore rimanenti da fare: ${expectedMonthHours - totalMonthHours} h`}
+        phrase4={`Ore effettive lavorate: ${actualWorkedMonthHours} h`}
       />
     </div>
 
@@ -590,9 +602,10 @@ export const loadData = async () => {
     <HippoSign
       alwaysOpen={true}
       inlinePanel={true}
-      phrase1={`Ore svolte nel mese corrente: ${totalMonthHours} h`}
+      phrase1={`Ore compilate nel mese corrente: ${totalMonthHours} h`}
       phrase2={`Ore da dare questo mese: ${expectedMonthHours} h`}
       phrase3={`Ore rimanenti da fare: ${expectedMonthHours - totalMonthHours} h`}
+      phrase4={`Ore effettive lavorate: ${actualWorkedMonthHours} h`}
     />
   </div>
 
@@ -736,6 +749,7 @@ export const loadData = async () => {
         loading={$jiraTimesheetMonthLoading}
         error={$jiraTimesheetMonthError}
         onRefreshDay={refreshJiraDay}
+        onInjectWorklog={injectJiraWorklog}
       />
     {/if}
   {/key}

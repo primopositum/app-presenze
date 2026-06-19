@@ -1,6 +1,10 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy } from 'svelte';
-  import { jiraSearch, jiraAddWorklog } from '$lib/services/jira';
+  import {
+    jiraSearch,
+    jiraAddWorklog,
+    type JiraWorklogCreatedEvent
+  } from '$lib/services/jira';
 
   export let day: string | null = null;
   export let issueKey: string | null = null;
@@ -18,7 +22,10 @@
     };
   };
 
-  const dispatch = createEventDispatcher<{ created: string }>();
+  const dispatch = createEventDispatcher<{
+    created: JiraWorklogCreatedEvent;
+    notify: { success: boolean; message: string };
+  }>();
 
   let showWorklogComposer = false;
   let loadingLoggableIssues = false;
@@ -249,20 +256,45 @@
       const withProjectCode = computedProjectCode
         ? `[${computedProjectCode}]${commentText ? ` ${commentText}` : ''}`
         : commentText;
+      const requestedTimeSpent = worklogValue.trim();
+      const requestedStarted = buildStartedValue(activeDate, worklogTime || '09:00');
 
-      await jiraAddWorklog(selectedIssueKey, {
-        timeSpent: worklogValue.trim(),
-        started: buildStartedValue(activeDate, worklogTime || '09:00'),
+      const result = await jiraAddWorklog(selectedIssueKey, {
+        timeSpent: requestedTimeSpent,
+        started: requestedStarted,
         comment: withProjectCode
       });
 
+      dispatch('created', {
+        day: activeDate,
+        activity: {
+          issue_key: selectedIssueKey,
+          issue_summary: selectedIssue?.fields?.summary || issueSummary || '',
+          project_key: selectedIssue?.fields?.project?.key || computedProjectCode || undefined,
+          project_name: selectedIssue?.fields?.project?.name || undefined,
+          worklog_id: String(result?.id || `optimistic-${Date.now()}`),
+          author: result?.author?.displayName,
+          started: result?.started || requestedStarted,
+          time_spent: result?.timeSpent || requestedTimeSpent,
+          time_spent_seconds: result?.timeSpentSeconds,
+          comment: withProjectCode
+        }
+      });
+
       createWorklogSuccess = `Worklog creato su ${selectedIssueKey} (${activeDate} ${worklogTime || '09:00'}).`;
+      dispatch('notify', {
+        success: true,
+        message: `Worklog Jira inserito correttamente su ${selectedIssueKey}.`
+      });
       worklogValue = '';
       worklogComment = '';
-      dispatch('created', activeDate);
       closeComposer();
     } catch (e: any) {
       createWorklogError = String(e?.message || e || 'Errore creazione worklog');
+      dispatch('notify', {
+        success: false,
+        message: createWorklogError
+      });
     } finally {
       creatingWorklog = false;
     }
