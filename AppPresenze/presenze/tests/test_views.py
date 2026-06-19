@@ -1,11 +1,12 @@
 ﻿from decimal import Decimal
 from datetime import date
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from presenze.models import (
     Utente, TimeEntry, Saldo, Trasferta, Spesa,
+    UtilitiesBar,
 )
 from .helpers import (
     make_utente, make_saldo, make_contratto, make_timeentry,
@@ -43,6 +44,7 @@ URL_SPESA_MANAGE     = lambda s_id: f"{BASE}/spese/{s_id}/"
 
 URL_SCONTRINI_LIST   = lambda t_id: f"{BASE}/trasferte/{t_id}/scontrini/"
 URL_SCONTRINO_DELETE = lambda t_id, filename: f"{BASE}/trasferte/{t_id}/scontrini/{filename}/delete/"
+URL_UTILITIESBAR     = f"{BASE}/utilitiesbar/"
 
 
 class TestSaldoEndpoint(TestCase):
@@ -314,6 +316,51 @@ class TestUsersList(TestCase):
     def test_non_autenticato_restituisce_401(self):
         res = APIClient().get(f"{BASE}/users/")
         self.assertEqual(res.status_code, 401)
+
+
+class TestUtilitiesBarList(TestCase):
+
+    def setUp(self):
+        self.utente = make_utente()
+
+    @override_settings(ALLOWED_HOSTS=["testserver", "100.50.2.1"])
+    def test_link_localhost_usa_host_richiesta_e_mantiene_porta(self):
+        utilities_bar = UtilitiesBar.objects.create(
+            link="http://localhost:6000/dashboard?view=main",
+            colore="#ffffff",
+            icon=UtilitiesBar.IconName.CIRCLE,
+            posizione=1,
+        )
+
+        res = auth_client(self.utente).get(
+            URL_UTILITIESBAR,
+            HTTP_HOST="100.50.2.1:7999",
+        )
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(
+            res.data[0]["link"],
+            "http://100.50.2.1:6000/dashboard?view=main",
+        )
+        utilities_bar.refresh_from_db()
+        self.assertEqual(utilities_bar.link, "http://localhost:6000/dashboard?view=main")
+
+    @override_settings(ALLOWED_HOSTS=["testserver", "100.50.2.1"])
+    def test_link_non_localhost_non_viene_modificato(self):
+        UtilitiesBar.objects.create(
+            link="https://example.com/app",
+            colore="#ffffff",
+            icon=UtilitiesBar.IconName.CIRCLE,
+            posizione=1,
+        )
+
+        res = auth_client(self.utente).get(
+            URL_UTILITIESBAR,
+            HTTP_HOST="100.50.2.1:7999",
+        )
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data[0]["link"], "https://example.com/app")
     
 
 # ---------------------------------------------------------------------------

@@ -75,6 +75,10 @@
     coefficienteChanged?: boolean;
     tragittoSegments?: string[];
   };
+  type UploadCompleteEvent = {
+    success: boolean;
+    message: string;
+  };
 
   $: isAuthed = $auth.isAuthed;
   $: isSuperuser = !!$auth.user?.is_superuser;
@@ -138,6 +142,10 @@
     setTimeout(() => {
       toastOpen = true;
     }, 0);
+  }
+
+  function handleReceiptUploadComplete(event: CustomEvent<UploadCompleteEvent>) {
+    showToast(event.detail.message, event.detail.success);
   }
 
   function removeTragittoSegmentsOnce(source: string[], segments: string[]): string[] {
@@ -319,8 +327,11 @@
       const { deleteScontrino } = useScontrini({ tId: item.id });
       await deleteScontrino(filename);
       refreshKey += 1;
+      showToast('Giustificativo eliminato correttamente.');
     } catch (e: any) {
-      error = e?.message || 'Errore eliminazione scontrino';
+      const message = e?.message || 'Errore eliminazione giustificativo';
+      error = message;
+      showToast(message, false);
     }
   }
 
@@ -405,8 +416,11 @@
       }
       spese = [created.payload, ...spese];
       showSpesaForm = false;
+      showToast('Spesa aggiunta correttamente.');
     } catch (e: any) {
-      createSpesaError = e?.message || 'Errore creazione spesa';
+      const message = e?.message || 'Errore creazione spesa';
+      createSpesaError = message;
+      showToast(message, false);
     } finally {
       creatingSpesa = false;
     }
@@ -425,9 +439,16 @@
         }
       }
       spese = spese.filter((s) => s.id !== spesaToDelete.id);
+      showToast('Spesa eliminata correttamente.');
     } catch (e: any) {
-      error = e?.message || 'Errore aggiornamento tragitto trasferta dopo eliminazione spesa';
+      const message = e?.message || 'Errore aggiornamento tragitto trasferta dopo eliminazione spesa';
+      error = message;
+      showToast(message, false);
     }
+  }
+
+  function handleDeleteSpesaError(event: CustomEvent<string>) {
+    showToast(event.detail || 'Errore eliminazione spesa', false);
   }
 
   async function handleCalcolaDistanza() {
@@ -493,8 +514,11 @@
       const created = await addSpesa({ type: 2, importo: kmPercorsi, tragitto });
       await appendTragittoSegments(tragitto);
       spese = [created.payload, ...spese];
+      showToast('Spesa aggiunta correttamente.');
     } catch (e: any) {
-      kmError = e?.message || 'Errore creazione spesa chilometrica';
+      const message = e?.message || 'Errore creazione spesa chilometrica';
+      kmError = message;
+      showToast(message, false);
     } finally {
       creatingSpesa = false;
     }
@@ -589,21 +613,22 @@
     </div>
     
     <div
-      class="relative mt-[14px] mx-auto grid w-full max-w-[1200px] grid-cols-1 gap-[14px] rounded-2xl border border-[#4f4f50] bg-[#e7e3e3] p-2.5 shadow-[0_10px_25px_-5px_rgba(0,0,0,0.05),0_8px_10px_-6px_rgba(0,0,0,0.05)] md:grid-cols-[minmax(320px,1fr)_minmax(420px,1.1fr)]"
+      class="relative mt-[14px] mx-auto grid w-full max-w-[1200px] grid-cols-1 gap-[14px] rounded-2xl border border-[#4f4f50] bg-[#e7e3e3] p-2.5 shadow-[0_10px_25px_-5px_rgba(0,0,0,0.05),0_8px_10px_-6px_rgba(0,0,0,0.05)] md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]"
       class:locked-block={isLocked}
       class:validated-surface={isLocked}
     >
-      <div class="min-h-[320px] rounded-xl bg-white p-3" class:locked-block={isLocked}>
+      <div class="min-h-[320px] min-w-0 rounded-xl bg-white p-3" class:locked-block={isLocked}>
         <LoadReceipts
           userId={$timeEntryUser.user?.id ?? null}
           tId={item?.id ?? null}
           onSavedFileClick={handleScontrinoGet}
           onSavedFileDelete={handleScontrinoDelete}
           disableSavedFileDelete={isLocked}
+          on:uploadComplete={handleReceiptUploadComplete}
         />
       </div>
-      <div class="grid gap-2.5">
-        <div class="map-corner relative z-0 mx-auto h-[320px] w-full overflow-hidden rounded-xl bg-white shadow-[0_14px_36px_rgba(0,0,0,0.22)] max-sm:h-[220px]">
+      <div class="grid min-w-0 gap-2.5">
+        <div class="map-corner relative z-0 mx-auto h-[320px] w-full min-w-0 max-w-full overflow-hidden rounded-xl bg-white shadow-[0_14px_36px_rgba(0,0,0,0.22)] max-sm:h-[220px]">
           {#if hasMapsApiKey}
             <MapsPlugin bind:this={mapRef} />
           {:else}
@@ -827,7 +852,12 @@
       {:else}
         <div class="grid gap-2">
           {#each spese as s (s.id)}
-            <SpeseCard spesa={s} readonly={isLocked} on:delete={(e) => handleDeleteSpesa(e.detail)} />
+            <SpeseCard
+              spesa={s}
+              readonly={isLocked}
+              on:delete={(e) => handleDeleteSpesa(e.detail)}
+              on:deleteError={handleDeleteSpesaError}
+            />
           {/each}
         </div>
       {/if}
@@ -886,6 +916,9 @@
     display: block;
     width: 100% !important;
     height: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
   }
 
   .map-corner :global(.panel) {
@@ -894,7 +927,11 @@
 
   .map-corner :global(.map-wrap),
   .map-corner :global(.map) {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
     height: 100% !important;
+    overflow: hidden !important;
   }
 </style>
 

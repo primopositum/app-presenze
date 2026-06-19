@@ -8,8 +8,9 @@
     import LoaderOverlay from '$lib/components/loader/LoaderOverlay.svelte';
     import ErrorCard from '$lib/components/ErrorCard.svelte';
     import ToastState from '$lib/components/ToastState.svelte';
+    import GenericButtton from '$lib/components/GenericButtton.svelte';
     import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
-    import { faDownload } from '@fortawesome/free-solid-svg-icons';
+    import { faDownload, faRotate } from '@fortawesome/free-solid-svg-icons';
     import { auth } from '$lib/stores/auth';
     import { fetchUsers, type User } from '$lib/services/users';
     import { getAutomobili, updateAutomobileCoeff, type Automobile } from '$lib/services/automobili';
@@ -258,12 +259,17 @@
 
     <header class="topbar">
         <div class="actions">
-        <button class="ghost" type="button" on:click={() => (showForm = !showForm)}>
-            {showForm ? 'Creating..' : 'Nuova'}
-        </button>
-        <button class="refresh" type="button" on:click={loadTrasferte}>
-            Aggiorna
-        </button>
+        <GenericButtton
+          color="#f97316"
+          label={showForm ? 'Chiudi creazione trasferta' : 'Nuova trasferta'}
+          title={showForm ? 'Chiudi creazione trasferta' : 'Nuova trasferta'}
+          on:click={() => (showForm = !showForm)}
+        >
+          +
+        </GenericButtton>
+        <GenericButtton color="#374151" label="Aggiorna trasferte" title="Aggiorna trasferte" on:click={loadTrasferte}>
+          <FontAwesomeIcon icon={faRotate} class="text-base" />
+        </GenericButtton>
         </div>
     </header>
 
@@ -398,17 +404,6 @@
     .actions {
         display: flex;
         gap: 8px;
-    }
-
-    .ghost {
-        appearance: none;
-        border: 1px solid #374151;
-        background: transparent;
-        color: #000000;
-        border-radius: 10px;
-        padding: 8px 12px;
-        font-size: 0.9rem;
-        cursor: pointer;
     }
 
     .content {

@@ -278,7 +278,7 @@ class SaldoRecordSerializer(serializers.Serializer):
 
 
 class SaldoMiniSerializer(serializers.ModelSerializer):
-    utente_id = serializers.IntegerField(source="utente_id", read_only=True)
+    utente_id = serializers.IntegerField(read_only=True)
     saldo = SaldoRecordSerializer(many=True, required=False)
 
     class Meta:

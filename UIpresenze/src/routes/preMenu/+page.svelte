@@ -91,13 +91,15 @@
 {#if error}
   <p>Errore: {error}</p>
 {:else}
-  <div class="usersGrid">
+  <div class="profiles-grid grid gap-6 [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))]">
     {#if users.length > 0}
       {#each users as u (u.id)}
         {#if !u.is_superuser}
-          <button class="userButton" type="button" on:click={() => handlePickUser(u)}>
-            <ProfileCard user={u} />
-          </button>
+          <div class="w-full profile-grid-item">
+            <button class="userButton" type="button" on:click={() => handlePickUser(u)}>
+              <ProfileCard user={u} />
+            </button>
+          </div>
         {/if}
       {/each}
     {/if}
@@ -105,19 +107,30 @@
 {/if}
 
 <style>
-  .usersGrid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 16px;
-    align-items: start;
-    padding: 12px;
-    justify-items: center;
+  .profiles-grid {
+    align-items: stretch;
+    padding: 16px;
+  }
+
+  .profile-grid-item {
+    display: flex;
+    align-items: stretch;
   }
 
   .userButton {
     all: unset;
-    display: block;
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    width: 100%;
     cursor: pointer;
+  }
+
+  @media (max-width: 760px) {
+    .profiles-grid {
+      grid-template-columns: minmax(0, 1fr);
+      padding: 16px;
+    }
   }
 </style>
 

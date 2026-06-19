@@ -32,8 +32,49 @@ export type JiraTimesheetActivity = {
 
 export type JiraTimesheetResponse = {
   date: string;
+  utente_email?: string;
+  jira_email?: string;
   count: number;
   activities: JiraTimesheetActivity[];
+};
+
+export type JiraTimesheetDayUser = {
+  utente_email?: string;
+  jira_email?: string;
+  count: number;
+  activities: JiraTimesheetActivity[];
+};
+
+export type JiraTimesheetMonthDay = {
+  date: string;
+  count: number;
+  users: Record<string, JiraTimesheetDayUser>;
+};
+
+export type JiraTimesheetMonthUser = {
+  utente_email?: string;
+  jira_email?: string;
+  account_id?: string;
+  count: number;
+  days: Record<string, { date: string; count: number; activities: JiraTimesheetActivity[] }>;
+};
+
+export type JiraTimesheetMonthResponse = {
+  year: number;
+  month: number;
+  start_date: string;
+  end_date: string;
+  count: number;
+  users_count: number;
+  users: JiraTimesheetMonthUser[];
+  days: Record<string, JiraTimesheetMonthDay>;
+};
+
+export type JiraTimesheetParams = {
+  email?: string | null;
+  mail?: string | null;
+  utente_email?: string | null;
+  jira_email?: string | null;
 };
 
 export type JiraIssueTimeFilter = {
@@ -269,8 +310,36 @@ export function jiraSearch(params: JiraSearchParams) {
   });
 }
 
-export function jiraTimesheet(date: string) {
+export function jiraTimesheet(date: string, params: JiraTimesheetParams = {}) {
+  const targetEmail =
+    String(params.email || params.utente_email || params.jira_email || params.mail || '').trim();
+
+  if (targetEmail) {
+    return requestJson('/jira/timesheet/', 'POST', {
+      date,
+      email: targetEmail,
+    }) as Promise<JiraTimesheetResponse>;
+  }
+
   return request('/jira/timesheet/', { date }) as Promise<JiraTimesheetResponse>;
+}
+
+export function jiraTimesheetMonth(year: number, month: number, params: JiraTimesheetParams = {}) {
+  const targetEmail =
+    String(params.email || params.utente_email || params.jira_email || params.mail || '').trim();
+
+  if (targetEmail) {
+    return requestJson('/jira/timesheet/month/', 'POST', {
+      year,
+      month,
+      email: targetEmail,
+    }) as Promise<JiraTimesheetMonthResponse>;
+  }
+
+  return request('/jira/timesheet/month/', {
+    year: String(year),
+    month: String(month),
+  }) as Promise<JiraTimesheetMonthResponse>;
 }
 
 export function jiraWorklogsByYear(year: string | number) {

@@ -6,7 +6,7 @@
 @theme {
   /* Palette principale */
   --color-primary: #0ea5e9;
-  --color-secondary: #9333ea;
+  --color-secondary: #f97316;
   --color-accent: #f59e0b;
 
   /* Superfici e testo */
@@ -36,6 +36,12 @@
   --color-auto-accent-200: #fed7aa;
   --color-auto-accent-500: #f97316;
   --color-auto-accent-700: #121111;
+  --color-auto-field-bg: #e0f2fe;
+  --color-auto-field-border: #bae6fd;
+  --color-auto-edit-field-bg: #fff7ed;
+  --color-auto-edit-field-border: #fed7aa;
+  --color-auto-edit-field-focus: rgba(249, 115, 22, 0.24);
+  --color-auto-edit-text: #7c2d12;
 
   --color-auto-danger-50: #fef2f2;
   --color-auto-danger-200: #fecaca;

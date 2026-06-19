@@ -4,6 +4,9 @@
   import { useUpdateContrattoOre } from '$lib/hooks/useContratto';
   import LoaderOverlay from '$lib/components/loader/LoaderOverlay.svelte';
   import ButtonGradient from '$lib/components/ButtonGradient.svelte';
+  import ErrorCard from '$lib/components/ErrorCard.svelte';
+
+  export let onSaved: ((message: string) => void) | null = null;
 
   let superadmin = false;
   let saving = false;
@@ -53,6 +56,7 @@
     try {
       const ore_sett = [preSet.lun, preSet.mar, preSet.mer, preSet.gio, preSet.ven];
       await updateContratto(ore_sett);
+      onSaved?.('Contratto utente aggiornato correttamente.');
     } catch (e: any) {
       error = e?.message || 'Errore aggiornamento contratto';
     } finally {
@@ -140,7 +144,7 @@
             disabled={saving || !profileUser?.id}
           />
           {#if error}
-            <div class="text-red-600 text-sm">{error}</div>
+            <ErrorCard message={error} onClose={() => (error = null)} />
           {/if}
         </div>
       {/if}

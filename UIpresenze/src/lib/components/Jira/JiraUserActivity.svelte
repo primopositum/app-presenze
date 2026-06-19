@@ -7,11 +7,12 @@
 
   export let day: string | null = null;
   export let ore: number | string | null = null;
+  export let userEmail: string | null = null;
+  export let activities: JiraTimesheetActivity[] = [];
+  export let loading = false;
+  export let error = '';
+  export let onRefreshDay: ((day: string) => Promise<void>) | null = null;
 
-  let loading = false;
-  let error = '';
-  let activities: JiraTimesheetActivity[] = [];
-  let lastLoadedDay = '';
   let deletingWorklogId = '';
   let worklogActionError = '';
   let completeActionError = '';
@@ -62,34 +63,25 @@
     return (seconds / 3600).toFixed(2);
   }
 
-  async function load() {
-    if (!day || day === lastLoadedDay) return;
+  async function refreshAfterWorklogCreate(event?: CustomEvent<string>) {
+    const targetDay = String(event?.detail || day || '').trim();
+    if (!targetDay) return;
+    if (onRefreshDay) {
+      await onRefreshDay(targetDay);
+      return;
+    }
+
+    const email = String(userEmail || '').trim();
     loading = true;
     error = '';
     try {
-      const data = await jiraTimesheet(day);
+      const data = await jiraTimesheet(targetDay, email ? { email } : {});
       activities = data.activities || [];
-      lastLoadedDay = day;
     } catch (e: any) {
       error = String(e?.message || e || 'Errore caricamento attivita');
     } finally {
       loading = false;
     }
-  }
-
-  $: if (day && day !== lastLoadedDay) {
-    load();
-  }
-
-  $: if (!day) {
-    activities = [];
-    lastLoadedDay = '';
-    error = '';
-  }
-
-  async function refreshAfterWorklogCreate() {
-    lastLoadedDay = '';
-    await load();
   }
 
   function secondsToJiraTimeSpent(totalSeconds: number) {

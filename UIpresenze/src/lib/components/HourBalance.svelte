@@ -7,6 +7,7 @@
 
   type CardPosition = 'is-front' | 'is-left' | 'is-right';
 
+  let open = false;
   let cardPositions: CardPosition[] = ['is-front', 'is-right', 'is-left'];
 
   function toFiniteNumber(value: unknown) {
@@ -79,25 +80,31 @@
 </script>
 
 <section class="balance-scene" aria-label="Saldo ore">
-  <div class="wrap-card">
-    {#each cards as card, index}
-      <button
-        type="button"
-        class={`balance-card ${card.tone} ${cardPositions[index]}`}
-        aria-label={`${card.title}: ${card.value} ore`}
-        on:click={() => handleCardClick(index)}
-      >
-        <span class="card-value">{card.value}h</span>
-        <span class="card-title">{card.title}</span>
-        <span class="card-desc">{card.description}</span>
-      </button>
-    {/each}
-  </div>
+  <button type="button" class="balance-trigger" on:click={() => (open = !open)}>
+    {open ? 'x' : `${latestLabel}h`}
+  </button>
 
-  <div class="lines" aria-hidden="true">
-    <div class="line"></div>
-    <div class="line"></div>
-  </div>
+  {#if open}
+    <div class="wrap-card">
+      {#each cards as card, index}
+        <button
+          type="button"
+          class={`balance-card ${card.tone} ${cardPositions[index]}`}
+          aria-label={`${card.title}: ${card.value} ore`}
+          on:click={() => handleCardClick(index)}
+        >
+          <span class="card-value">{card.value}h</span>
+          <span class="card-title">{card.title}</span>
+          <span class="card-desc">{card.description}</span>
+        </button>
+      {/each}
+    </div>
+
+    <div class="lines" aria-hidden="true">
+      <div class="line"></div>
+      <div class="line"></div>
+    </div>
+  {/if}
 </section>
 
 <style>
@@ -111,6 +118,24 @@
     align-items: center;
     gap: 10px;
     user-select: none;
+  }
+
+  .balance-trigger {
+    width: 64px;
+    height: 64px;
+    border: 0;
+    border-radius: 50%;
+    background: radial-gradient(circle, #8ef9fc 0%, #20a4f6 44%, #0851c0 100%);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.22);
+  }
+
+  .balance-trigger:focus-visible {
+    outline: 3px solid rgba(15, 23, 42, 0.35);
+    outline-offset: 3px;
   }
 
   .wrap-card {

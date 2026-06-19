@@ -13,7 +13,7 @@ from django.utils import timezone as django_timezone
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from ..models import JiraCredentials, JiraGlobals, TimeEntry
+from ..models import JiraCredentials, JiraGlobals, TimeEntry, Utente
 
 
 ##########################################################################################################################################################################################################################################
@@ -922,6 +922,106 @@ def _sum_jira_logged_seconds_for_user_day(domain: str, headers: dict, account_id
     return total_logged_seconds
 
 
+def _jira_timesheet_activity(issue, worklog):
+    fields = issue.get("fields", {}) or {}
+    project = fields.get("project", {}) or {}
+    author = worklog.get("author", {}) or {}
+    return {
+        "issue_key": issue.get("key"),
+        "issue_summary": fields.get("summary", ""),
+        "project_key": project.get("key"),
+        "project_name": project.get("name"),
+        "worklog_id": worklog.get("id"),
+        "author": author.get("displayName"),
+        "started": str(worklog.get("started", "")),
+        "time_spent": worklog.get("timeSpent"),
+        "time_spent_seconds": worklog.get("timeSpentSeconds"),
+        "comment": _extract_comment_text(worklog.get("comment")).strip(),
+    }
+
+
+def _fetch_jira_timesheet_issues(domain: str, headers: dict, account_id: str, start_date: date, end_date: date):
+    search_url = f"https://{domain}/rest/api/3/search/jql"
+    jql = (
+        f'worklogAuthor = "{account_id}"'
+        f' AND worklogDate >= "{start_date.isoformat()}"'
+        f' AND worklogDate <= "{end_date.isoformat()}"'
+    )
+    start_at = 0
+    issues = []
+
+    while True:
+        params = {
+            "jql": jql,
+            "fields": ["summary", "project"],
+            "startAt": start_at,
+            "maxResults": 100,
+        }
+        search_response = requests.get(search_url, params=params, headers=headers, timeout=10)
+        search_response.raise_for_status()
+        payload = search_response.json() or {}
+        batch = payload.get("issues", [])
+        if isinstance(batch, list):
+            issues.extend(batch)
+
+        start_at += len(batch) if isinstance(batch, list) else 0
+        total = int(payload.get("total", 0))
+        if start_at >= total or not batch:
+            break
+
+    return issues
+
+
+def _jira_timesheet_payload_for_user(target_user, start_date: date, end_date: date):
+    creds, error_response = _jira_credentials_for_user(target_user)
+    if error_response:
+        return None, error_response
+    domain, email, api_token = creds
+    headers = _jira_headers(email, api_token)
+
+    current_account_id = _jira_current_account_id(domain, headers)
+    if not current_account_id:
+        return None, Response({"error": "Impossibile identificare l'account Jira corrente"}, status=502)
+
+    issues = _fetch_jira_timesheet_issues(domain, headers, current_account_id, start_date, end_date)
+    days = {}
+    activities_count = 0
+
+    for issue in issues:
+        key = issue.get("key")
+        if not key:
+            continue
+
+        worklogs = _fetch_issue_worklogs(domain, key, headers)
+        for worklog in worklogs:
+            author = worklog.get("author", {}) or {}
+            author_account_id = str(author.get("accountId") or "").strip()
+            if author_account_id != current_account_id:
+                continue
+
+            started = str(worklog.get("started", ""))
+            local_day = _local_date_from_started(started)
+            if not local_day or local_day < start_date or local_day > end_date:
+                continue
+
+            day_key = local_day.isoformat()
+            days.setdefault(day_key, {"date": day_key, "count": 0, "activities": []})
+            days[day_key]["activities"].append(_jira_timesheet_activity(issue, worklog))
+            days[day_key]["count"] += 1
+            activities_count += 1
+
+    for day_payload in days.values():
+        day_payload["activities"].sort(key=lambda item: item.get("started") or "", reverse=True)
+
+    return {
+        "utente_email": target_user.email,
+        "jira_email": email,
+        "account_id": current_account_id,
+        "count": activities_count,
+        "days": dict(sorted(days.items())),
+    }, None
+
+
 def _jira_user_monthly_worklog_payload(user, target_year: int, account_id: str = "", target_month: int | None = None):
     if target_month is not None and (target_month < 1 or target_month > 12):
         raise ValueError("Formato month non valido (usa 1-12)")
@@ -1215,13 +1315,53 @@ class JiraWorklogsTodayView(APIView):
     Restituisce le attivita Jira (worklog) registrate in una specifica data.
 
     Endpoint:
-        GET /api/jira/worklogs/today/?date=YYYY-MM-DD
+        GET  /api/jira/timesheet/?date=YYYY-MM-DD
+        POST /api/jira/timesheet/ { "date": "YYYY-MM-DD", "email": "utente@example.com" }
+
+    I superuser possono passare nel body/query una mail target con una delle chiavi:
+    email, mail, utente_email, jira_email.
     """
 
     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        date_raw = (request.GET.get("date") or "").strip()
+    @staticmethod
+    def _request_value(request, *keys):
+        for key in keys:
+            value = request.data.get(key)
+            if value not in (None, ""):
+                return str(value).strip()
+        for key in keys:
+            value = request.query_params.get(key)
+            if value not in (None, ""):
+                return str(value).strip()
+        return ""
+
+    def _target_user_from_request(self, request):
+        target_email = self._request_value(request, "email", "mail", "utente_email", "jira_email")
+        if not target_email:
+            return request.user, None
+
+        if not request.user.is_superuser:
+            if target_email.casefold() == str(request.user.email or "").strip().casefold():
+                return request.user, None
+            return None, Response({"error": "Solo un superuser puo richiedere i worklog di un altro utente"}, status=403)
+
+        target_user = Utente.objects.filter(email__iexact=target_email).first()
+        if target_user:
+            return target_user, None
+
+        jira_creds = (
+            JiraCredentials.objects.select_related("utente")
+            .filter(jira_email__iexact=target_email)
+            .first()
+        )
+        if jira_creds:
+            return jira_creds.utente, None
+
+        return None, Response({"error": f"Utente/Jira credentials non trovati per la mail {target_email}"}, status=404)
+
+    def _handle(self, request):
+        date_raw = self._request_value(request, "date")
         if not date_raw:
             return Response({"error": "Parametro date obbligatorio (YYYY-MM-DD)"}, status=400)
 
@@ -1230,81 +1370,21 @@ class JiraWorklogsTodayView(APIView):
         except ValueError:
             return Response({"error": "Formato date non valido (usa YYYY-MM-DD)"}, status=400)
 
-        creds, error_response = _jira_credentials_for_user(request.user)
-        if error_response:
-            return error_response
-        domain, email, api_token = creds
-        headers = _jira_headers(email, api_token)
-
-        search_url = f"https://{domain}/rest/api/3/search/jql"
-        jql = f'worklogDate = "{target_date.isoformat()}"'
-        start_at = 0
-        issues = []
+        target_user, target_error = self._target_user_from_request(request)
+        if target_error:
+            return target_error
 
         try:
-            current_account_id = _jira_current_account_id(domain, headers)
-            if not current_account_id:
-                return Response({"error": "Impossibile identificare l'account Jira corrente"}, status=502)
-
-            while True:
-                params = {
-                    "jql": jql,
-                    "fields": ["summary", "project"],
-                    "startAt": start_at,
-                    "maxResults": 100,
-                }
-                search_response = requests.get(search_url, params=params, headers=headers, timeout=10)
-                search_response.raise_for_status()
-                payload = search_response.json() or {}
-                batch = payload.get("issues", [])
-                issues.extend(batch)
-
-                start_at += len(batch)
-                total = int(payload.get("total", 0))
-                if start_at >= total or not batch:
-                    break
-
-            activities = []
-            target_prefix = target_date.isoformat()
-
-            for issue in issues:
-                key = issue.get("key")
-                if not key:
-                    continue
-                fields = issue.get("fields", {}) or {}
-                summary = fields.get("summary", "")
-                project = fields.get("project", {}) or {}
-
-                worklogs = _fetch_issue_worklogs(domain, key, headers)
-                for worklog in worklogs:
-                    started = str(worklog.get("started", ""))
-                    if not started.startswith(target_prefix):
-                        continue
-
-                    author = worklog.get("author", {}) or {}
-                    author_account_id = str(author.get("accountId") or "").strip()
-                    if author_account_id != current_account_id:
-                        continue
-                    comment = _extract_comment_text(worklog.get("comment")).strip()
-                    activities.append(
-                        {
-                            "issue_key": key,
-                            "issue_summary": summary,
-                            "project_key": project.get("key"),
-                            "project_name": project.get("name"),
-                            "worklog_id": worklog.get("id"),
-                            "author": author.get("displayName"),
-                            "started": started,
-                            "time_spent": worklog.get("timeSpent"),
-                            "time_spent_seconds": worklog.get("timeSpentSeconds"),
-                            "comment": comment,
-                        }
-                    )
-
-            activities.sort(key=lambda item: item.get("started") or "", reverse=True)
+            payload, error_response = _jira_timesheet_payload_for_user(target_user, target_date, target_date)
+            if error_response:
+                return error_response
+            day_payload = (payload.get("days") or {}).get(target_date.isoformat(), {})
+            activities = day_payload.get("activities", [])
             return Response(
                 {
                     "date": target_date.isoformat(),
+                    "utente_email": target_user.email,
+                    "jira_email": payload.get("jira_email"),
                     "count": len(activities),
                     "activities": activities,
                 }
@@ -1319,6 +1399,115 @@ class JiraWorklogsTodayView(APIView):
             return Response(detail, status=e.response.status_code)
         except requests.exceptions.RequestException as e:
             return Response({"error": str(e)}, status=502)
+
+    def get(self, request):
+        return self._handle(request)
+
+    def post(self, request):
+        return self._handle(request)
+
+
+class JiraWorklogsMonthView(APIView):
+    """
+    Restituisce i worklog Jira di un mese, raggruppati per giorno e utente.
+
+    Endpoint:
+        GET  /api/jira/timesheet/month/?year=YYYY&month=MM
+        GET  /api/jira/timesheet/month/?date=YYYY-MM-DD
+        POST /api/jira/timesheet/month/ { "year": YYYY, "month": MM, "email": "utente@example.com" }
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @staticmethod
+    def _request_value(request, *keys):
+        return JiraWorklogsTodayView._request_value(request, *keys)
+
+    def _target_user_from_request(self, request):
+        return JiraWorklogsTodayView()._target_user_from_request(request)
+
+    @staticmethod
+    def _parse_month(request):
+        date_raw = JiraWorklogsTodayView._request_value(request, "date")
+        if date_raw:
+            try:
+                parsed_date = date.fromisoformat(date_raw)
+            except ValueError:
+                return None, None, Response({"error": "Formato date non valido (usa YYYY-MM-DD)"}, status=400)
+            return parsed_date.year, parsed_date.month, None
+
+        year_raw = JiraWorklogsTodayView._request_value(request, "year")
+        month_raw = JiraWorklogsTodayView._request_value(request, "month")
+        if not year_raw or not month_raw:
+            return None, None, Response({"error": "Parametri obbligatori: year e month oppure date"}, status=400)
+
+        try:
+            target_year = int(year_raw)
+            target_month = int(month_raw)
+            if target_year < 1900 or target_year > 3000 or target_month < 1 or target_month > 12:
+                raise ValueError
+        except ValueError:
+            return None, None, Response({"error": "Formato year/month non valido"}, status=400)
+
+        return target_year, target_month, None
+
+    def _handle(self, request):
+        target_year, target_month, parse_error = self._parse_month(request)
+        if parse_error:
+            return parse_error
+
+        target_user, target_error = self._target_user_from_request(request)
+        if target_error:
+            return target_error
+
+        month_start = date(target_year, target_month, 1)
+        month_end = date(target_year, target_month, calendar.monthrange(target_year, target_month)[1])
+
+        try:
+            user_payload, error_response = _jira_timesheet_payload_for_user(target_user, month_start, month_end)
+            if error_response:
+                return error_response
+
+            users = [user_payload]
+            days = {}
+            for payload in users:
+                utente_email = payload.get("utente_email")
+                jira_email = payload.get("jira_email")
+                for day_key, day_payload in (payload.get("days") or {}).items():
+                    day_row = days.setdefault(day_key, {"date": day_key, "count": 0, "users": {}})
+                    activities = day_payload.get("activities") or []
+                    day_row["users"][utente_email] = {
+                        "utente_email": utente_email,
+                        "jira_email": jira_email,
+                        "count": len(activities),
+                        "activities": activities,
+                    }
+                    day_row["count"] += len(activities)
+
+            return Response(
+                {
+                    "year": target_year,
+                    "month": target_month,
+                    "start_date": month_start.isoformat(),
+                    "end_date": month_end.isoformat(),
+                    "count": sum(user.get("count", 0) for user in users),
+                    "users_count": len(users),
+                    "users": users,
+                    "days": dict(sorted(days.items())),
+                }
+            )
+        except requests.exceptions.Timeout:
+            return Response({"error": "Timeout connessione a Jira"}, status=504)
+        except requests.exceptions.HTTPError as exc:
+            return _jira_error_response(exc)
+        except requests.exceptions.RequestException as exc:
+            return Response({"error": str(exc)}, status=502)
+
+    def get(self, request):
+        return self._handle(request)
+
+    def post(self, request):
+        return self._handle(request)
 
 
 class JiraUserMonthlyWorklogView(APIView):

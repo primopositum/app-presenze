@@ -12,6 +12,7 @@
     userId: number;
   }
   import HippoSign from '$lib/components/HippoSign.svelte';
+  import HourBalance from '$lib/components/HourBalance.svelte';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import TimeEntriesCalendar from '$lib/components/TimeEntriesCalendar.svelte';
@@ -38,17 +39,30 @@
   import { useOneUserApi } from '$lib/hooks/useUserApi.js';
   import { useSaldoApi } from '$lib/hooks/useSaldoApi';
   import type { SaldoRecord } from '$lib/services/saldo';
+  import {
+    getJiraActivitiesForDay,
+    useJiraTimesheetMonthCache
+  } from '$lib/hooks/useJiraTimesheetMonth';
+  import type { JiraTimesheetActivity } from '$lib/services/jira';
   let loading = false;
   let error: string | null = null;
 
+  function formatLocalYmd(date: Date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
   const today = new Date(); 
+  const todayYmd = formatLocalYmd(today);
   let year = today.getFullYear();
   let month = today.getMonth() + 1; // 1-12 
   let userId: number | null = null;
   let user: User | null = null;
   let entries: TimeEntry[] = [];
   let dayHours: DayHours[] = [];
-  let selectedDate: string | null = null;
+  let selectedDate: string | null = todayYmd;
   let selectedEntries: TimeEntry[] = [];
   let selectedDayWorkedHours = 0;
   let selectedDayForbidType3 = false;
@@ -72,6 +86,14 @@
   let saldoVisuale = 0;
   let saldoValidatoVisuale = 0;
   let saldoRecords: SaldoRecord[] = [];
+  let hourBalancePeriodo = '';
+  let selectedJiraEmail: string | null = null;
+  let selectedJiraActivities: JiraTimesheetActivity[] = [];
+  let jiraMonthLoadKey = '';
+  const jiraTimesheetMonth = useJiraTimesheetMonthCache();
+  const jiraTimesheetMonthData = jiraTimesheetMonth.data;
+  const jiraTimesheetMonthLoading = jiraTimesheetMonth.loading;
+  const jiraTimesheetMonthError = jiraTimesheetMonth.error;
 
   function splitYmd(dateStr: string) {
     const [y, m, d] = dateStr.split('-').map(Number);
@@ -366,12 +388,49 @@ export const loadData = async () => {
     noteError = null;
   }
 
+  async function loadJiraMonth(force = false) {
+    if (!userId || !$jiraControl.loaded || !$jiraControl.enabled) return;
+    if ($auth.user?.is_superuser && !selectedJiraEmail) return;
+    await jiraTimesheetMonth.loadMonth({
+      year,
+      month,
+      email: selectedJiraEmail,
+      force
+    });
+  }
+
+  async function refreshJiraDay(day: string) {
+    await jiraTimesheetMonth.refreshDay(day, selectedJiraEmail);
+  }
+
   $: if (userId) {
     $timeEntryReload;
     year;
     month;
     loadData();
   }
+
+  $: selectedJiraEmail = $auth.user?.is_superuser ? (user?.email ?? null) : null;
+
+  $: {
+    const nextJiraMonthLoadKey = `${year}-${month}|${selectedJiraEmail ?? ''}|${userId ?? ''}|${$jiraControl.loaded ? 1 : 0}|${$jiraControl.enabled ? 1 : 0}`;
+    if (
+      userId &&
+      $jiraControl.loaded &&
+      $jiraControl.enabled &&
+      (!$auth.user?.is_superuser || selectedJiraEmail) &&
+      nextJiraMonthLoadKey !== jiraMonthLoadKey
+    ) {
+      jiraMonthLoadKey = nextJiraMonthLoadKey;
+      void loadJiraMonth(false);
+    }
+  }
+
+  $: selectedJiraActivities = getJiraActivitiesForDay(
+    $jiraTimesheetMonthData,
+    selectedDate,
+    selectedJiraEmail
+  );
 
   $: if (selectedDate) {
     selectedEntries = entries.filter((entry) => entry.data === selectedDate);
@@ -411,6 +470,7 @@ export const loadData = async () => {
   }
 
   let saldoPeriodo = 0;
+  $: hourBalancePeriodo = `${String(month).padStart(2, '0')}-${year}`;
   $: saldoPeriodo = entries.reduce((acc, entry) => {
     const { y, m } = splitYmd(entry.data);
     if (y !== year || m !== month) return acc;
@@ -435,6 +495,13 @@ export const loadData = async () => {
 
 
 <TimeEntryFormProvider>
+  <div class="hidden sm:block">
+    <HourBalance
+      saldoRecords={saldoRecords}
+      periodo={hourBalancePeriodo}
+      saldoMese={saldoPeriodo}
+    />
+  </div>
   {#key $timeEntryReload}
   <div class="w-full max-w-7xl mx-auto px-3 sm:px-4 relative">
     <div class="pointer-events-auto absolute left-3 top-2 z-30 max-sm:hidden">
@@ -446,13 +513,20 @@ export const loadData = async () => {
     </div>
 
   <div class="w-full flex justify-center my-2">
-    <div class="flex w-full max-w-4xl flex-wrap items-center justify-center gap-3 px-2 max-sm:flex-nowrap max-sm:justify-start max-sm:overflow-x-auto">
-      {#if $auth.user?.is_superuser}
-        <div class="flex items-center justify-center gap-2">
-          <div class="text-sm font-infinity tracking-[3px]">
+    <div class="flex w-full max-w-4xl flex-col items-center justify-center gap-2 px-2">
+      <div class="flex min-w-0 items-center justify-center gap-3">
+        {#if $auth.user?.is_superuser}
+          <span class="whitespace-nowrap text-sm font-infinity tracking-[3px]">
             {user?.nome} {user?.cognome}
-          </div>
+          </span>
+        {/if}
+        <h1 class="m-0 whitespace-nowrap text-center font-infinity tracking-[3px] text-sm font-bold text-slate-800">
+          {selectedDate ?? todayYmd}
+        </h1>
+      </div>
 
+      <div class="flex items-center justify-center gap-3">
+        {#if $auth.user?.is_superuser}
           <button
             type="button"
             on:click={() => goto('/preMenu', { state: { route: 'presences' } })}
@@ -464,44 +538,44 @@ export const loadData = async () => {
               style={`color: ${palette.secondary.main};`}
             />
           </button>
-        </div>
-      {/if}
+        {/if}
 
-      {#if !loading}
-        <button type="button" on:click={loadData} disabled={loading} aria-label="Ricarica dati">
+        {#if !loading}
+          <button type="button" on:click={loadData} disabled={loading} aria-label="Ricarica dati">
+            <FontAwesomeIcon
+              icon={faRotate}
+              class="text-[150%]"
+              style={`color: ${palette.secondary.main};`}
+            />
+          </button>
+        {/if}
+
+        <button
+          type="button"
+          on:click={openValidateConfirm}
+          disabled={loading || updatingValidation || !entries.length}
+          aria-label="Valida mese corrente"
+        >
           <FontAwesomeIcon
-            icon={faRotate}
+            icon={faCheck}
             class="text-[150%]"
             style={`color: ${palette.secondary.main};`}
           />
         </button>
-      {/if}
 
-      <button
-        type="button"
-        on:click={openValidateConfirm}
-        disabled={loading || updatingValidation || !entries.length}
-        aria-label="Valida mese corrente"
-      >
-        <FontAwesomeIcon
-          icon={faCheck}
-          class="text-[150%]"
-          style={`color: ${palette.secondary.main};`}
-        />
-      </button>
-
-      <button
-        type="button"
-        on:click={handleGeneratePdf}
-        disabled={loading || generatingPdf || !userId}
-        aria-label="Scarica PDF mese corrente"
-      >
-        <FontAwesomeIcon
-          icon={faFilePdf}
-          class="text-[150%]"
-          style={`color: ${palette.secondary.main};`}
-        />
-      </button>
+        <button
+          type="button"
+          on:click={handleGeneratePdf}
+          disabled={loading || generatingPdf || !userId}
+          aria-label="Scarica PDF mese corrente"
+        >
+          <FontAwesomeIcon
+            icon={faFilePdf}
+            class="text-[150%]"
+            style={`color: ${palette.secondary.main};`}
+          />
+        </button>
+      </div>
 
       <LoaderOverlay show={loading} />
     </div>
@@ -654,7 +728,15 @@ export const loadData = async () => {
       <div><PreSetWeek/></div>
     {/if}
     {#if $jiraControl.loaded && $jiraControl.enabled}
-      <Useractivity day={selectedDate} ore={selectedDayWorkedHours} />
+      <Useractivity
+        day={selectedDate}
+        ore={selectedDayWorkedHours}
+        userEmail={selectedJiraEmail}
+        activities={selectedJiraActivities}
+        loading={$jiraTimesheetMonthLoading}
+        error={$jiraTimesheetMonthError}
+        onRefreshDay={refreshJiraDay}
+      />
     {/if}
   {/key}
 </TimeEntryFormProvider>

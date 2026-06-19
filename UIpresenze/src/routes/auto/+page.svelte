@@ -3,6 +3,11 @@
   import { auth } from '$lib/stores/auth';
   import LoaderOverlay from '$lib/components/loader/LoaderOverlay.svelte';
   import AutoCard from '$lib/components/AutoCard.svelte';
+  import ErrorCard from '$lib/components/ErrorCard.svelte';
+  import GenericButtton from '$lib/components/GenericButtton.svelte';
+  import ToastState from '$lib/components/ToastState.svelte';
+  import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
+  import { faPlus, faRotate } from '@fortawesome/free-solid-svg-icons';
   import {
     useAutomobiliList,
     useCreateAutomobile,
@@ -27,6 +32,11 @@
   let bootstrapped = false;
   let isAuthed = false;
   let favoriteAutoId = '';
+  let editingId = '';
+  let savingEditId = '';
+  let toastOpen = false;
+  let toastSuccess = true;
+  let toastMessage = '';
 
   let marca = '';
   let alimentazione = '';
@@ -49,6 +59,7 @@
   }
 
   function openCreate() {
+    editingId = '';
     resetForm();
     showForm = true;
   }
@@ -58,19 +69,43 @@
     showForm = false;
   }
 
-  function openEdit(automobile: Automobile) {
-    selectedId = getAutoId(automobile);
-    if (selectedId === null) return;
-    isEdit = true;
-    marca = automobile.marca || '';
-    alimentazione = automobile.alimentazione || '';
-    descrizione = automobile.descrizione || '';
-    coefficiente = String(automobile.coefficiente ?? '');
-    isActive = !!automobile.is_active;
-    showForm = true;
+  function getErrorMessage(value: unknown, fallback: string) {
+    if (value instanceof Error) return value.message || fallback;
+    if (typeof value === 'string') return value || fallback;
+    const message = (value as any)?.message;
+    return typeof message === 'string' && message ? message : fallback;
   }
 
-  async function loadAutomobili() {
+  function showToast(message: string, success = true) {
+    toastSuccess = success;
+    toastMessage = message;
+    toastOpen = false;
+    setTimeout(() => {
+      toastOpen = true;
+    }, 0);
+  }
+
+  function showError(value: unknown, fallback: string) {
+    const message = getErrorMessage(value, fallback);
+    error = message;
+    showToast(message, false);
+  }
+
+  function openEdit(automobile: Automobile) {
+    if (saving || savingEditId) return;
+    const id = getAutoId(automobile);
+    if (id === null) return;
+    showForm = false;
+    resetForm();
+    editingId = String(id);
+  }
+
+  function cancelEdit() {
+    if (savingEditId) return;
+    editingId = '';
+  }
+
+  async function loadAutomobili(options: { notify?: boolean } = {}) {
     loading = true;
     error = null;
     try {
@@ -78,8 +113,11 @@
       const res = await list();
       favoriteAutoId = getFavoriteAutomobileId();
       items = sortFavoriteAutomobileFirst(res.payload, favoriteAutoId, getAutoId);
+      if (options.notify) {
+        showToast('Automobili aggiornate.');
+      }
     } catch (e: any) {
-      error = e?.message || 'Errore caricamento automobili';
+      showError(e, 'Errore caricamento automobili');
     } finally {
       loading = false;
     }
@@ -87,7 +125,7 @@
 
   async function handleDelete(automobile: Automobile) {
     const id = getAutoId(automobile);
-    if (id === null || loading) return;
+    if (id === null || loading || savingEditId) return;
     try {
       loading = true;
       const remove = useDeleteAutomobile({ pk: id });
@@ -97,18 +135,48 @@
         setFavoriteAutomobileId(null);
       }
       await loadAutomobili();
+      showToast('Automobile eliminata o archiviata correttamente.');
     } catch (e: any) {
-      error = e?.message || 'Errore eliminazione automobile';
+      showError(e, 'Errore eliminazione automobile');
       loading = false;
     }
   }
 
+  async function handleInlineSave(automobile: Automobile, payload: AutomobileCreate) {
+    const id = getAutoId(automobile);
+    if (id === null || savingEditId) return;
+
+    savingEditId = String(id);
+    error = null;
+    try {
+      const update = useUpdateAutomobile({ pk: id });
+      const res = await update(payload);
+      items = sortFavoriteAutomobileFirst(
+        items.map((item) => (String(getAutoId(item)) === String(id) ? res.payload : item)),
+        favoriteAutoId,
+        getAutoId
+      );
+      editingId = '';
+      showToast('Automobile aggiornata correttamente.');
+    } catch (e: any) {
+      showError(e, 'Errore salvataggio automobile');
+    } finally {
+      savingEditId = '';
+    }
+  }
+
   function handleFavorite(automobile: Automobile) {
+    if (savingEditId) return;
     const id = getAutoId(automobile);
     if (id === null) return;
     favoriteAutoId = isFavoriteAutomobile(id, favoriteAutoId) ? '' : String(id);
     setFavoriteAutomobileId(favoriteAutoId || null);
     items = sortFavoriteAutomobileFirst(items, favoriteAutoId, getAutoId);
+    showToast(favoriteAutoId ? 'Automobile impostata come preferita.' : 'Preferenza automobile rimossa.');
+  }
+
+  function handleBoundaryError(boundaryError: unknown) {
+    showToast(getErrorMessage(boundaryError, 'Errore visualizzazione automobili'), false);
   }
 
   function handleCoefficienteInput(event: Event) {
@@ -120,7 +188,7 @@
   async function submitForm() {
     error = null;
     if (!marca.trim() || !alimentazione.trim()) {
-      error = 'Marca e alimentazione sono obbligatori.';
+      showError('Marca e alimentazione sono obbligatori.', 'Marca e alimentazione sono obbligatori.');
       return;
     }
 
@@ -139,15 +207,17 @@
       if (isEdit && selectedId !== null) {
         const update = useUpdateAutomobile({ pk: selectedId });
         await update(payload);
+        showToast('Automobile aggiornata correttamente.');
       } else {
         const create = useCreateAutomobile();
         await create(payload);
+        showToast('Automobile creata correttamente.');
       }
       showForm = false;
       resetForm();
       await loadAutomobili();
     } catch (e: any) {
-      error = e?.message || 'Errore salvataggio automobile';
+      showError(e, 'Errore salvataggio automobile');
     } finally {
       saving = false;
     }
@@ -156,6 +226,8 @@
   function handleWindowKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape' && showForm) {
       closeForm();
+    } else if (event.key === 'Escape' && editingId) {
+      cancelEdit();
     }
   }
 
@@ -193,37 +265,57 @@
 
   <header class="topbar">
     <div class="actions">
-      <button class="ghost" type="button" on:click={openCreate}>+</button>
-      <button class="refresh" type="button" on:click={loadAutomobili}>Aggiorna</button>
+      <GenericButtton color="#f97316" label="Nuova automobile" title="Nuova automobile" on:click={openCreate}>
+        <FontAwesomeIcon icon={faPlus} class="text-base" />
+      </GenericButtton>
+      <GenericButtton
+        color="#374151"
+        label="Aggiorna automobili"
+        title="Aggiorna automobili"
+        on:click={() => loadAutomobili({ notify: true })}
+      >
+        <FontAwesomeIcon icon={faRotate} class="text-base" />
+      </GenericButtton>
     </div>
   </header>
 
   <main class="content">
     <LoaderOverlay show={loading} />
 
-    {#if error}
-      <p class="state error">{error}</p>
-    {/if}
+    <svelte:boundary onerror={handleBoundaryError}>
+      {#if loading}
+        <p class="state">Caricamento...</p>
+      {:else if items.length === 0}
+        <p class="state">Nessuna automobile trovata</p>
+      {:else}
+        <section class="cars-pane">
+          <ul class="list">
+            {#each items as item, idx (`${item.id ?? item.a_id ?? item.A_ID ?? idx}`)}
+              <AutoCard
+                automobile={item}
+                favorite={isFavoriteAutomobile(getAutoId(item), favoriteAutoId)}
+                editing={getAutoId(item) !== null && String(getAutoId(item)) === editingId}
+                saving={getAutoId(item) !== null && String(getAutoId(item)) === savingEditId}
+                onDelete={handleDelete}
+                onEdit={openEdit}
+                onSave={handleInlineSave}
+                onCancelEdit={cancelEdit}
+                onFavorite={handleFavorite}
+              />
+            {/each}
+          </ul>
+        </section>
+      {/if}
 
-    {#if loading}
-      <p class="state">Caricamento...</p>
-    {:else if items.length === 0}
-      <p class="state">Nessuna automobile trovata</p>
-    {:else}
-      <section class="cars-pane">
-        <ul class="list">
-          {#each items as item, idx (`${item.id ?? item.a_id ?? item.A_ID ?? idx}`)}
-            <AutoCard
-              automobile={item}
-              favorite={isFavoriteAutomobile(getAutoId(item), favoriteAutoId)}
-              onDelete={handleDelete}
-              onEdit={openEdit}
-              onFavorite={handleFavorite}
-            />
-          {/each}
-        </ul>
-      </section>
-    {/if}
+      {#snippet failed(boundaryError, reset)}
+        <div class="error-shell">
+          <ErrorCard
+            message={getErrorMessage(boundaryError, 'Errore visualizzazione automobili')}
+            onClose={reset}
+          />
+        </div>
+      {/snippet}
+    </svelte:boundary>
   </main>
 </div>
 
@@ -263,6 +355,22 @@
   </div>
 {/if}
 
+{#if error}
+  <div class="error-backdrop">
+    <button
+      type="button"
+      class="error-close-layer"
+      aria-label="Chiudi errore"
+      on:click={() => (error = null)}
+    ></button>
+    <div class="error-card-wrap">
+      <ErrorCard message={error} onClose={() => (error = null)} />
+    </div>
+  </div>
+{/if}
+
+<ToastState bind:open={toastOpen} success={toastSuccess} message={toastMessage} />
+
 <style>
   .page {
     background: var(--color-auto-bg);
@@ -270,9 +378,6 @@
   }
 
   .topbar {
-    position: sticky;
-    top: 0;
-    z-index: 10;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -374,6 +479,12 @@
     padding: 8px;
   }
 
+  .error-shell {
+    display: grid;
+    place-items: center;
+    padding: 24px 8px;
+  }
+
   .cars-pane {
     display: flex;
     flex-direction: column;
@@ -419,6 +530,29 @@
     max-height: calc(100vh - 32px);
     overflow: auto;
     box-shadow: 0 20px 40px rgba(0, 0, 0, 0.28);
+  }
+
+  .error-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 2100;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.5);
+  }
+
+  .error-close-layer {
+    position: absolute;
+    inset: 0;
+    border: 0;
+    background: transparent;
+    cursor: default;
+  }
+
+  .error-card-wrap {
+    position: relative;
+    z-index: 1;
   }
 
   .form-wrap.new-auto {

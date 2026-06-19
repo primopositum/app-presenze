@@ -84,6 +84,7 @@ api_urlpatterns = [
     path("jira/search/", views.JiraProxyView.as_view(), name="jira-search"),
     path("jira/statuses/", views.JiraStatusesView.as_view(), name="jira-statuses"),
     path("jira/timesheet/", views.JiraWorklogsTodayView.as_view(), name="jira-timesheet"),
+    path("jira/timesheet/month/", views.JiraWorklogsMonthView.as_view(), name="jira-timesheet-month"),
     path("jira/worklogs/user-monthly/", views.JiraUserMonthlyWorklogView.as_view(), name="jira-worklogs-user-monthly"),
     path("jira/worklogs/year/", views.JiraWorklogView.as_view(), name="jira-worklogs-year"),
     path("jira/worklogs/year/stream/", views.JiraWorklogStreamView.as_view(), name="jira-worklogs-year-stream"),

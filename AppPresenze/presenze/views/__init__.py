@@ -33,6 +33,7 @@ from .jira import (
     JiraProxyView,
     JiraStatusesView,
     JiraWorklogsTodayView,
+    JiraWorklogsMonthView,
     JiraUserMonthlyWorklogView,
     JiraWorklogView,
     JiraWorklogStreamView,

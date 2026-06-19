@@ -18,7 +18,7 @@
     };
   };
 
-  const dispatch = createEventDispatcher<{ created: void }>();
+  const dispatch = createEventDispatcher<{ created: string }>();
 
   let showWorklogComposer = false;
   let loadingLoggableIssues = false;
@@ -259,7 +259,7 @@
       createWorklogSuccess = `Worklog creato su ${selectedIssueKey} (${activeDate} ${worklogTime || '09:00'}).`;
       worklogValue = '';
       worklogComment = '';
-      dispatch('created');
+      dispatch('created', activeDate);
       closeComposer();
     } catch (e: any) {
       createWorklogError = String(e?.message || e || 'Errore creazione worklog');

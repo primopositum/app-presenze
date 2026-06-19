@@ -4,19 +4,48 @@ const BASE = apiBase();
 
 type Opts = RequestInit & { json?: any };
 
+function formatApiError(data: any, fallback: string) {
+  const raw = data?.errors || data?.error || data?.detail || data?.message || data;
+  if (typeof raw === 'string') return raw;
+  if (Array.isArray(raw)) return raw.map((item) => formatApiError(item, fallback)).join(', ');
+  if (raw && typeof raw === 'object') {
+    return Object.entries(raw)
+      .map(([key, value]) => {
+        const message = Array.isArray(value) ? value.join(', ') : String(value);
+        return `${key}: ${message}`;
+      })
+      .join(' - ');
+  }
+  return fallback;
+}
+
 async function request(path: string, opts: Opts = {}) {
   const url = path.startsWith('http') ? path : `${BASE}${path.startsWith('/') ? '' : '/'}${path}`;
-  const res = await authFetch(url, opts);
+  let res: Response;
+
+  try {
+    res = await authFetch(url, opts);
+  } catch (error: any) {
+    throw new Error(error?.message || 'Backend non raggiungibile');
+  }
 
   let data: any = null;
   const contentType = res.headers.get('content-type');
   if (res.status !== 204 && res.status !== 205) {
-    data = contentType?.includes('application/json') ? JSON.parse((await res.text()) || 'null') : await res.text();
+    const body = await res.text();
+    if (contentType?.includes('application/json')) {
+      try {
+        data = JSON.parse(body || 'null');
+      } catch {
+        data = body;
+      }
+    } else {
+      data = body;
+    }
   }
 
   if (!res.ok) {
-    const message = (data?.errors || data?.error || data?.detail) || res.statusText || 'Request failed';
-    throw new Error(message);
+    throw new Error(formatApiError(data, res.statusText || 'Request failed'));
   }
 
   return data;

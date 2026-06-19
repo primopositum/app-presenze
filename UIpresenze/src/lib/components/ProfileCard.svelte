@@ -21,6 +21,7 @@
 
   export let onSave: ((payload: UpdateAccountPayload) => void | Promise<void>) | null = null;
   export let onDelete: ((userId: number) => void | Promise<void>) | null = null;
+  export let onSaved: ((message: string) => void) | null = null;
 
   const dispatch = createEventDispatcher<{ save: UpdateAccountPayload }>();
 
@@ -159,6 +160,23 @@
     saveError = '';
   }
 
+  function closeSaveError() {
+    saveError = '';
+  }
+
+  function closeSaveErrorFromBackdrop(event: MouseEvent) {
+    if (event.target === event.currentTarget) {
+      closeSaveError();
+    }
+  }
+
+  function closeSaveErrorFromKeyboard(event: KeyboardEvent) {
+    if (event.key === 'Escape' || event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      closeSaveError();
+    }
+  }
+
   function openSignaturePicker() {
     if (!canManageSignature || signatureUploading) return;
     signatureFileInput?.click();
@@ -183,6 +201,7 @@
       if (result.error) throw new Error(result.error);
       signaturePreviewUrl = result.signature?.preview_data_url ?? '';
       showSignatureModal = true;
+      onSaved?.('Firma caricata correttamente.');
     } catch (e) {
       signatureUploadError = e instanceof Error ? e.message : 'Errore caricamento firma';
     } finally {
@@ -285,6 +304,11 @@
         await loadJiraTokenStatus();
       }
 
+      onSaved?.(
+        shouldOverwriteJiraToken && !hasProfileChanges
+          ? 'Token Jira salvato correttamente.'
+          : 'Modifiche profilo salvate correttamente.'
+      );
       editing = false;
     } catch (e) {
       saveError = e instanceof Error ? e.message : 'Errore durante il salvataggio';
@@ -668,10 +692,7 @@
             <p class="mt-2 text-[0.72rem] text-red-500 font-medium">{signatureError}</p>
           {/if}
 
-          {#if editing}
-            {#if saveError}
-              <p class="mt-3 text-[0.72rem] text-red-500 font-medium">{saveError}</p>
-            {/if}
+         {#if editing}
             <div class="mt-4 pt-3.5 border-t {isSuperProfile ? 'border-fuchsia-50' : 'border-orange-50'} flex items-center gap-2">
               <button
                 type="button"
@@ -749,6 +770,19 @@
     {:else}
       <p class="text-sm text-zinc-500">Nessuna firma disponibile.</p>
     {/if}
+  </div>
+{/if}
+
+{#if saveError}
+  <div
+    class="error-card-backdrop"
+    role="button"
+    tabindex="0"
+    aria-label="Chiudi errore"
+    on:click={closeSaveErrorFromBackdrop}
+    on:keydown={closeSaveErrorFromKeyboard}
+  >
+    <ErrorCard message={saveError} onClose={closeSaveError} />
   </div>
 {/if}
 
@@ -930,6 +964,16 @@
     inset: 0;
     z-index: 3200;
     background: rgba(0, 0, 0, 0.45);
+  }
+  .error-card-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 3400;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 16px;
   }
   .confirm-modal {
     position: fixed;

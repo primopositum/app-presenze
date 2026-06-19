@@ -9,7 +9,7 @@
   export let readonly = false;
   let loading = false;
 
-  const dispatch = createEventDispatcher<{ delete: Spesa }>();
+  const dispatch = createEventDispatcher<{ delete: Spesa; deleteError: string }>();
   const types: Record<number, string> = {
     1: 'Pedaggi',
     2: 'Rimborso km',
@@ -33,6 +33,8 @@
     }
     if (!error) {
       dispatch('delete', spesa);
+    } else {
+      dispatch('deleteError', error);
     }
   }
 

@@ -6,67 +6,15 @@
   import { page } from '$app/stores';
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
   import { faHouse, faKey, faHammer, faUsers } from '@fortawesome/free-solid-svg-icons';
-  import HourBalance from './HourBalance.svelte';
-  import { timeEntryUser } from '$lib/stores/timeEntryUser';
-  import { timeEntryReload } from '$lib/stores/timeEntryReload';
   import ChangePasswordCard from '$lib/components/ChangePasswordCard.svelte';
-  import { useSaldoApi } from '$lib/hooks/useSaldoApi';
-  import type { SaldoRecord } from '$lib/services/saldo';
-  import { getTimeEntriesFromMonth, type TimeEntry } from '$lib/services/timeEntries';
 
-  $: isPresencesRoute = $page.url.pathname.startsWith('/presences');
   $: isProfileRoute = $page.url.pathname === '/profilo';
   $: showAllProfiles = $page.url.searchParams.get('show_all_users') === '1';
   $: canToggleAllProfiles = isProfileRoute && !!$auth.user?.is_superuser;
-  $: canShowHourBalanceRoute = isPresencesRoute;
 
   let open = false;
   let successMessage: string | null = null;
   let successTimer: ReturnType<typeof setTimeout> | null = null;
-  let saldoRecords: SaldoRecord[] = [];
-  let saldoMese = 0;
-  let saldoLoadKey = '';
-  $: saldoUserId =
-    $auth.user?.is_superuser && isPresencesRoute
-      ? $timeEntryUser.user?.id ?? null
-      : $auth.user?.id ?? null;
-  $: showSaldo = $auth.isAuthed && canShowHourBalanceRoute && saldoUserId !== null;
-  $: hbYear = Number($page.url.searchParams.get('year')) || new Date().getFullYear();
-  $: hbMonth = Number($page.url.searchParams.get('month')) || new Date().getMonth() + 1;
-  $: hbPeriodo = `${String(hbMonth).padStart(2, '0')}-${hbYear}`;
-  $: {
-    const reloadVersion = $timeEntryReload;
-    const nextKey = `${saldoUserId ?? 'none'}|${hbPeriodo}|${reloadVersion}`;
-    if (showSaldo && saldoUserId && nextKey !== saldoLoadKey) {
-      saldoLoadKey = nextKey;
-      loadSaldo(saldoUserId, hbYear, hbMonth);
-    }
-  }
-
-  function timeEntryMonthDelta(entries: TimeEntry[], year: number, month: number) {
-    return entries.reduce((acc, entry) => {
-      const [entryYear, entryMonth] = entry.data.split('-').map(Number);
-      if (entryYear !== year || entryMonth !== month) return acc;
-      const hours = Number(entry.ore_tot) || 0;
-      if (entry.type === 3) return acc + hours;
-      if (entry.type === 4) return acc - hours;
-      return acc;
-    }, 0);
-  }
-
-  async function loadSaldo(userId: number, year: number, month: number) {
-    const result = await useSaldoApi(userId);
-    saldoRecords = result.records;
-    try {
-      const entriesPayload = await getTimeEntriesFromMonth({
-        date: new Date(year, month - 1, 1),
-        utenteId: userId
-      });
-      saldoMese = timeEntryMonthDelta((entriesPayload?.results ?? []) as TimeEntry[], year, month);
-    } catch {
-      saldoMese = 0;
-    }
-  }
   
   async function handleLogout() {
     stopAutoRefresh();
@@ -175,19 +123,6 @@
       {/if}
       </div>
   {/if}
-
-
-
-
-  {#if showSaldo}
-    <div class="hide-mobile-saldo">
-      <HourBalance
-        saldoRecords={saldoRecords}
-        periodo={hbPeriodo}
-        saldoMese={saldoMese}
-      />
-    </div>
-  {/if}
 </nav>
 
 {#if successMessage}
@@ -282,10 +217,6 @@
   }
 
   @media (max-width: 640px) {
-    .hide-mobile-saldo {
-      display: none;
-    }
-
     .profile-controls {
       display: flex;
       flex-wrap: wrap;

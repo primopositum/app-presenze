@@ -17,6 +17,7 @@
   let geocoder: google.maps.Geocoder;
   let autocompleteA: google.maps.places.Autocomplete;
   let autocompleteB: google.maps.places.Autocomplete;
+  let resizeObserver: ResizeObserver | null = null;
 
   let address1 = '';
   let address2 = '';
@@ -130,6 +131,11 @@
           provinciaA = placeInfo.provincia;
         }
       });
+      resizeObserver = new ResizeObserver(() => {
+        if (!map) return;
+        google.maps.event.trigger(map, 'resize');
+      });
+      resizeObserver.observe(mapContainer);
 
       autocompleteB.addListener('place_changed', () => {
         const place = autocompleteB.getPlace();
@@ -171,6 +177,7 @@
   });
 
   onDestroy(() => {
+    resizeObserver?.disconnect();
     if (directionsRenderer) directionsRenderer.setMap(null);
   });
 
@@ -469,7 +476,13 @@
 
   .wrapper {
     display: flex;
-    height: 100vh;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    max-width: 100%;
+    max-height: 100%;
+    overflow: hidden;
     font-family: 'DM Sans', sans-serif;
   }
 
@@ -688,12 +701,18 @@
 
   .map-wrap {
     flex: 1;
+    min-width: 0;
+    min-height: 0;
+    max-width: 100%;
+    max-height: 100%;
+    overflow: hidden;
     position: relative;
   }
 
   .map {
     width: 100%;
     height: 100%;
+    min-width: 0;
   }
 
   .map-error {

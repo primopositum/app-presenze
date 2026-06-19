@@ -7,6 +7,7 @@
   export let duration = 2600;
 
   let timer: ReturnType<typeof setTimeout> | null = null;
+  $: durationMs = Math.max(800, Number(duration || 2600));
 
   function clearTimer() {
     if (timer) {
@@ -20,7 +21,7 @@
     if (open && message) {
       timer = setTimeout(() => {
         open = false;
-      }, Math.max(800, Number(duration || 2600)));
+      }, durationMs);
     }
   }
 
@@ -30,7 +31,14 @@
 </script>
 
 {#if open && message}
-  <div class="toast" class:ok={success} class:ko={!success} role="status" aria-live="polite">
+  <div
+    class="toast"
+    class:ok={success}
+    class:ko={!success}
+    style={`--toast-duration: ${durationMs}ms;`}
+    role="status"
+    aria-live="polite"
+  >
     <span class="dot" aria-hidden="true"></span>
     <span class="txt">{message}</span>
     <button
@@ -41,6 +49,7 @@
     >
       &times;
     </button>
+    <span class="progress" aria-hidden="true"></span>
   </div>
 {/if}
 
@@ -57,11 +66,12 @@
     align-items: start;
     gap: 8px;
     border-radius: 12px;
-    padding: 10px 10px 10px 12px;
+    padding: 10px 10px 13px 12px;
     box-shadow: 0 12px 26px rgba(15, 23, 42, 0.18);
     border: 1px solid transparent;
     animation: toast-in 170ms ease-out;
     font-family: var(--font-mono);
+    overflow: hidden;
   }
   .toast.ok {
     background: #f0fdf4;
@@ -102,6 +112,17 @@
     background: rgba(15, 23, 42, 0.08);
     opacity: 1;
   }
+  .progress {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 3px;
+    width: 100%;
+    background: currentColor;
+    opacity: 0.7;
+    transform-origin: left center;
+    animation: toast-progress var(--toast-duration) linear forwards;
+  }
   @keyframes toast-in {
     from {
       opacity: 0;
@@ -110,6 +131,14 @@
     to {
       opacity: 1;
       transform: translateY(0);
+    }
+  }
+  @keyframes toast-progress {
+    from {
+      transform: scaleX(1);
+    }
+    to {
+      transform: scaleX(0);
     }
   }
 
