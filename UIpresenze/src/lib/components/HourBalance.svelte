@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { fade, scale } from 'svelte/transition';
+  import { cubicOut } from 'svelte/easing';
   import type { SaldoRecord } from '$lib/services/saldo';
 
   export let saldoRecords: SaldoRecord[] = [];
@@ -85,7 +87,10 @@
   </button>
 
   {#if open}
-    <div class="wrap-card">
+    <div
+      class="wrap-card"
+      transition:scale={{ duration: 320, start: 0.7, opacity: 0, easing: cubicOut }}
+    >
       {#each cards as card, index}
         <button
           type="button"
@@ -100,7 +105,7 @@
       {/each}
     </div>
 
-    <div class="lines" aria-hidden="true">
+    <div class="lines" aria-hidden="true" transition:fade={{ duration: 200 }}>
       <div class="line"></div>
       <div class="line"></div>
     </div>

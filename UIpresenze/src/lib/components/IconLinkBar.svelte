@@ -17,7 +17,7 @@
     faUbuntu
   } from '@fortawesome/free-brands-svg-icons';
   import { faCircle } from '@fortawesome/free-regular-svg-icons';
-  import { faCar } from '@fortawesome/free-solid-svg-icons';
+  import { faBookOpen, faCar, faMagnifyingGlass } from '@fortawesome/free-solid-svg-icons';
   import palette from '../../theme/palette.js';
   import { getUtilitiesBar, type UtilitiesBarItem } from '$lib/services/utilitiesbar';
   import { jiraControl } from '$lib/stores/jiraControl';
@@ -34,7 +34,9 @@
     faLinkedin,
     faMicrosoft,
     faNotion,
-    faUbuntu
+    faUbuntu,
+    faBookOpen,
+    faMagnifyingGlass
   };
 
   const DEFAULT_HOVER = palette.state.info;

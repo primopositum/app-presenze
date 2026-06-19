@@ -414,6 +414,8 @@ class UtilitiesBar(models.Model):
         MICROSOFT = "faMicrosoft", "Microsoft"
         NOTION = "faNotion", "Notion"
         UBUNTU = "faUbuntu", "Ubuntu"
+        BOOK_OPEN = "faBookOpen", "Book Open"
+        MAGNIFYING_GLASS = "faMagnifyingGlass", "Magnifying Glass"
 
     id = models.BigAutoField(primary_key=True, db_column="UB_ID")
     link = models.URLField(max_length=500)

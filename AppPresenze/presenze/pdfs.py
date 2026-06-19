@@ -10,6 +10,7 @@ from typing import Dict, List, Tuple
 from collections import defaultdict
 import calendar
 import re
+import requests
 from datetime import timedelta
 from dateutil.relativedelta import relativedelta
 
@@ -236,6 +237,42 @@ def fill_pdf(template_path: Path, full_name: str, days_data: Dict[int, DayData])
     return out
 
 
+def _jira_http_error_payload(exc: requests.exceptions.HTTPError) -> tuple[dict, int | None]:
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+
+    try:
+        jira_detail = response.json() if response is not None else {}
+    except Exception:
+        jira_detail = {}
+
+    if not isinstance(jira_detail, dict):
+        jira_detail = {"raw": jira_detail}
+
+    error_messages = jira_detail.get("errorMessages")
+    field_errors = jira_detail.get("errors")
+    message = jira_detail.get("error") or jira_detail.get("message")
+
+    if not message and isinstance(error_messages, list) and error_messages:
+        message = "; ".join(str(item) for item in error_messages)
+    if not message and isinstance(field_errors, dict) and field_errors:
+        message = "; ".join(f"{field}: {detail}" for field, detail in field_errors.items())
+
+    fallback_messages = {
+        400: "Richiesta Jira non valida durante il controllo ore.",
+        401: "Token Jira non valido o scaduto. Aggiorna le credenziali Jira.",
+        403: "Permessi Jira insufficienti per leggere i worklog del mese.",
+    }
+    message = str(message or fallback_messages.get(status_code) or f"Errore Jira HTTP {status_code}")
+
+    return {
+        "detail": message,
+        "source": "jira",
+        "jira_status": status_code,
+        "jira_error": jira_detail,
+    }, status_code
+
+
 class PresenzeMeseScorsoPDFView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -325,14 +362,20 @@ class PresenzeMeseScorsoPDFView(APIView):
                 )
             except ValueError as exc:
                 raise ValidationError({"detail": f"Controllo ore Jira non disponibile: {exc}"})
+            except requests.exceptions.HTTPError as exc:
+                error_payload, jira_status = _jira_http_error_payload(exc)
+                if jira_status in (400, 401, 403):
+                    return Response(error_payload, status=jira_status)
+                raise ValidationError({"detail": error_payload["detail"]})
             except Exception as exc:
                 raise ValidationError({"detail": f"Errore durante il controllo ore Jira: {exc}"})
 
             jira_total_seconds = int(jira_payload.get("total_seconds") or 0)
             jira_hours = (Decimal(jira_total_seconds) / Decimal("3600")).quantize(Decimal("0.01"))
-            if total_hours_internal.quantize(Decimal("0.01")) != jira_hours:
+            user_hours = total_hours_internal.quantize(Decimal("0.01"))
+            if jira_hours < user_hours:
                 raise ValidationError(
-                    {"detail": f"Ore inserite ({total_hours_internal:.2f}) non coerenti con Jira ({jira_hours:.2f})."}
+                    {"detail": f"Ore Jira ({jira_hours:.2f}) inferiori alle ore inserite ({user_hours:.2f})."}
                 )
 
         nome = getattr(user, "nome", "") or ""

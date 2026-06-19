@@ -35,7 +35,7 @@ def _local_ip_for_request(request):
 
     return None
 
-
+ 
 def _replace_localhost_link(link, server_ip):
     if not link or not server_ip:
         return link
