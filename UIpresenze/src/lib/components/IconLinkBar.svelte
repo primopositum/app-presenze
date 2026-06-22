@@ -65,7 +65,7 @@
 </script>
 
 <div class="utility-shell" style={`--icon-auto-color: #16a34a;`}>
-  <div class="utility-card rounded-[4%] border-[10px] border-gray-800 bg-white p-8 shadow-lg overflow-hidden">
+  <div class="utility-card rounded-[4%] border-[10px] border-gray-800 bg-white p-8 shadow-lg">
     <button type="button" class="icon-container auto-icon" on:click={() => goto('/auto')} aria-label="Vai alla pagina auto">
       <FontAwesomeIcon icon={faCar} class="text-gray-700 text-[280%]" />
     </button>
@@ -77,8 +77,12 @@
         rel="noopener noreferrer"
         class="icon-container"
         style={`--item-hover-color: ${normalizeColor(item.colore)};`}
+        aria-label={item.nome}
       >
         <FontAwesomeIcon icon={ICON_MAP[item.icon]} class="text-gray-700 text-[280%]" />
+        {#if item.nome}
+          <span class="utility-label" role="tooltip">{item.nome}</span>
+        {/if}
       </a>
     {/each}
   </div>
@@ -115,6 +119,31 @@
 
   .icon-container:hover :global(svg) {
     color: var(--item-hover-color, #0ea5e9);
+  }
+
+  .utility-label {
+    position: absolute;
+    bottom: calc(100% + 0.5rem);
+    left: 50%;
+    z-index: 2;
+    max-width: 12rem;
+    transform: translateX(-50%) translateY(0.25rem);
+    border-radius: 0.375rem;
+    background: #1f2937;
+    padding: 0.25rem 0.5rem;
+    color: white;
+    font-size: 0.75rem;
+    line-height: 1rem;
+    opacity: 0;
+    pointer-events: none;
+    white-space: nowrap;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+  }
+
+  .icon-container:hover .utility-label,
+  .icon-container:focus-visible .utility-label {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
   }
 
   .auto-icon:hover :global(svg) {

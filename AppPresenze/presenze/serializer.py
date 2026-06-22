@@ -402,7 +402,7 @@ class SignatureSerializer(serializers.ModelSerializer):
 class UtilitiesBarSerializer(serializers.ModelSerializer):
     class Meta:
         model = UtilitiesBar
-        fields = ["id", "link", "colore", "icon", "posizione"]
-        read_only_fields = ["id", "link", "colore", "icon", "posizione"]
+        fields = ["id", "nome", "link", "colore", "icon", "posizione"]
+        read_only_fields = ["id", "nome", "link", "colore", "icon", "posizione"]
 
 

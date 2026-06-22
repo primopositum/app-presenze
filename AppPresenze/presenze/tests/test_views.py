@@ -326,6 +326,7 @@ class TestUtilitiesBarList(TestCase):
     @override_settings(ALLOWED_HOSTS=["testserver", "100.50.2.1"])
     def test_link_localhost_usa_host_richiesta_e_mantiene_porta(self):
         utilities_bar = UtilitiesBar.objects.create(
+            nome="Dashboard locale",
             link="http://localhost:6000/dashboard?view=main",
             colore="#ffffff",
             icon=UtilitiesBar.IconName.CIRCLE,
@@ -338,6 +339,7 @@ class TestUtilitiesBarList(TestCase):
         )
 
         self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data[0]["nome"], "Dashboard locale")
         self.assertEqual(
             res.data[0]["link"],
             "http://100.50.2.1:6000/dashboard?view=main",

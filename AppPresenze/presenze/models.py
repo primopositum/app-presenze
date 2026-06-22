@@ -418,6 +418,7 @@ class UtilitiesBar(models.Model):
         MAGNIFYING_GLASS = "faMagnifyingGlass", "Magnifying Glass"
 
     id = models.BigAutoField(primary_key=True, db_column="UB_ID")
+    nome = models.CharField(max_length=100, blank=True)
     link = models.URLField(max_length=500)
     colore = models.CharField(max_length=20, help_text="Colore hex, esempio: #ffffff")
     icon = models.CharField(
@@ -434,7 +435,7 @@ class UtilitiesBar(models.Model):
         ordering = ["posizione", "id"]
 
     def __str__(self):
-        return f"UtilitiesBar #{self.id} - pos {self.posizione}"
+        return self.nome or f"UtilitiesBar #{self.id} - pos {self.posizione}"
 
 
 # ---------------------------
