@@ -400,12 +400,19 @@ export const loadData = async () => {
     });
   }
 
-  async function refreshJiraDay(day: string, silent = false) {
-    await jiraTimesheetMonth.refreshDay(day, selectedJiraEmail, { silent });
+  async function refreshAllData() {
+    await Promise.allSettled([
+      loadData(),
+      loadJiraMonth(true)
+    ]);
   }
 
   function injectJiraWorklog(day: string, activity: JiraTimesheetActivity) {
     return jiraTimesheetMonth.injectWorklogIntoCache(day, activity, selectedJiraEmail);
+  }
+
+  function removeJiraWorklog(day: string, worklogId: string) {
+    return jiraTimesheetMonth.removeWorklogFromCache(day, worklogId, selectedJiraEmail);
   }
 
   $: if (userId) {
@@ -552,8 +559,8 @@ export const loadData = async () => {
           </button>
         {/if}
 
-        {#if !loading}
-          <button type="button" on:click={loadData} disabled={loading} aria-label="Ricarica dati">
+        {#if !loading && !$jiraTimesheetMonthLoading}
+          <button type="button" on:click={refreshAllData} aria-label="Ricarica tutti i dati">
             <FontAwesomeIcon
               icon={faRotate}
               class="text-[150%]"
@@ -744,12 +751,11 @@ export const loadData = async () => {
       <Useractivity
         day={selectedDate}
         ore={selectedDayWorkedHours}
-        userEmail={selectedJiraEmail}
         activities={selectedJiraActivities}
         loading={$jiraTimesheetMonthLoading}
         error={$jiraTimesheetMonthError}
-        onRefreshDay={refreshJiraDay}
         onInjectWorklog={injectJiraWorklog}
+        onRemoveWorklog={removeJiraWorklog}
       />
     {/if}
   {/key}

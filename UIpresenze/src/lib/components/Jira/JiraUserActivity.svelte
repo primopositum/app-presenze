@@ -1,7 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
   import {
-    jiraTimesheet,
     jiraDeleteWorklog,
     jiraAddWorklog,
     jiraUpdateWorklog,
@@ -17,12 +15,11 @@
 
   export let day: string | null = null;
   export let ore: number | string | null = null;
-  export let userEmail: string | null = null;
   export let activities: JiraTimesheetActivity[] = [];
   export let loading = false;
   export let error = '';
-  export let onRefreshDay: ((day: string, silent?: boolean) => Promise<void>) | null = null;
   export let onInjectWorklog: ((day: string, activity: JiraTimesheetActivity) => boolean) | null = null;
+  export let onRemoveWorklog: ((day: string, worklogId: string) => boolean) | null = null;
 
   let deletingWorklogId = '';
   let worklogActionError = '';
@@ -33,13 +30,7 @@
   let toastSuccess = true;
   let toastMessage = '';
   let deleteConfirmTarget: { issueKey: string; worklogId: string } | null = null;
-  const backgroundRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const COMPLETE_ISSUE_KEY = 'AM-1';
-
-  onDestroy(() => {
-    backgroundRefreshTimers.forEach((timer) => clearTimeout(timer));
-    backgroundRefreshTimers.clear();
-  });
 
   function toNumber(value: unknown) {
     const n = Number(value);
@@ -96,42 +87,7 @@
     return (seconds / 3600).toFixed(2);
   }
 
-  async function refreshDayImmediately(targetDay: string) {
-    if (!targetDay) return;
-    if (onRefreshDay) {
-      await onRefreshDay(targetDay);
-      return;
-    }
-
-    const email = String(userEmail || '').trim();
-    loading = true;
-    error = '';
-    try {
-      const data = await jiraTimesheet(targetDay, email ? { email } : {});
-      activities = data.activities || [];
-    } catch (e: any) {
-      error = String(e?.message || e || 'Errore caricamento attivita');
-    } finally {
-      loading = false;
-    }
-  }
-
-  function scheduleBackgroundRefresh(targetDay: string) {
-    const existingTimer = backgroundRefreshTimers.get(targetDay);
-    if (existingTimer) clearTimeout(existingTimer);
-
-    const timer = setTimeout(() => {
-      backgroundRefreshTimers.delete(targetDay);
-      if (onRefreshDay) {
-        void onRefreshDay(targetDay, true).catch(() => undefined);
-        return;
-      }
-      void refreshDayImmediately(targetDay).catch(() => undefined);
-    }, 2000);
-    backgroundRefreshTimers.set(targetDay, timer);
-  }
-
-  function applyOptimisticWorklog(detail: JiraWorklogCreatedEvent) {
+  function applySavedWorklog(detail: JiraWorklogCreatedEvent) {
     const targetDay = String(detail.day || '').trim();
     if (!targetDay) return;
 
@@ -146,19 +102,10 @@
         )
       ];
     }
-    scheduleBackgroundRefresh(targetDay);
   }
 
-  async function refreshAfterWorklogCreate(event?: CustomEvent<JiraWorklogCreatedEvent>) {
-    const targetDay = String(event?.detail?.day || day || '').trim();
-    if (!targetDay) return;
-
-    if (event?.detail?.activity) {
-      applyOptimisticWorklog(event.detail);
-      return;
-    }
-
-    await refreshDayImmediately(targetDay);
+  function applyCreatedWorklog(event: CustomEvent<JiraWorklogCreatedEvent>) {
+    if (event.detail?.activity) applySavedWorklog(event.detail);
   }
 
   function secondsToJiraTimeSpent(totalSeconds: number) {
@@ -229,7 +176,7 @@
       } else {
         result = await jiraAddWorklog(COMPLETE_ISSUE_KEY, { timeSpent, started });
       }
-      applyOptimisticWorklog({
+      applySavedWorklog({
         day,
         activity: {
           ...am1Entry,
@@ -259,7 +206,13 @@
     worklogActionError = '';
     try {
       await jiraDeleteWorklog(issueKey, worklogId);
-      await refreshAfterWorklogCreate();
+      const targetDay = String(day || '').trim();
+      const removed = targetDay ? (onRemoveWorklog?.(targetDay, worklogId) ?? false) : false;
+      if (!removed) {
+        activities = activities.filter(
+          (item) => String(item.worklog_id || '').trim() !== worklogId
+        );
+      }
     } catch (e: any) {
       worklogActionError = String(e?.message || e || 'Errore rimozione worklog');
     } finally {
@@ -358,7 +311,7 @@
         {day}
         blocked={worklogInputBlocked}
         blockedReason={worklogInputBlockReason}
-        on:created={refreshAfterWorklogCreate}
+        on:created={applyCreatedWorklog}
         on:notify={handleWorklogToast}
       />
     </div>

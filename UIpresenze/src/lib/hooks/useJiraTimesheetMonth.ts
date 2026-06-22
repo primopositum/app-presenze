@@ -236,6 +236,44 @@ export function useJiraTimesheetMonthCache() {
     return true;
   }
 
+  function removeWorklogFromCache(
+    day: string,
+    worklogId: string | number,
+    emailOverride?: string | null
+  ) {
+    const email = String(emailOverride ?? activeEmail ?? '').trim();
+    const key = cacheKey(activeYear, activeMonth, email);
+    const normalizedWorklogId = String(worklogId || '').trim();
+    if (!day || !normalizedWorklogId || !activeYear || !activeMonth) return false;
+
+    const current = monthCache.get(key);
+    if (!current) return false;
+
+    const userKey = userKeyForDay(current, email) || email;
+    const existingDay = current.days?.[day];
+    const existingUser = existingDay?.users?.[userKey];
+    if (!existingUser) return false;
+
+    const activities = (existingUser.activities || []).filter(
+      (item) => String(item.worklog_id || '').trim() !== normalizedWorklogId
+    );
+    if (activities.length === (existingUser.activities || []).length) return false;
+
+    const next = mergeDailyIntoMonth(current, day, email, {
+      date: day,
+      utente_email: existingUser.utente_email,
+      jira_email: existingUser.jira_email,
+      count: activities.length,
+      activities,
+    });
+
+    monthCache.set(key, next);
+    if (activeKey === key) {
+      data.set(next);
+    }
+    return true;
+  }
+
   async function refreshDay(
     day: string,
     emailOverride?: string | null,
@@ -284,6 +322,7 @@ export function useJiraTimesheetMonthCache() {
     error,
     loadMonth,
     injectWorklogIntoCache,
+    removeWorklogFromCache,
     refreshDay,
   };
 }
