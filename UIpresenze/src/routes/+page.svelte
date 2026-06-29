@@ -12,9 +12,9 @@
   $: isAuthed = $auth.isAuthed;
   
    const redirect = (route : string) => {
-    if (route === 'business') {
+    if (route === 'JiraBoard') {
       if (!$jiraControl.loaded || !$jiraControl.enabled) return;
-      goto('/business', { state: { route } });
+      goto('/JiraBoard', { state: { route } });
       return;
     }
     if (user?.is_superuser){goto(`/preMenu`, {state : {route}});}
@@ -37,21 +37,21 @@
   <CardImage
     caption="Accedi all'area delle trasferte"
     alt="trasferte"
-    on:click = {()=>{goto('/trasferte')}}
+    on:click = {()=>{goto('/Trasferte')}}
     imageSrc="/trasferte.png"
        />
   {#if $jiraControl.loaded && $jiraControl.enabled}
     <CardImage
       caption="Accedi all'area delle task"
       alt="Task"
-      on:click = {()=>{redirect('business')}}
+      on:click = {()=>{redirect('JiraBoard')}}
       imageSrc="/business.png"
       />
   {/if}
   <CardImage
     caption="Accedi all'area delle presenze"
     alt="presenze"
-    on:click = {()=>{redirect('presences')}}
+    on:click = {()=>{redirect('Presenze')}}
     imageSrc="/presence.png"
      />
    

@@ -87,8 +87,17 @@
 
   function isSubtask(issue: JiraIssue) {
     const issueType = issue.fields?.issuetype;
+    if (!issueType) return false;
+    if (issueType.subtask === true) return true;
+
     const typeName = String(issueType?.name || '').toLowerCase();
-    return Boolean(issueType?.subtask) || typeName.includes('sub-task') || typeName.includes('subtask') || Boolean(issue.fields?.parent);
+    return (
+      typeName.includes('sub-task') ||
+      typeName.includes('subtask') ||
+      typeName.includes('sotto-attività') ||
+      typeName.includes('sottoattività') ||
+      typeName.includes('sottotask')
+    );
   }
 
   function flattenIssues(issues: JiraIssue[]): JiraIssue[] {
@@ -96,6 +105,20 @@
       issue,
       ...flattenIssues(issue.fields?.subtasks_enriched || [])
     ]);
+  }
+
+  $: if (issuesData.length > 0) {
+    const flat = flattenIssues(issuesData);
+    const subtaskTypes = [
+      ...new Set(flat.map((issue) => issue.fields?.issuetype?.name).filter(Boolean))
+    ];
+    console.table({
+      issuesData: issuesData.length,
+      flattenedTotal: flat.length,
+      nestedSubtasks: flat.length - issuesData.length,
+      subtaskTypesFound: subtaskTypes.join(', '),
+      detectedAsSubtask: flat.filter(isSubtask).length
+    });
   }
 
   function issueYear(issue: JiraIssue) {
@@ -163,7 +186,7 @@
 
 </script>
 
-<section class="completed-bar">
+<section class="completed-bar" data-history-hover-exclude>
   <div class="head">
     <div>
       <h2>Progetti completati</h2>
@@ -173,7 +196,7 @@
       </p>
     </div>
     <div class="head-actions">
-      <button type="button" class="ghost" on:click={clearSelection} disabled={loading || selectedCount === 0}>
+      <button type="button" class="ghost" data-history-hover-exclude on:click={clearSelection} disabled={loading || selectedCount === 0}>
         Pulisci
       </button>
       <button type="button" on:click={refreshCompleted} disabled={loading}>{loading ? '...' : 'Aggiorna'}</button>
@@ -181,7 +204,7 @@
   </div>
 
   {#if loading}
-    <div class="progress-shell" aria-live="polite">
+    <div class="progress-shell" data-history-hover-exclude aria-live="polite">
       <div class="progress-meta">
         <span>Caricamento issue completate</span>
         <strong>...</strong>
@@ -204,6 +227,8 @@
         {#each filteredProjects as project (project.key)}
           <div
             class="project-card"
+            data-history-hover
+            data-history-hover-exclude={selectedProjectKeys.includes(project.key) || undefined}
             class:selected={selectedProjectKeys.includes(project.key)}
             role="button"
             tabindex="0"
@@ -211,8 +236,8 @@
             on:keydown={(e) => (e.key === 'Enter' || e.key === ' ' ? toggleProject(project.key) : undefined)}
           >
             <div class="row-top">
-              <span class="project-key">{project.key}</span>
-              <span class="issues-pill">{project.issueCount} issue</span>
+              <span class="project-key" data-history-hover-exclude>{project.key}</span>
+              <span class="issues-pill" data-history-hover-exclude>{project.issueCount} issue</span>
             </div>
             <h3>{project.name}</h3>
             <p class="hours-pill">Ore totali: {fmtHours(project.seconds)}</p>
@@ -221,17 +246,17 @@
       </div>
     </div>
     {#if selectedProjectKeys.length > 0}
-      <div class="subtasks-panel">
+      <div class="subtasks-panel" data-history-hover-exclude>
         <h4>Sottotask completate ({completedSubtasks.length})</h4>
         {#if completedSubtasks.length === 0}
           <p class="subtasks-empty">Nessuna sottotask completata trovata per i progetti selezionati.</p>
         {:else}
           <div class="subtasks-list">
             {#each completedSubtasks as issue (issue.key)}
-              <article class="subtask-item">
+              <article class="subtask-item" data-history-hover>
                 <div class="subtask-head">
-                  <span class="subtask-key">{issue.key}</span>
-                  <span class="subtask-hours">{fmtHours(Math.max(0, Number(taskTotalSeconds(issue.fields) || 0)))}</span>
+                  <span class="subtask-key" data-history-hover-exclude>{issue.key}</span>
+                  <span class="subtask-hours" data-history-hover-exclude>{fmtHours(Math.max(0, Number(taskTotalSeconds(issue.fields) || 0)))}</span>
                 </div>
                 <p class="subtask-summary">{issue.fields?.summary || '-'}</p>
                 <p class="subtask-meta">

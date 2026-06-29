@@ -174,30 +174,30 @@
   $: xScale = scaleLinear().domain([0, Math.max(1, ...chartRows.map((d) => d.hours))]).range([0, barAreaWidth]);
 </script>
 
-<section class="charts-shell">
+<section class="charts-shell" data-history-hover>
   <h3>Grafici selezione</h3>
 
   <div class="metric-grid">
-    <article class="metric-card">
+    <article class="metric-card" data-history-hover>
       <span class="label">
         {selectedProjectKeys.length > 0 ? 'Utenti coinvolti (selezione)' : 'Progetti totali'}
       </span>
       <strong>{selectedProjectKeys.length > 0 ? chartRows.length : allProjects.length}</strong>
     </article>
-    <article class="metric-card">
+    <article class="metric-card" data-history-hover>
       <span class="label">Ore totali</span>
       <strong>{fmtHours(totalSeconds)}</strong>
     </article>
   </div>
 
   {#if allProjects.length > 0 && selectedProjectKeys.length === 0}
-    <p class="hint">Nessun progetto selezionato: visualizzazione totale ore per progetto.</p>
+    <p class="hint" data-history-hover-exclude>Nessun progetto selezionato: visualizzazione totale ore per progetto.</p>
   {/if}
 
   {#if chartRows.length === 0}
-    <p class="empty">Nessun progetto disponibile per i grafici.</p>
+    <p class="empty" data-history-hover>Nessun progetto disponibile per i grafici.</p>
   {:else}
-    <article class="chart-card">
+    <article class="chart-card" data-history-hover>
       <h4>{selectedProjectKeys.length > 0 ? 'Distribuzione ore per utente (%)' : 'Distribuzione ore per progetto (%)'}</h4>
       <div class="donut-wrap">
         <svg width={donutSize} height={donutSize} viewBox="0 0 220 220" role="img" aria-label={selectedProjectKeys.length > 0 ? 'Distribuzione ore per utente' : 'Distribuzione ore per progetto'}>
@@ -205,6 +205,7 @@
             {#each arcs as slice (slice.data.id)}
               <path
                 class="chart-segment"
+                data-history-hover-exclude
                 d={arcPath(slice) || ''}
                 fill={slice.data.color}
                 stroke="#fff"
@@ -218,8 +219,8 @@
         </svg>
         <ul class="legend">
           {#each chartRows as row (row.id)}
-            <li>
-              <span class="dot" style={`--dot:${row.color}`}></span>
+            <li data-history-hover>
+              <span class="dot" data-history-hover-exclude style={`--dot:${row.color}`}></span>
               <span class="name">{row.label}</span>
               <span class="num">{row.percent.toFixed(1)}%</span>
             </li>
@@ -228,7 +229,7 @@
       </div>
     </article>
 
-    <article class="chart-card">
+    <article class="chart-card" data-history-hover>
       <h4>{selectedProjectKeys.length > 0 ? 'Ore per utente' : 'Ore per progetto'}</h4>
       <div class="bar-wrap">
         <svg width={chartWidth} height={chartHeight + 24} viewBox={`0 0 ${chartWidth} ${chartHeight + 24}`} role="img" aria-label={selectedProjectKeys.length > 0 ? 'Ore per utente' : 'Ore per progetto'}>
@@ -236,6 +237,7 @@
             {#each chartRows as row (row.id)}
               <rect
                 class="chart-bar"
+                data-history-hover-exclude
                 y={yScale(row.id) || 0}
                 x="0"
                 width={xScale(row.hours)}
@@ -448,6 +450,7 @@
     font-size: 0.72rem;
     font-weight: 700;
   }
+
 
   .chart-tooltip small {
     color: #475569;

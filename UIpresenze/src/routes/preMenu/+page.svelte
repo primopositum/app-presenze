@@ -67,7 +67,7 @@
   function handlePickUser(u: User) {
     timeEntryUser.setUser(u);
     if ($page.url.pathname === '/preMenu') {
-      goto('/presences');
+      goto('/Presenze');
       return;
     }
     goto(route);

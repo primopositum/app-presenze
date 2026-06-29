@@ -145,10 +145,13 @@
     return matchStatus && matchSearch;
   });
   $: groupedByStatus = (() => {
-    const groups = statuses.map((status) => ({
-      status,
-      items: filtered.filter((issue) => (issue.fields?.status?.name || 'Senza stato') === status)
-    }));
+    const normalizeStatus = (status: string) => status.trim().toLocaleUpperCase('it-IT');
+    const groups = statuses
+      .map((status) => ({
+        status,
+        items: filtered.filter((issue) => (issue.fields?.status?.name || 'Senza stato') === status)
+      }))
+      .filter((group) => group.items.length > 0 || normalizeStatus(group.status) === 'COMPLETATA');
 
     const hasNoStatus = filtered.some((issue) => !(issue.fields?.status?.name || '').trim());
     if (hasNoStatus && !groups.some((group) => group.status === 'Senza stato')) {
@@ -156,6 +159,16 @@
         status: 'Senza stato',
         items: filtered.filter((issue) => (issue.fields?.status?.name || 'Senza stato') === 'Senza stato')
       });
+    }
+
+    const inCorsoIndex = groups.findIndex((group) => normalizeStatus(group.status) === 'IN CORSO');
+    const inAttesaIndex = groups.findIndex(
+      (group) => normalizeStatus(group.status) === 'IN ATTESA DI RISCONTRO'
+    );
+
+    if (inCorsoIndex > inAttesaIndex && inAttesaIndex >= 0) {
+      const inCorsoGroup = groups.splice(inCorsoIndex, 1)[0];
+      if (inCorsoGroup) groups.splice(inAttesaIndex, 0, inCorsoGroup);
     }
 
     return groups;
@@ -270,7 +283,7 @@
     } finally {
       updatingIssueKey = '';
       handleDragEnd();
-    }
+    } 
   }
 
   function handleWindowScroll() {
@@ -1032,42 +1045,61 @@
     align-items: start;
   }
   .status-group {
-    border: 1px solid #e2e8f0;
-    border-top: 3px solid var(--status-accent, #64748b);
+    display: flex;
+    flex-direction: column;
+    border: 1px solid #fdba74;
+    border-top: 3px solid #ea580c;
     border-radius: 12px;
-    background: linear-gradient(180deg, var(--status-soft, #f8fafc), #fff 38%);
+    background: linear-gradient(180deg, #fff7ed 0%, #fffbf5 38%, #fff 100%);
     padding: 10px;
     min-width: 0;
+    max-height: clamp(360px, calc(100vh - 300px), 730px);
+    overflow: hidden;
     transition: box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease;
   }
   .status-group.drop-active {
-    border-color: var(--status-accent, #fb923c);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-accent, #fb923c) 34%, transparent);
-    background: linear-gradient(180deg, color-mix(in srgb, var(--status-soft, #f8fafc) 65%, #ffffff), #fff 40%);
+    border-color: #f97316;
+    box-shadow: 0 0 0 2px rgb(249 115 22 / 34%);
+    background: linear-gradient(180deg, #ffedd5 0%, #fff7ed 40%, #fff 100%);
   }
   .status-group.drop-disabled {
     opacity: 0.9;
   }
   .status-group-head {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
     margin-bottom: 10px;
     padding-bottom: 8px;
-    border-bottom: 1px dashed #cbd5e1;
+    border-bottom: 1px dashed #fb923c;
   }
   .status-group-head h3 {
     margin: 0;
-    color: var(--status-text, #334155);
+    color: #c2410c;
     font-size: 12px;
     font-family: var(--font-mono);
     text-transform: uppercase;
     letter-spacing: 0.03em;
   }
+  .status-group-head .count {
+    color: #c2410c;
+    font-weight: 700;
+    opacity: 1;
+  }
   .status-group-cards {
     display: grid;
     gap: 8px;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 4px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .status-group-cards::-webkit-scrollbar {
+    display: none;
   }
   .drag-card-wrap {
     cursor: grab;

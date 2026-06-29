@@ -5,16 +5,31 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
-  import { faHouse, faKey, faHammer, faUsers } from '@fortawesome/free-solid-svg-icons';
+  import { faHouse, faKey, faHammer, faUsers, faQuestion } from '@fortawesome/free-solid-svg-icons';
   import ChangePasswordCard from '$lib/components/ChangePasswordCard.svelte';
+  import GuideModal from '$lib/components/GuideModal.svelte';
+
+  const GUIDE_ROUTES = new Set(['Automobili', 'JiraBoard', 'Presenze', 'Trasferte']);
 
   $: isProfileRoute = $page.url.pathname === '/profilo';
   $: showAllProfiles = $page.url.searchParams.get('show_all_users') === '1';
   $: canToggleAllProfiles = isProfileRoute && !!$auth.user?.is_superuser;
+  $: currentRouteName = $page.url.pathname.split('/').filter(Boolean)[0] || '';
+  $: guidePdfUrl = GUIDE_ROUTES.has(currentRouteName)
+    ? `/docs/tutorialGrafici/${encodeURIComponent(currentRouteName)}.pdf`
+    : '';
 
   let open = false;
   let successMessage: string | null = null;
   let successTimer: ReturnType<typeof setTimeout> | null = null;
+  let guideRotation = 0;
+  let guideOpen = false;
+  let lastGuidePdfUrl = '';
+
+  $: if (guidePdfUrl !== lastGuidePdfUrl) {
+    guideOpen = false;
+    lastGuidePdfUrl = guidePdfUrl;
+  }
   
   async function handleLogout() {
     stopAutoRefresh();
@@ -28,6 +43,10 @@
 
   function goToProfile() {
     goto('/profilo');
+  }
+  function handleGuideClick() {
+    guideRotation += 360;
+    guideOpen = true;
   }
   function toggleAllProfiles() {
     const params = new URLSearchParams($page.url.searchParams);
@@ -99,6 +118,18 @@
     </div>
  
     <div class="flex-1 flex justify-end items-center gap-2">
+      {#if guidePdfUrl}
+        <button
+          type="button"
+          class="guide-button"
+          style={`--guide-rotation: ${guideRotation}deg;`}
+          title="Guida"
+          aria-label={`Apri la guida di ${currentRouteName}`}
+          on:click={handleGuideClick}
+        >
+          <FontAwesomeIcon icon={faQuestion} class="text-[150%]" />
+        </button>
+      {/if}
       <ButtonGradient
         onClick={handleLogout}
         title="Logout"
@@ -131,9 +162,45 @@
   </div>
 {/if}
 
+{#if guidePdfUrl}
+  {#key guidePdfUrl}
+    <GuideModal
+      isOpen={guideOpen}
+      onClose={() => (guideOpen = false)}
+      pdfUrl={guidePdfUrl}
+      title={`Guida ${currentRouteName}`}
+    />
+  {/key}
+{/if}
+
 
 
 <style>
+  .guide-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #374151;
+    border-radius: 9999px;
+    background: #374151;
+    color: #fff;
+    width: 3.15rem;
+    height: 3.15rem;
+    flex: 0 0 3.15rem;
+    padding: 0;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transform: rotateX(var(--guide-rotation, 0deg));
+    transform-style: preserve-3d;
+    transition: transform 0.55s ease-in-out, background-color 0.2s ease, border-color 0.2s ease;
+  }
+
+  .guide-button:hover {
+    border-color: #4b5563;
+    background: #4b5563;
+  }
+
   .modal-backdrop {
     position: fixed;
     inset: 0;

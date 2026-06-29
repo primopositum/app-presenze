@@ -548,7 +548,7 @@ export const loadData = async () => {
         {#if $auth.user?.is_superuser}
           <button
             type="button"
-            on:click={() => goto('/preMenu', { state: { route: 'presences' } })}
+            on:click={() => goto('/preMenu', { state: { route: '/Presenze' } })}
             aria-label="Torna al pre-menu presenze"
           >
             <FontAwesomeIcon

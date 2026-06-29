@@ -74,5 +74,5 @@ export async function ensureJiraControlLoaded(force = false): Promise<boolean> {
 
 export function isJiraRoute(pathname: string) {
   const path = String(pathname || '');
-  return path.startsWith('/business') || path.startsWith('/JiraHistory');
+  return path.startsWith('/JiraBoard') || path.startsWith('/JiraHistory');
 }

@@ -5,6 +5,7 @@ import {
   jiraFiltersPost,
   jiraIssueTime,
   jiraWorklogsByYear,
+  jiraWorklogsByYearStream,
   jiraStatuses,
   jiraAddWorklog,
   jiraUpdateState,
@@ -17,6 +18,7 @@ import {
   type JiraIssueTimeFilter,
   type JiraCompletedHistoryResponse,
   type JiraYearWorklogResponse,
+  type JiraYearWorklogProgress,
   type JiraStatusesResponse,
   type JiraUpdateStatePayload,
   type JiraWorklogPayload,
@@ -95,6 +97,18 @@ export async function useJiraWorklogsByYear(year: number | string): Promise<Jira
     throw new Error('Anno non valido');
   }
   return jiraWorklogsByYear(parsedYear);
+}
+
+export async function useJiraWorklogsByYearStream(
+  year: number | string,
+  onProgress?: (progress: JiraYearWorklogProgress) => void,
+  signal?: AbortSignal
+): Promise<JiraYearWorklogResponse> {
+  const parsedYear = Number(String(year ?? '').trim());
+  if (!Number.isInteger(parsedYear) || parsedYear < 1900 || parsedYear > 3000) {
+    throw new Error('Anno non valido');
+  }
+  return jiraWorklogsByYearStream(parsedYear, onProgress, signal);
 }
 
 export async function useJiraCompletedHistory(year: number | string = 'all'): Promise<JiraCompletedHistoryResponse> {

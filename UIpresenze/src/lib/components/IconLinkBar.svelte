@@ -66,7 +66,7 @@
 
 <div class="utility-shell" style={`--icon-auto-color: #16a34a;`}>
   <div class="utility-card rounded-[4%] border-[10px] border-gray-800 bg-white p-8 shadow-lg">
-    <button type="button" class="icon-container auto-icon" on:click={() => goto('/auto')} aria-label="Vai alla pagina auto">
+    <button type="button" class="icon-container auto-icon" on:click={() => goto('/Automobili')} aria-label="Vai alla pagina automobili">
       <FontAwesomeIcon icon={faCar} class="text-gray-700 text-[280%]" />
     </button>
 

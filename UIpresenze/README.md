@@ -61,7 +61,7 @@ src/
 │   ├── login/
 │   ├── presences/
 │   ├── trasferte/
-│   ├── auto/
+│   ├── Automobili/
 │   └── profilo/
 └── theme/
     └── palette.js          # Colori dell'app

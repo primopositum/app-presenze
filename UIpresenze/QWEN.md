@@ -45,7 +45,7 @@ src/
 │       ├── timeEntryReload.ts
 │       └── timeEntryUser.ts
 ├── routes/
-│   ├── auto/               # Vehicles module
+│   ├── Automobili/         # Vehicles module
 │   ├── login/              # Login page
 │   ├── preMenu/            # Pre-menu module
 │   ├── presences/          # Presences/attendance module

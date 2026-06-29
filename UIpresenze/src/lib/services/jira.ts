@@ -157,6 +157,10 @@ export type JiraYearWorklogIssue = {
   issue_summary?: string;
   status?: string;
   assignee?: string;
+  issue_type?: string;
+  is_subtask?: boolean;
+  parent_key?: string;
+  parent_summary?: string;
   worklogs_count: number;
   total_seconds: number;
   worklogs: JiraYearWorklogItem[];
@@ -211,6 +215,11 @@ export type JiraYearWorklogResponse = {
   worklogs_count: number;
   total_seconds: number;
   projects: JiraYearWorklogProject[];
+};
+
+export type JiraYearWorklogProgress = {
+  loaded: number;
+  total: number;
 };
 
 export type JiraCompletedHistoryResponse = {
@@ -364,6 +373,86 @@ export function jiraWorklogsByYear(year: string | number) {
     view: 'tree',
     year: String(year ?? '').trim(),
   }) as Promise<JiraYearWorklogResponse>;
+}
+
+export async function jiraWorklogsByYearStream(
+  year: string | number,
+  onProgress?: (progress: JiraYearWorklogProgress) => void,
+  signal?: AbortSignal
+): Promise<JiraYearWorklogResponse> {
+  const normalizedYear = String(year ?? '').trim();
+  const url = `${BASE}/jira/worklogs/year/stream/?year=${encodeURIComponent(normalizedYear)}`;
+  const res = await authFetch(
+    url,
+    {
+      method: 'GET',
+      headers: { Accept: 'text/event-stream' },
+      signal
+    },
+    true
+  );
+
+  if (!res.ok) {
+    const isJson = res.headers.get('content-type')?.includes('application/json');
+    const data = isJson ? await res.json() : await res.text();
+    const message = (isJson && (data?.error || data?.detail)) || res.statusText;
+    throw new Error(message || 'Request failed');
+  }
+  if (!res.body) {
+    throw new Error('Stream worklog non disponibile');
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result: JiraYearWorklogResponse | null = null;
+
+  const parseEvent = (eventBlock: string) => {
+    const rawData = eventBlock
+      .split('\n')
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trimStart())
+      .join('\n');
+    if (!rawData) return;
+
+    const event = JSON.parse(rawData);
+    if (event.type === 'start') {
+      onProgress?.({ loaded: 0, total: Number(event.total || 0) });
+      return;
+    }
+    if (event.type === 'progress') {
+      onProgress?.({ loaded: Number(event.loaded || 0), total: Number(event.total || 0) });
+      return;
+    }
+    if (event.type === 'error') {
+      throw new Error(String(event.error || 'Errore caricamento worklog annuali'));
+    }
+    if (event.type === 'done') {
+      const { type: _type, ...payload } = event;
+      result = payload as JiraYearWorklogResponse;
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer = (buffer + decoder.decode(value, { stream: !done })).replace(/\r\n/g, '\n');
+
+    let separatorIndex = buffer.indexOf('\n\n');
+    while (separatorIndex >= 0) {
+      const eventBlock = buffer.slice(0, separatorIndex);
+      buffer = buffer.slice(separatorIndex + 2);
+      parseEvent(eventBlock);
+      separatorIndex = buffer.indexOf('\n\n');
+    }
+
+    if (done) break;
+  }
+
+  if (buffer.trim()) parseEvent(buffer);
+  if (!result) {
+    throw new Error('Stream worklog terminato senza dati');
+  }
+  return result;
 }
 
 export function jiraCompletedHistory(year: string | number = 'all') {

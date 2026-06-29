@@ -99,7 +99,7 @@ UIpresenze/
 │   │       ├── timeEntryReload.ts
 │   │       └── timeEntryUser.ts
 │   ├── routes/                   # Routing SvelteKit (file-based)
-│   │   ├── auto/                 # Modulo gestione auto
+│   │   ├── Automobili/           # Modulo gestione automobili
 │   │   ├── login/                # Pagina di login
 │   │   ├── preMenu/              # Menu intermedio
 │   │   ├── presences/            # Modulo presenze (core)
@@ -222,7 +222,7 @@ Gestione delle trasferte aziendali:
 
 **API Service**: `src/lib/services/trasferte.ts`
 
-### 3. Modulo Auto (`/auto`)
+### 3. Modulo Automobili (`/Automobili`)
 
 Gestione parco auto aziendale:
 
