@@ -15,6 +15,9 @@
   --color-muted: #64748b;
   --color-text: rgba(0, 0, 0, 0.7);
 
+  /* Font size custom */
+  --text-xxs: 0.625rem; /* 10px -> classe text-xxs */
+
   /* Facoltativo: mappa i font per Tailwind */
   --font-sans: 'Inter', system-ui, sans-serif;
   --font-mono: 'Fira Mono', ui-monospace, SFMono-Regular, Menlo, monospace;

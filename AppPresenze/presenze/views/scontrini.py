@@ -28,6 +28,10 @@ def _folder_name(trasferta: Trasferta) -> str:
     return f"{data}_{trasferta.pk}"
 
 
+def _is_staff_or_super(user):
+    return user.is_staff or user.is_superuser
+
+
 def _scontrino_upload_logic(request, t_id: int):
     """
     POST /presenze/api/trasferte/<t_id>/scontrini/
@@ -120,10 +124,10 @@ def _scontrini_list_logic(request, t_id: int):
             status=status.HTTP_404_NOT_FOUND,
         )
 
-    is_super = request.user.is_superuser
+    is_admin = _is_staff_or_super(request.user)
     is_owner = trasferta.utente_id == request.user.id
 
-    if not (is_super or is_owner):
+    if not (is_admin or is_owner):
         return Response(
             {"errors": "Non hai i permessi per visualizzare gli scontrini di questa trasferta."},
             status=status.HTTP_403_FORBIDDEN,
@@ -165,9 +169,9 @@ def _scontrino_get_or_delete_logic(request, t_id: int, filename: str, delete: bo
             status=status.HTTP_404_NOT_FOUND,
         )
 
-    is_super = request.user.is_superuser
+    is_admin = _is_staff_or_super(request.user)
     is_owner = trasferta.utente_id == request.user.id
-    if not (is_super or is_owner):
+    if not (is_admin or is_owner):
         return Response(
             {"errors": "Non hai i permessi per accedere agli scontrini di questa trasferta."},
             status=status.HTTP_403_FORBIDDEN,
@@ -175,6 +179,12 @@ def _scontrino_get_or_delete_logic(request, t_id: int, filename: str, delete: bo
     if delete and trasferta.validation_level == Trasferta.ValidationLevel.VALIDATO_ADMIN:
         return Response(
             {"errors": "Non è possibile eliminare scontrini di una trasferta validata dall'admin."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if delete and not (request.user.is_superuser or is_owner):
+        return Response(
+            {"errors": "Non hai i permessi per eliminare scontrini di questa trasferta."},
             status=status.HTTP_403_FORBIDDEN,
         )
 

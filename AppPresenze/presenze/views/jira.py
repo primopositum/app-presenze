@@ -743,6 +743,12 @@ def _nest_subtasks_into_parents(payload: dict) -> None:
             fields = {}
             issue["fields"] = fields
 
+        issue_type = fields.get("issuetype")
+        is_subtask = bool(issue_type.get("subtask")) if isinstance(issue_type, dict) else False
+        if not is_subtask:
+            top_level.append(issue)
+            continue
+
         parent = fields.get("parent")
         parent_key = str((parent or {}).get("key") or "").strip() if isinstance(parent, dict) else ""
         parent_issue = issue_map.get(parent_key)
@@ -787,7 +793,7 @@ def _search_issues_for_year_worklog(domain: str, headers: dict, target_year: int
     while True:
         params = {
             "jql": jql,
-            "fields": ["summary", "project", "status", "assignee"],
+            "fields": _completed_history_fields(),
             "startAt": start_at,
             "maxResults": 100,
         }
@@ -1725,6 +1731,9 @@ class JiraWorklogStreamView(APIView):
                     if issue_key:
                         fields = (issue.get("fields") or {}) if isinstance(issue, dict) else {}
                         project = fields.get("project", {}) or {}
+                        issue_type = fields.get("issuetype", {}) or {}
+                        parent = fields.get("parent", {}) or {}
+                        parent_fields = parent.get("fields", {}) or {}
                         project_key = str(project.get("key") or "N/D").strip() or "N/D"
                         project_name = str(project.get("name") or "Progetto non disponibile").strip() or "Progetto non disponibile"
 
@@ -1776,7 +1785,11 @@ class JiraWorklogStreamView(APIView):
                                     "issue_key": issue_key,
                                     "issue_summary": fields.get("summary"),
                                     "status": (fields.get("status", {}) or {}).get("name"),
-                                    "assignee": author.get("displayName"),
+                                    "assignee": (fields.get("assignee", {}) or {}).get("displayName"),
+                                    "issue_type": issue_type.get("name"),
+                                    "is_subtask": bool(issue_type.get("subtask")),
+                                    "parent_key": parent.get("key"),
+                                    "parent_summary": parent_fields.get("summary"),
                                     "worklogs_count": len(issue_worklogs),
                                     "total_seconds": issue_total_seconds,
                                     "worklogs": issue_worklogs,

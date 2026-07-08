@@ -19,6 +19,7 @@ from ..models import Utente, Trasferta, Signature, SignatureEvent
 from ..serializer import TrasfertaSerializer
 from ..TrasfertePDF import (
     TrasfertePDFView,
+    TrasfertaSingolaPDFView,
     build_trasferte_pdf_bytes,
     _get_client_ip,
     _signature_to_temp_file,
@@ -319,6 +320,11 @@ def trasferta_delete(request, t_id: int):
 @permission_classes([IsAuthenticated])
 def trasferte_mese_scorso_pdf(request):
     return TrasfertePDFView.as_view()(request)
+
+
+@permission_classes([IsAuthenticated])
+def trasferta_singola_pdf(request):
+    return TrasfertaSingolaPDFView.as_view()(request)
 
 
 @api_view(["GET"])

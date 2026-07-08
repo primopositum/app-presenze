@@ -2,7 +2,7 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
-  import { faArrowLeft, faRotate, faCheck, faBroom, faFlag, faCalculator, faCar, faLocationDot } from '@fortawesome/free-solid-svg-icons';
+  import { faArrowLeft, faRotate, faCheck, faBroom, faFlag, faCalculator, faCar, faLocationDot, faFilePdf } from '@fortawesome/free-solid-svg-icons';
   import { onMount } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import palette from '../../../theme/palette.js';
@@ -19,7 +19,7 @@
     getFavoriteAutomobileId,
     sortFavoriteAutomobileFirst
   } from '$lib/services/automobilePreference';
-  import { useCreateSpese, useScontrini, useValidateTrasferta } from '$lib/hooks/useTrasferte';
+  import { useCreateSpese, useScontrini, useValidateTrasferta, useTrasfertaSinglePdf } from '$lib/hooks/useTrasferte';
   import type { User } from '$lib/services/users';
   import LoaderOverlay from '$lib/components/loader/LoaderOverlay.svelte';
   import SpeseCard from '$lib/components/SpeseCard.svelte';
@@ -40,7 +40,7 @@
   let mapRef: {
     calcolaDistanza: (a1?: string, a2?: string) => Promise<number | null>;
     hasError: () => boolean;
-    getErrorMessage: () => string;
+    getErrorMessage: () => string; 
     getRouteTragitto: () => string[];
   } | null = null;
   let distanzaKm: number | null = null;
@@ -62,8 +62,12 @@
   let autoOptions: Array<{ id: number; label: string }> = [];
   let selectedAutoId = '';
   let isLocked = false;
+  let canEdit = false;
+  let isReadOnly = false;
   let isSuperuser = false;
+  let currentUserId: number | null = null;
   let refreshKey = 0;
+  let generatingPdf = false;
   let isKmBandieraRossa = false;
   let toastOpen = false;
   let toastSuccess = true;
@@ -82,6 +86,7 @@
 
   $: isAuthed = $auth.isAuthed;
   $: isSuperuser = !!$auth.user?.is_superuser;
+  $: currentUserId = $auth.user?.id ?? null;
 
   function getAutoId(auto: Automobile): number | null {
     return auto.id ?? auto.a_id ?? auto.A_ID ?? null;
@@ -181,7 +186,7 @@
   }
 
   async function handleCoefficienteChange(event: Event) {
-    if (!item || isLocked) return;
+    if (!item || isReadOnly) return;
 
     const value = (event.currentTarget as HTMLInputElement).value.trim();
     costoKmInput = value;
@@ -238,7 +243,7 @@
   }
 
   async function handleAutomobileChange(event: Event) {
-    if (!item || isLocked) return;
+    if (!item || isReadOnly) return;
 
     const nextAutoId = (event.currentTarget as HTMLSelectElement).value;
     const previousAutoId = selectedAutoId;
@@ -303,6 +308,32 @@
     }
   }
 
+  async function handleGeneratePdf() {
+    if (!item?.id || generatingPdf) return;
+
+    generatingPdf = true;
+    error = null;
+    try {
+      const { generatePdf } = useTrasfertaSinglePdf({ tId: item.id });
+      const res = await generatePdf();
+      const url = URL.createObjectURL(res.payload);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `trasferta_${item.utente_nome}_${item.utente_cognome}_${item.data}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      showToast('PDF trasferta generato correttamente.');
+    } catch (e: any) {
+      const message = e?.message || 'Errore generazione PDF trasferta';
+      error = message;
+      showToast(message, false);
+    } finally {
+      generatingPdf = false;
+    }
+  }
+
   async function handleScontrinoGet(filename: string) {
     if (!item?.id) return;
     try {
@@ -322,7 +353,7 @@
   }
 
   async function handleScontrinoDelete(filename: string) {
-    if (!item?.id || isLocked) return;
+    if (!item?.id || isReadOnly) return;
     try {
       const { deleteScontrino } = useScontrini({ tId: item.id });
       await deleteScontrino(filename);
@@ -364,7 +395,7 @@
   }
 
   async function handleCreateSpesa(payload: SpesaFormSubmit) {
-    if (!item || creatingSpesa || isLocked) return;
+    if (!item || creatingSpesa || isReadOnly) return;
 
     const spesaType = Number(payload.type);
     if (!Number.isFinite(spesaType) || spesaType <= 0) {
@@ -427,7 +458,7 @@
   }
 
   async function handleDeleteSpesa(spesaToDelete: Spesa) {
-    if (!item || isLocked) return;
+    if (!item || isReadOnly) return;
 
     try {
       const segments = (spesaToDelete.tragitto ?? []).map((v) => String(v).trim()).filter(Boolean);
@@ -452,7 +483,7 @@
   }
 
   async function handleCalcolaDistanza() {
-    if (isLocked) return;
+    if (isReadOnly) return;
     if (!hasMapsApiKey) {
       mapUnavailable = true;
       kmError = 'Chiave Google Maps mancante: imposta VITE_GOOGLE_MAPS_API_KEY nel file .env';
@@ -476,7 +507,7 @@
   }
 
   async function handleCreateKmSpesa() {
-    if (!item || creatingSpesa || isLocked) return;
+    if (!item || creatingSpesa || isReadOnly) return;
 
     if (mapUnavailable) {
       const manualKm = Number(String(distanzaKmInput).replace(',', '.'));
@@ -525,7 +556,7 @@
   }
 
   function handleClearRouteInputs() {
-    if (isLocked) return;
+    if (isReadOnly) return;
     partenza = DEFAULT_PARTENZA;
     arrivo = '';
   }
@@ -552,11 +583,13 @@
   }
 
   $: isLocked = item?.validation_level === 2;
+  $: canEdit = !!item && (isSuperuser || Number(currentUserId) === Number(item.utente_id));
+  $: isReadOnly = isLocked || !canEdit;
   $: canShowValidateButton = !!item && (
     (isSuperuser && item.validation_level === 1) ||
-    (!isSuperuser && item.validation_level === 0)
+    (!isSuperuser && canEdit && item.validation_level === 0)
   );
-  $: if (isLocked && showSpesaForm) {
+  $: if (isReadOnly && showSpesaForm) {
     showSpesaForm = false;
   }
 
@@ -610,6 +643,20 @@
         </button>
       {/if}
 
+      <button
+        type="button"
+        on:click={handleGeneratePdf}
+        disabled={generatingPdf || !item}
+        aria-label="Crea PDF trasferta"
+        title="Crea PDF trasferta"
+      >
+        <FontAwesomeIcon
+          icon={faFilePdf}
+          class="text-[150%]"
+          style={`color: ${palette.secondary.main};`}
+        />
+      </button>
+
     </div>
     
     <div
@@ -623,7 +670,7 @@
           tId={item?.id ?? null}
           onSavedFileClick={handleScontrinoGet}
           onSavedFileDelete={handleScontrinoDelete}
-          disableSavedFileDelete={isLocked}
+          disableSavedFileDelete={isReadOnly}
           on:uploadComplete={handleReceiptUploadComplete}
         />
       </div>
@@ -642,7 +689,7 @@
             <button
               class="cursor-pointer rounded-[10px] border border-gray-300 bg-white px-3 py-2 text-[0.9rem] font-semibold transition hover:bg-gray-50"
               on:click={handleCalcolaDistanza}
-              disabled={isLocked || !hasMapsApiKey}
+              disabled={isReadOnly || !hasMapsApiKey}
             >
               Calcola
             </button>
@@ -657,7 +704,7 @@
                   step="0.1"
                   bind:value={distanzaKmInput}
                   placeholder="0.0"
-                  disabled={isLocked}
+                  disabled={isReadOnly}
                 />
               </div>
             {:else}
@@ -706,7 +753,7 @@
                 aria-pressed={isKmBandieraRossa}
                 title="Andata e Ritorno"
                 on:click={() => (isKmBandieraRossa = !isKmBandieraRossa)}
-                disabled={creatingSpesa || isLocked}
+                disabled={creatingSpesa || isReadOnly}
               >
                 <FontAwesomeIcon icon={faFlag} />
               </button>
@@ -718,13 +765,13 @@
                 placeholder="Coeff. auto selezionata"
                 value={costoKmInput}
                 on:change={handleCoefficienteChange}
-                disabled={creatingSpesa || isLocked}
+                disabled={creatingSpesa || isReadOnly}
               />
               <button
                 class="min-w-[44px] cursor-pointer rounded-[10px] border border-gray-300 bg-white px-3 py-2 text-[1rem] font-bold transition hover:bg-gray-50"
                 type="button"
                 on:click={handleCreateKmSpesa}
-                disabled={creatingSpesa || coefficienteSaving || isLocked}
+                disabled={creatingSpesa || coefficienteSaving || isReadOnly}
                 aria-label="Crea spesa chilometrica"
               >
                 <FontAwesomeIcon icon={faCalculator} />
@@ -739,7 +786,7 @@
                 placeholder="Inserisci partenza"
                 bind:value={partenza}
                 on:keydown={handleRouteInputsEnter}
-                disabled={creatingSpesa || isLocked}
+                disabled={creatingSpesa || isReadOnly}
               />
               <input
                 class="w-full rounded-[10px] border border-gray-300 bg-white px-3 py-2.5 text-[0.9rem] outline-none focus:border-gray-400 focus:shadow-[0_0_0_2px_rgba(156,163,175,0.18)]"
@@ -747,13 +794,13 @@
                 placeholder="Inserisci arrivo"
                 bind:value={arrivo}
                 on:keydown={handleRouteInputsEnter}
-                disabled={creatingSpesa || isLocked}
+                disabled={creatingSpesa || isReadOnly}
               />
               <button
                 class="inline-flex h-[42px] w-[42px] cursor-pointer items-center justify-center rounded-[10px] border border-gray-300 bg-white transition hover:bg-gray-50"
                 type="button"
                 on:click={handleClearRouteInputs}
-                disabled={creatingSpesa || isLocked}
+	                disabled={creatingSpesa || isReadOnly}
                 aria-label="Pulisci partenza e arrivo"
                 title="Pulisci campi"
               >
@@ -774,7 +821,7 @@
 	                class="w-full rounded-[10px] border border-gray-300 bg-white px-3 py-2.5 text-[0.95rem] outline-none focus:border-gray-400 focus:shadow-[0_0_0_2px_rgba(156,163,175,0.18)]"
 	                bind:value={selectedAutoId}
 	                on:change={handleAutomobileChange}
-	                disabled={creatingSpesa || autoLoading || isLocked}
+	                disabled={creatingSpesa || autoLoading || isReadOnly}
 	              >
 	                <option value="">Nessuna automobile</option>
 	                {#each autoOptions as option (option.id)}
@@ -826,7 +873,7 @@
           class="h-8 w-8 rounded-full border border-gray-300 bg-white text-lg leading-none transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
           type="button"
           on:click={() => (showSpesaForm = !showSpesaForm)}
-          disabled={creatingSpesa || isLocked}
+          disabled={creatingSpesa || isReadOnly}
           aria-label="Aggiungi spesa"
         >
           +
@@ -854,7 +901,7 @@
           {#each spese as s (s.id)}
             <SpeseCard
               spesa={s}
-              readonly={isLocked}
+              readonly={isReadOnly}
               on:delete={(e) => handleDeleteSpesa(e.detail)}
               on:deleteError={handleDeleteSpesaError}
             />

@@ -39,7 +39,6 @@
 
   let isDragging = false;
   let fileInput: HTMLInputElement;
-  let autoDateInput: HTMLInputElement;
   let allFiles: Array<ScontrinoFile | AutoPdfCurrentMonthItem> = [];
   let fileCounter = 1;
   let loadingFiles = false;
@@ -279,20 +278,35 @@
     fileInput.click();
   }
 
-  function openAutoCalendar(): void {
+  const autoMonthNames = [
+    'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
+    'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'
+  ];
+
+  function buildAutoYearOptions(): number[] {
+    const current = new Date().getFullYear();
+    const years: number[] = [];
+    for (let y = current - 5; y <= current + 1; y++) years.push(y);
+    return years;
+  }
+  const autoYearOptions = buildAutoYearOptions();
+
+  $: autoMonthParts = /^\d{4}-\d{2}$/.test(selectedAutoMonth)
+    ? selectedAutoMonth.split('-')
+    : todayIsoMonth().split('-');
+  $: selectedAutoYear = autoMonthParts[0];
+  $: selectedAutoMonthNum = autoMonthParts[1];
+
+  function handleAutoMonthChange(e: Event): void {
     if (disabled) return;
-    if (!autoDateInput) return;
-    if (typeof autoDateInput.showPicker === 'function') {
-      autoDateInput.showPicker();
-      return;
-    }
-    autoDateInput.click();
+    const mm = (e.target as HTMLSelectElement).value;
+    selectedAutoMonth = `${selectedAutoYear}-${mm}`;
   }
 
-  function handleAutoDateChange(e: Event): void {
+  function handleAutoYearChange(e: Event): void {
     if (disabled) return;
-    const input = e.target as HTMLInputElement;
-    selectedAutoMonth = input.value || todayIsoMonth();
+    const yyyy = (e.target as HTMLSelectElement).value;
+    selectedAutoMonth = `${yyyy}-${selectedAutoMonthNum}`;
   }
 
   function handleFileInput(e: Event): void {
@@ -378,33 +392,31 @@
 
 <div class="mx-auto flex w-full max-w-[360px] flex-col gap-2.5 font-sans">
   {#if mode === 'auto'}
-    <div class="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-3 py-2">
-      <span class="text-xs font-medium text-gray-600">{selectedAutoMonthLabel}</span>
-      <button
-        type="button"
-        class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition hover:bg-gray-50"
-        on:click={openAutoCalendar}
-        disabled={disabled}
-        aria-label="Seleziona data PDF auto"
-        title="Seleziona data PDF auto"
-      >
-        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-          <line x1="16" y1="2" x2="16" y2="6"></line>
-          <line x1="8" y1="2" x2="8" y2="6"></line>
-          <line x1="3" y1="10" x2="21" y2="10"></line>
-        </svg>
-      </button>
-      <input
-        bind:this={autoDateInput}
-        type="month"
-        bind:value={selectedAutoMonth}
-        on:change={handleAutoDateChange}
-        class="pointer-events-none absolute opacity-0"
-        tabindex="-1"
-        aria-hidden="true"
-        disabled={disabled}
-      />
+    <div class="flex items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
+      <span class="text-xs font-medium text-gray-600">Periodo PDF auto</span>
+      <div class="flex items-center gap-1.5">
+        <select
+          class="rounded-lg border border-gray-300 bg-white py-2 pl-2.5 pr-8 text-xxs font-medium leading-normal text-gray-700 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+          on:change={handleAutoMonthChange}
+          disabled={disabled}
+          aria-label="Mese PDF auto"
+        >
+          {#each autoMonthNames as name, i}
+            {@const mm = String(i + 1).padStart(2, '0')}
+            <option value={mm} selected={mm === selectedAutoMonthNum}>{name}</option>
+          {/each}
+        </select>
+        <select
+          class="rounded-lg border border-gray-300 bg-white py-2 pl-2.5 pr-8 text-xxs font-medium leading-normal text-gray-700 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+          on:change={handleAutoYearChange}
+          disabled={disabled}
+          aria-label="Anno PDF auto"
+        >
+          {#each autoYearOptions as year}
+            <option value={String(year)} selected={String(year) === selectedAutoYear}>{year}</option>
+          {/each}
+        </select>
+      </div>
     </div>
   {/if}
 

@@ -86,16 +86,16 @@ export type ScontrinoUploadResponse = {
 
 /**
  * Regola sessione:
- * - superuser -> NON passa uId
- * - non superuser -> passa uId = $auth.user.id
+ * - staff/superuser -> NON passa uId
+ * - non staff/superuser -> passa uId = $auth.user.id
  * - se params.uId è passato esplicitamente, lo rispetta (utile per superuser che filtra)
  */
 function resolveUId(explicitUId?: number) {
   if (explicitUId !== undefined && explicitUId !== null) return explicitUId;
 
   const a = get(auth);
-  const isSuperuser = !!a?.user?.is_superuser;
-  if (isSuperuser) return undefined;
+  const isPrivileged = !!(a?.user?.is_staff || a?.user?.is_superuser);
+  if (isPrivileged) return undefined;
 
   const id = a?.user?.id;
   return id ?? undefined;
@@ -164,6 +164,29 @@ export async function fetchTrasfertaDossier(uId: number | string, data: string):
 
 export async function getTrasfertaDossier(uId: number | string, data: string) {
   const res = await fetchTrasfertaDossier(uId, data);
+  return res.blob();
+}
+
+export async function fetchTrasfertaSinglePdf(tId: number | string): Promise<Response> {
+  const url = `${BASE}/trasferte/Singlepdf/?t_id=${encodeURIComponent(String(tId))}`;
+  const res = await authFetch(url, { method: 'GET' });
+  if (!res.ok) {
+    let message = res.statusText || 'Request failed';
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const data = await res.json().catch(() => null);
+      message = data?.errors || data?.error || data?.detail || message;
+    } else {
+      const text = await res.text().catch(() => '');
+      if (text) message = text;
+    }
+    throw new Error(message);
+  }
+  return res;
+}
+
+export async function getTrasfertaSinglePdf(tId: number | string) {
+  const res = await fetchTrasfertaSinglePdf(tId);
   return res.blob();
 }
 

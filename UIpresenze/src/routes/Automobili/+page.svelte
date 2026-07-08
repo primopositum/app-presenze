@@ -39,7 +39,7 @@
   let toastMessage = '';
 
   let marca = '';
-  let alimentazione = '';
+  let alimentazione = ''; 
   let descrizione = '';
   let coefficiente = '';
   let isActive = true;

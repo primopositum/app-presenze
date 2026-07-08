@@ -25,6 +25,8 @@ from rest_framework.views import APIView
 from docx import Document
 from docx.shared import Cm
 
+from pypdf import PdfWriter
+
 from .models import Contratto, Signature, SignatureEvent, Spesa, Trasferta, Utente
 
 
@@ -38,6 +40,9 @@ DOCX_TEMPLATE_PATH = Path(
 
 SIGNATURE_WIDTH_CM = 5.0
 SIGNATURE_HEIGHT_CM = 2.5
+
+# Estensioni dei giustificativi che vanno convertiti in PDF prima di essere allegati.
+IMAGE_SCONTRINO_SUFFIXES = {".jpg", ".jpeg", ".png"}
 
 
 def _to_bool(value: str | None, default: bool = False) -> bool:
@@ -360,6 +365,44 @@ def _fill_docx(
     return out
 
 
+def _run_soffice_convert(input_paths: List[Path], out_dir: Path) -> List[str]:
+    """
+    Converte in PDF, via LibreOffice headless, i file passati.
+    Ritorna la lista degli eventuali errori (vuota in caso di successo).
+    """
+    if not input_paths:
+        return []
+
+    conversion_errors: List[str] = []
+    try:
+        subprocess.run(
+            [
+                "soffice",
+                "--headless",
+                "--convert-to",
+                "pdf",
+                "--outdir",
+                str(out_dir),
+                *[str(p) for p in input_paths],
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except FileNotFoundError:
+        conversion_errors.append("soffice non trovato nel container")
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        stdout = (exc.stdout or "").strip()
+        details = stderr or stdout or str(exc)
+        conversion_errors.append(f"soffice: {details}")
+    except Exception as exc:
+        conversion_errors.append(f"soffice: {exc}")
+
+    return conversion_errors
+
+
 def _convert_docx_to_pdf(docx_bytes: bytes) -> BytesIO:
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp = Path(tmp_dir)
@@ -367,34 +410,8 @@ def _convert_docx_to_pdf(docx_bytes: bytes) -> BytesIO:
         pdf_path = tmp / "trasferte.pdf"
         docx_path.write_bytes(docx_bytes)
 
-        conversion_errors: List[str] = []
-
         # Conversione DOCX -> PDF via LibreOffice headless.
-        try:
-            subprocess.run(
-                [
-                    "soffice",
-                    "--headless",
-                    "--convert-to",
-                    "pdf",
-                    "--outdir",
-                    str(tmp),
-                    str(docx_path),
-                ],
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-        except FileNotFoundError:
-            conversion_errors.append("soffice non trovato nel container")
-        except subprocess.CalledProcessError as exc:
-            stderr = (exc.stderr or "").strip()
-            stdout = (exc.stdout or "").strip()
-            details = stderr or stdout or str(exc)
-            conversion_errors.append(f"soffice: {details}")
-        except Exception as exc:
-            conversion_errors.append(f"soffice: {exc}")
+        conversion_errors = _run_soffice_convert([docx_path], tmp)
 
         if not pdf_path.exists():
             raise ValidationError(
@@ -409,6 +426,84 @@ def _convert_docx_to_pdf(docx_bytes: bytes) -> BytesIO:
         out = BytesIO(pdf_path.read_bytes())
         out.seek(0)
         return out
+
+
+def _scontrini_folder_for(trasferta: Trasferta) -> Path:
+    """Cartella dei giustificativi della trasferta: SCONTRINI_ROOT/{data}_{t_id}."""
+    scontrini_root = Path(settings.SCONTRINI_ROOT)
+    folder_name = f"{trasferta.data.strftime('%Y-%m-%d')}_{trasferta.id}"
+    return scontrini_root / folder_name
+
+
+def _collect_scontrini_paths(trasferta: Trasferta) -> List[Path]:
+    """Ritorna i file dei giustificativi della trasferta, ordinati per nome."""
+    folder = _scontrini_folder_for(trasferta)
+    if not folder.exists():
+        return []
+    return [p for p in sorted(folder.iterdir()) if p.is_file()]
+
+
+def _merge_scontrini_into_pdf(base_pdf_bytes: bytes, scontrini_paths: List[Path]) -> bytes:
+    """
+    Restituisce un unico PDF composto dal PDF base seguito dai giustificativi.
+    I giustificativi PDF vengono allegati direttamente; le immagini (jpg/png)
+    vengono convertite in PDF via LibreOffice headless. I file non convertibili
+    vengono ignorati senza compromettere la generazione del documento.
+    """
+    if not scontrini_paths:
+        return base_pdf_bytes
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp = Path(tmp_dir)
+
+        # Pre-converte le immagini in PDF: ogni immagine viene copiata con un
+        # nome indicizzato univoco per evitare collisioni sui nomi di output.
+        converted_by_index: Dict[int, Path] = {}
+        staged_images: List[Path] = []
+        image_index_by_stem: Dict[str, int] = {}
+        for idx, path in enumerate(scontrini_paths):
+            suffix = path.suffix.lower()
+            if suffix in IMAGE_SCONTRINO_SUFFIXES:
+                staged = tmp / f"scontrino_{idx}{suffix}"
+                staged.write_bytes(path.read_bytes())
+                staged_images.append(staged)
+                image_index_by_stem[staged.stem] = idx
+
+        if staged_images:
+            _run_soffice_convert(staged_images, tmp)
+            for staged in staged_images:
+                pdf_path = tmp / f"{staged.stem}.pdf"
+                if pdf_path.exists():
+                    converted_by_index[image_index_by_stem[staged.stem]] = pdf_path
+
+        writer = PdfWriter()
+        try:
+            writer.append(BytesIO(base_pdf_bytes))
+        except Exception as exc:
+            raise ValidationError(
+                {"errors": f"Errore lettura PDF trasferta: {exc}"}
+            ) from exc
+
+        for idx, path in enumerate(scontrini_paths):
+            suffix = path.suffix.lower()
+            if suffix == ".pdf":
+                source = path
+            elif idx in converted_by_index:
+                source = converted_by_index[idx]
+            else:
+                # Formato non supportato o conversione fallita: si ignora il file.
+                continue
+            try:
+                writer.append(str(source))
+            except Exception:
+                # Giustificativo corrotto/protetto: si salta senza bloccare tutto.
+                continue
+
+        out = BytesIO()
+        writer.write(out)
+        writer.close()
+        out.seek(0)
+        return out.getvalue()
 
 
 def _get_client_ip(request) -> str | None:
@@ -622,6 +717,119 @@ class TrasfertePDFView(APIView):
 
         pdf_stream = BytesIO(pdf_bytes)
         filename = f"trasferte_{user.nome}_{user.cognome}_{start_prev_month.strftime('%Y_%m')}.pdf"
+        response = FileResponse(pdf_stream, as_attachment=True, filename=filename)
+        response["X-Firma-Status"] = firma_status
+        response["Access-Control-Expose-Headers"] = "X-Firma-Status"
+        return response
+
+
+class TrasfertaSingolaPDFView(APIView):
+    """
+    GET /api/trasferte/Singlepdf/?t_id=<t_id>
+
+    Genera lo stesso PDF di TrasfertePDFView ma per una singola trasferta,
+    usando lo stesso template, e vi allega solo i giustificativi (scontrini)
+    della trasferta corrente, restituendo un unico file PDF.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        t_id_param = request.query_params.get("t_id")
+        firma = _to_bool(request.query_params.get("firma"), default=False)
+        firma_path_param = request.query_params.get("firma_path")
+        firma_status = "ok"
+
+        if not t_id_param:
+            return Response(
+                {"errors": "Parametro 't_id' obbligatorio."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            t_id = int(t_id_param)
+        except (TypeError, ValueError):
+            return Response(
+                {"errors": "Parametro 't_id' non valido."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            trasferta = (
+                Trasferta.objects
+                .select_related("automobile", "utente")
+                .prefetch_related("spese")
+                .get(pk=t_id)
+            )
+        except Trasferta.DoesNotExist:
+            return Response(
+                {"errors": "Trasferta non trovata."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        is_super = request.user.is_superuser
+        is_owner = request.user.id == trasferta.utente_id
+        if not (is_super or is_owner):
+            return Response(
+                {"errors": "Non hai i permessi per questa trasferta."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        user = trasferta.utente
+        month_start = trasferta.data.replace(day=1)
+
+        firma_path = None
+        signature_used = None
+        temp_dir = None
+        if firma:
+            if firma_path_param:
+                firma_path = Path(firma_path_param)
+            else:
+                signature_used = (
+                    Signature.objects
+                    .filter(user_id=user.id)
+                    .order_by("-created_at")
+                    .first()
+                )
+                if signature_used is None:
+                    firma = False
+                    firma_status = "firma mancante"
+                temp_dir = tempfile.TemporaryDirectory()
+                if signature_used is not None:
+                    firma_path = _signature_to_temp_file(signature_used, temp_dir.name)
+                    if firma_path is None:
+                        firma = False
+                        firma_status = "firma mancante"
+
+        try:
+            base_pdf_bytes = build_trasferte_pdf_bytes(
+                user=user,
+                trasferte=[trasferta],
+                period_start=month_start,
+                firma=firma,
+                firma_path=firma_path,
+                reference_trasferta=trasferta,
+            )
+        finally:
+            if temp_dir is not None:
+                temp_dir.cleanup()
+
+        scontrini_paths = _collect_scontrini_paths(trasferta)
+        pdf_bytes = _merge_scontrini_into_pdf(base_pdf_bytes, scontrini_paths)
+
+        if firma and signature_used is not None:
+            SignatureEvent.objects.create(
+                signature=signature_used,
+                user=request.user,
+                event_type=SignatureEvent.EventType.USED,
+                document_id=uuid.uuid4(),
+                document_sha256=hashlib.sha256(pdf_bytes).hexdigest(),
+                ip_address=_get_client_ip(request),
+                user_agent=request.META.get("HTTP_USER_AGENT", ""),
+            )
+
+        pdf_stream = BytesIO(pdf_bytes)
+        filename = f"trasferta_{user.nome}_{user.cognome}_{trasferta.data.strftime('%Y_%m_%d')}.pdf"
         response = FileResponse(pdf_stream, as_attachment=True, filename=filename)
         response["X-Firma-Status"] = firma_status
         response["Access-Control-Expose-Headers"] = "X-Firma-Status"

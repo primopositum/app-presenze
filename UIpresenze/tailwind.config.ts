@@ -5,7 +5,7 @@ import typography from '@tailwindcss/typography';
 import plugin from 'tailwindcss/plugin';
 
 const config: Config = {
-  darkMode: 'class', 
+  darkMode: 'class',
   content: [
     './src/**/*.{html,js,svelte,ts}', // scansiona tutti i file Svelte/TS/JS/HTML
   ],

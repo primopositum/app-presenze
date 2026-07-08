@@ -35,10 +35,12 @@ URL_TE_RANGE_OVERRIDE = f"{BASE}/time-entries/range-override/"
 URL_TE_BULK_VALIDATE  = f"{BASE}/time-entries/bulk-validate-month/"
 
 URL_TRASFERTA_CREATE = f"{BASE}/trasferte/create/"
+URL_TRASFERTA_LIST   = f"{BASE}/trasferte/"
 URL_TRASFERTA_UPDATE = lambda t_id: f"{BASE}/trasferte/{t_id}/"
 URL_TRASFERTA_VALID  = lambda tr_id: f"{BASE}/trasferte/{tr_id}/validation/"
 URL_TRASFERTA_DELETE = lambda t_id: f"{BASE}/trasferte/{t_id}/delete/"
 
+URL_SPESA_LIST       = lambda t_id: f"{BASE}/trasferte/{t_id}/spese/"
 URL_SPESA_CREATE     = lambda t_id: f"{BASE}/trasferte/{t_id}/spese/create/"
 URL_SPESA_MANAGE     = lambda s_id: f"{BASE}/spese/{s_id}/"
 
@@ -778,6 +780,21 @@ class TestTrasfertaDelete(TestCase):
         self.assertEqual(res.status_code, 403)
 
 
+class TestTrasfertaStaffAccess(TestCase):
+
+    def setUp(self):
+        self.utente = make_utente()
+        self.staff = make_utente(email="staff@test.com", is_staff=True)
+        self.trasferta = make_trasferta(self.utente)
+
+    def test_staff_vede_trasferte_altrui_in_lista(self):
+        res = auth_client(self.staff).get(URL_TRASFERTA_LIST)
+
+        self.assertEqual(res.status_code, 200)
+        ids = {item["id"] for item in res.data}
+        self.assertIn(self.trasferta.id, ids)
+
+
 # ---------------------------------------------------------------------------
 # Spesa views
 # ---------------------------------------------------------------------------
@@ -884,12 +901,38 @@ class TestSpesaUpdateDelete(TestCase):
         self.assertEqual(res.status_code, 403)
 
 
+class TestSpesaStaffAccess(TestCase):
+
+    def setUp(self):
+        self.utente = make_utente()
+        self.staff = make_utente(email="staff@test.com", is_staff=True)
+        self.trasferta = make_trasferta(self.utente)
+        self.spesa = make_spesa(self.trasferta)
+
+    def test_staff_vede_spese_di_trasferta_altrui(self):
+        res = auth_client(self.staff).get(URL_SPESA_LIST(self.trasferta.id))
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.data), 1)
+        self.assertEqual(res.data[0]["id"], self.spesa.id)
+
+    def test_staff_non_modifica_spesa_altrui(self):
+        res = auth_client(self.staff).put(
+            URL_SPESA_MANAGE(self.spesa.id),
+            {"importo": "50.00"},
+            format="json",
+        )
+
+        self.assertEqual(res.status_code, 403)
+
+
 class TestScontrinoDelete(TestCase):
 
     def setUp(self):
         self.utente = make_utente()
         self.altro = make_utente(email="altro@test.com")
         self.admin = make_utente(email="admin@test.com", is_superuser=True, is_staff=True)
+        self.staff = make_utente(email="staff@test.com", is_staff=True)
         self.trasferta = make_trasferta(self.utente)
 
         folder = Path(settings.SCONTRINI_ROOT) / f"{self.trasferta.data.strftime('%Y-%m-%d')}_{self.trasferta.id}"
@@ -920,6 +963,21 @@ class TestScontrinoDelete(TestCase):
         res = auth_client(self.altro).delete(
             URL_SCONTRINO_DELETE(self.trasferta.id, self.filename)
         )
+        self.assertEqual(res.status_code, 403)
+        self.assertTrue(self.file_path.exists())
+
+    def test_staff_puo_vedere_scontrini_di_trasferta_altrui(self):
+        res = auth_client(self.staff).get(URL_SCONTRINI_LIST(self.trasferta.id))
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.data), 1)
+        self.assertEqual(res.data[0]["filename"], self.filename)
+
+    def test_staff_non_puo_eliminare_scontrino_altrui(self):
+        res = auth_client(self.staff).delete(
+            URL_SCONTRINO_DELETE(self.trasferta.id, self.filename)
+        )
+
         self.assertEqual(res.status_code, 403)
         self.assertTrue(self.file_path.exists())
 

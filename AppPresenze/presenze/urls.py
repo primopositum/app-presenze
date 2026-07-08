@@ -35,8 +35,9 @@ api_urlpatterns = [
     # -------------------------------------------------------------------------
     # PDF
     # -------------------------------------------------------------------------
-    path("pdf/",           views.presenze_mese_scorso_pdf,  name="presenze-mese-scorso-pdf"),
-    path("trasferte/pdf/", views.trasferte_mese_scorso_pdf, name="trasferte-mese-scorso-pdf"),
+    path("pdf/",                 views.presenze_mese_scorso_pdf,  name="presenze-mese-scorso-pdf"),
+    path("trasferte/pdf/",       views.trasferte_mese_scorso_pdf, name="trasferte-mese-scorso-pdf"),
+    path("trasferte/Singlepdf/", views.trasferta_singola_pdf,     name="trasferte-singola-pdf"),
 
     # -------------------------------------------------------------------------
     # Trasferte

@@ -5,10 +5,14 @@
     import { timeEntryReload } from '$lib/stores/timeEntryReload';
     import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
     import { faTrash } from '@fortawesome/free-solid-svg-icons';
+    import { auth } from '$lib/stores/auth';
 
     export let trasf: Trasferta | null = null;
     export let onClick: ((trasf: Trasferta) => void) | undefined;
     let deleting = false;
+    $: canDelete = !!trasf
+        && trasf.validation_level !== 2
+        && (!!$auth.user?.is_superuser || Number($auth.user?.id) === Number(trasf.utente_id));
 
     function handleClick() {
         if (!trasf) return;
@@ -48,7 +52,7 @@
 
     <div class="head ${validationBg(trasf?.validation_level)}">
         <div class="title">{trasf?.azienda || `Trasferta #${trasf?.id ?? ''}`}</div>
-        {#if trasf?.validation_level !== 2}
+        {#if canDelete}
             <button
                 type="button"
                 class="trash"

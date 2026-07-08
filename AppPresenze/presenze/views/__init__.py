@@ -12,7 +12,7 @@ from .timeentries import (
 from .trasferte import (
     trasferta_create, trasferta_update,
     trasferte_validation_level, trasferta_list, trasferta_delete,
-    trasferte_mese_scorso_pdf, trasferta_dossier,
+    trasferte_mese_scorso_pdf, trasferta_singola_pdf, trasferta_dossier,
 )
 from .spese import spesa_list_by_trasferta, spesa_manage
 
