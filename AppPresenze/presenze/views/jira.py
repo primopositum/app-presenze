@@ -11,6 +11,7 @@ from django.db.models import Sum
 from django.http import StreamingHttpResponse
 from django.utils import timezone as django_timezone
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.renderers import BaseRenderer, JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from ..models import JiraCredentials, JiraGlobals, TimeEntry, Utente
@@ -636,11 +637,13 @@ def _jira_current_account_id(domain: str, headers: dict):
 
 
 def _year_worklog_jql(target_year: int) -> str:
-    # Buffer di un anno: include issue chiuse a cavallo ma con worklog nell'anno target.
+    # Tutte le issue (incluse sottotask e issue non completate) con almeno
+    # un worklog registrato nell'anno target. Il filtro corretto per una vista
+    # "ore per anno" è worklogDate, non resolutiondate+Done: quest'ultimo
+    # escludeva a monte le sottotask/issue aperte pur avendo ore loggate.
     return (
-        f'(statusCategory = Done OR status in ("Completed","Completata"))'
-        f' AND resolutiondate >= "{date(target_year - 1, 1, 1).isoformat()}"'
-        f' AND resolutiondate <= "{date(target_year + 1, 1, 1).isoformat()}"'
+        f'worklogDate >= "{date(target_year, 1, 1).isoformat()}"'
+        f' AND worklogDate <= "{date(target_year, 12, 31).isoformat()}"'
         f' ORDER BY updated DESC'
     )
 
@@ -707,11 +710,10 @@ def _fetch_jira_search_all(domain: str, headers: dict, jql: str, fields: list[st
 
         total = int(page_payload.get("total", len(collected_issues)) or len(collected_issues))
 
-        # Controlla se ci sono altre pagine tramite token
+        # L'endpoint /search/jql pagina con nextPageToken e non restituisce
+        # né un total affidabile né isLast: si continua finché arriva un token.
         next_page_token = page_payload.get("nextPageToken")
-        is_last = page_payload.get("isLast", True)
-
-        if is_last or not next_page_token or not batch:
+        if not next_page_token or not batch:
             break
 
     payload["issues"] = collected_issues
@@ -785,31 +787,10 @@ def _completed_history_payload(domain: str, headers: dict, target_year: int | No
 
 
 def _search_issues_for_year_worklog(domain: str, headers: dict, target_year: int):
-    search_url = f"https://{domain}/rest/api/3/search/jql"
     jql = _year_worklog_jql(target_year)
-    start_at = 0
-    issues = []
-
-    while True:
-        params = {
-            "jql": jql,
-            "fields": _completed_history_fields(),
-            "startAt": start_at,
-            "maxResults": 100,
-        }
-        search_response = requests.get(search_url, params=params, headers=headers, timeout=10)
-        search_response.raise_for_status()
-        payload = search_response.json() or {}
-        batch = payload.get("issues", [])
-        if isinstance(batch, list):
-            issues.extend(batch)
-
-        start_at += len(batch) if isinstance(batch, list) else 0
-        total = int(payload.get("total", 0))
-        if start_at >= total or not batch:
-            break
-
-    return issues, jql
+    payload = _fetch_jira_search_all(domain, headers, jql, _completed_history_fields())
+    issues = payload.get("issues", [])
+    return (issues if isinstance(issues, list) else []), jql
 
 
 def _build_year_worklog_payload(
@@ -836,6 +817,10 @@ def _build_year_worklog_payload(
         project = fields.get("project", {}) or {}
         project_key = str(project.get("key") or "N/D").strip() or "N/D"
         project_name = str(project.get("name") or "Progetto non disponibile").strip() or "Progetto non disponibile"
+        issue_type = fields.get("issuetype", {}) or {}
+        parent = fields.get("parent", {}) or {}
+        parent_fields = parent.get("fields", {}) or {}
+        assignee_field = fields.get("assignee", {}) or {}
 
         worklogs = _fetch_issue_worklogs(domain, issue_key, headers)
 
@@ -899,7 +884,11 @@ def _build_year_worklog_payload(
                     "issue_key": issue_key,
                     "issue_summary": fields.get("summary"),
                     "status": (fields.get("status", {}) or {}).get("name"),
-                    "assignee": author.get("displayName"),
+                    "assignee": assignee_field.get("displayName"),
+                    "issue_type": issue_type.get("name"),
+                    "is_subtask": bool(issue_type.get("subtask")),
+                    "parent_key": parent.get("key"),
+                    "parent_summary": parent_fields.get("summary"),
                     "worklogs_count": len(issue_worklogs),
                     "total_seconds": issue_total_seconds,
                     "worklogs": issue_worklogs,
@@ -932,28 +921,10 @@ def _sum_jira_logged_seconds_for_user_day(domain: str, headers: dict, account_id
     if not account_id:
         return 0
 
-    search_url = f"https://{domain}/rest/api/3/search/jql"
     jql = f'worklogAuthor = currentUser() AND worklogDate = "{target_date.isoformat()}"'
-    start_at = 0
-    issues = []
-
-    while True:
-        params = {
-            "jql": jql,
-            "fields": ["summary"],
-            "startAt": start_at,
-            "maxResults": 100,
-        }
-        search_response = requests.get(search_url, params=params, headers=headers, timeout=10)
-        search_response.raise_for_status()
-        payload = search_response.json() or {}
-        batch = payload.get("issues", [])
-        issues.extend(batch)
-
-        start_at += len(batch)
-        total = int(payload.get("total", 0))
-        if start_at >= total or not batch:
-            break
+    issues = _fetch_jira_search_all(domain, headers, jql, ["summary"]).get("issues", [])
+    if not isinstance(issues, list):
+        issues = []
 
     total_logged_seconds = 0
     for issue in issues:
@@ -994,35 +965,13 @@ def _jira_timesheet_activity(issue, worklog):
 
 
 def _fetch_jira_timesheet_issues(domain: str, headers: dict, account_id: str, start_date: date, end_date: date):
-    search_url = f"https://{domain}/rest/api/3/search/jql"
     jql = (
         f'worklogAuthor = "{account_id}"'
         f' AND worklogDate >= "{start_date.isoformat()}"'
         f' AND worklogDate <= "{end_date.isoformat()}"'
     )
-    start_at = 0
-    issues = []
-
-    while True:
-        params = {
-            "jql": jql,
-            "fields": ["summary", "project"],
-            "startAt": start_at,
-            "maxResults": 100,
-        }
-        search_response = requests.get(search_url, params=params, headers=headers, timeout=10)
-        search_response.raise_for_status()
-        payload = search_response.json() or {}
-        batch = payload.get("issues", [])
-        if isinstance(batch, list):
-            issues.extend(batch)
-
-        start_at += len(batch) if isinstance(batch, list) else 0
-        total = int(payload.get("total", 0))
-        if start_at >= total or not batch:
-            break
-
-    return issues
+    issues = _fetch_jira_search_all(domain, headers, jql, ["summary", "project"]).get("issues", [])
+    return issues if isinstance(issues, list) else []
 
 
 def _jira_timesheet_payload_for_user(target_user, start_date: date, end_date: date):
@@ -1110,27 +1059,9 @@ def _jira_user_monthly_worklog_payload(user, target_year: int, account_id: str =
         f' AND worklogDate <= "{jql_end}"'
     )
 
-    search_url = f"https://{domain}/rest/api/3/search/jql"
-    start_at = 0
-    issues = []
-
-    while True:
-        params = {
-            "jql": jql,
-            "fields": ["summary", "project"],
-            "startAt": start_at,
-            "maxResults": 100,
-        }
-        resp = requests.get(search_url, params=params, headers=headers, timeout=10)
-        resp.raise_for_status()
-        payload = resp.json() or {}
-        batch = payload.get("issues", [])
-        if isinstance(batch, list):
-            issues.extend(batch)
-
-        start_at += len(batch) if isinstance(batch, list) else 0
-        if start_at >= int(payload.get("total", 0)) or not batch:
-            break
+    issues = _fetch_jira_search_all(domain, headers, jql, ["summary", "project"]).get("issues", [])
+    if not isinstance(issues, list):
+        issues = []
 
     # Riallinea l'autore principale da worklog anche nel flusso usato dal controllo ore PDF.
     _enrich_completed_issues_with_worklog_authors({"issues": issues}, domain, headers)
@@ -1246,38 +1177,15 @@ class JiraProxyView(APIView):
 
         try:
             if fetch_all_pages:
-                collected_issues = []
-                page_start = start_at
-                total = 0
-                payload = {}
+                payload = _fetch_jira_search_all(
+                    domain,
+                    headers,
+                    params["jql"],
+                    params["fields"],
+                    start_at=start_at,
+                    page_size=max_results,
+                )
                 status_code = 200
-
-                while True:
-                    page_params = {
-                        **params,
-                        "maxResults": max_results,
-                        "startAt": page_start,
-                    }
-                    response = requests.get(url, params=page_params, headers=headers, timeout=10)
-                    response.raise_for_status()
-                    status_code = response.status_code
-                    page_payload = response.json() or {}
-                    if not payload:
-                        payload = page_payload
-
-                    batch = page_payload.get("issues", [])
-                    if isinstance(batch, list):
-                        collected_issues.extend(batch)
-
-                    total = int(page_payload.get("total", len(collected_issues)) or len(collected_issues))
-                    page_start += len(batch) if isinstance(batch, list) else 0
-                    if page_start >= total or not batch:
-                        break
-
-                payload["issues"] = collected_issues
-                payload["startAt"] = start_at
-                payload["maxResults"] = len(collected_issues)
-                payload["total"] = total
             else:
                 request_params = {
                     **params,
@@ -1679,6 +1587,25 @@ class JiraWorklogView(APIView):
             return Response({"error": str(e)}, status=502)
 
 
+class ServerSentEventRenderer(BaseRenderer):
+    """Renderer per abilitare la content negotiation DRF sugli stream SSE.
+
+    Senza un renderer che dichiari ``text/event-stream`` DRF rifiuta la
+    richiesta con "Could not satisfy the request Accept header" prima ancora
+    di eseguire la view.
+    """
+
+    media_type = "text/event-stream"
+    format = "txt"
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        if data is None:
+            return b""
+        if isinstance(data, (bytes, str)):
+            return data
+        return json.dumps(data, ensure_ascii=False)
+
+
 class JiraWorklogStreamView(APIView):
     """
     Stream SSE dei worklog annuali Jira con progresso incrementale.
@@ -1688,6 +1615,7 @@ class JiraWorklogStreamView(APIView):
     """
 
     permission_classes = [IsAuthenticated]
+    renderer_classes = [ServerSentEventRenderer, JSONRenderer]
 
     def get(self, request):
         year_raw = (request.GET.get("year") or "").strip()
