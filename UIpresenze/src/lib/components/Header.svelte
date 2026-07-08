@@ -9,14 +9,20 @@
   import ChangePasswordCard from '$lib/components/ChangePasswordCard.svelte';
   import GuideModal from '$lib/components/GuideModal.svelte';
 
-  const GUIDE_ROUTES = new Set(['Automobili', 'JiraBoard', 'Presenze', 'Trasferte']);
+  const GUIDE_ROUTES = new Map([
+    ['Automobili', 'Automobili'],
+    ['JiraBoard', 'JiraBoard'],
+    ['Presenze', 'Presenze'],
+    ['trasferte', 'Trasferte']
+  ]);
 
   $: isProfileRoute = $page.url.pathname === '/profilo';
   $: showAllProfiles = $page.url.searchParams.get('show_all_users') === '1';
   $: canToggleAllProfiles = isProfileRoute && !!$auth.user?.is_superuser;
   $: currentRouteName = $page.url.pathname.split('/').filter(Boolean)[0] || '';
-  $: guidePdfUrl = GUIDE_ROUTES.has(currentRouteName)
-    ? `/docs/tutorialGrafici/${encodeURIComponent(currentRouteName)}.pdf`
+  $: guideName = GUIDE_ROUTES.get(currentRouteName) ?? '';
+  $: guidePdfUrl = guideName
+    ? `/docs/tutorialGrafici/${encodeURIComponent(guideName)}.pdf`
     : '';
 
   let open = false;

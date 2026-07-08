@@ -617,7 +617,7 @@
       </div>
     {/if}
     <div class="flex justify-center items-center gap-3 mt-2">
-      <button type="button" on:click={() => goto('/Trasferte')} aria-label="Indietro">
+      <button type="button" on:click={() => goto('/trasferte')} aria-label="Indietro">
         <FontAwesomeIcon
           icon={faArrowLeft}
           class="text-[150%]"

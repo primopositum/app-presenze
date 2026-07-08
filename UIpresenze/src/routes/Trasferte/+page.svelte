@@ -66,7 +66,7 @@
         }
     }
     function openTrasferta(item: Trasferta) {
-        goto(`/Trasferte/${item.id}`, { state: { trasf: item } });
+        goto(`/trasferte/${item.id}`, { state: { trasf: item } });
     }
 
     function getAutoId(auto: Automobile): number | null {
