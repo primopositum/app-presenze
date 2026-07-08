@@ -45,6 +45,7 @@
 
     $: isSuperuser = !!$auth.user?.is_superuser;
     $: currentUserId = $auth.user?.id ?? null;
+    $: authRoleKey = `${$auth.user?.id ?? ''}:${$auth.user?.is_staff ?? false}:${$auth.user?.is_superuser ?? false}`;
     $: if (!isSuperuser && currentUserId) {
       selectedDossierUserId = String(currentUserId);
     }
@@ -249,6 +250,7 @@
       .filter((option): option is { id: number; label: string } => option !== null);
 
     $: if (mounted) {
+        authRoleKey;
         $timeEntryReload;
         loadTrasferte();
     }

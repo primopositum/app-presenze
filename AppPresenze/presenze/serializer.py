@@ -17,6 +17,7 @@ class UtenteSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'is_superuser',
+            'is_staff',
             'email',
             'password',
             'nome',
@@ -28,7 +29,7 @@ class UtenteSerializer(serializers.ModelSerializer):
             'saldo',
             'contratti'
         ]
-        read_only_fields = ['data_creaz', 'data_upd', 'is_superuser']
+        read_only_fields = ['data_creaz', 'data_upd', 'is_superuser', 'is_staff']
 
     def create(self, validated_data):
         password = validated_data.pop('password', None)
