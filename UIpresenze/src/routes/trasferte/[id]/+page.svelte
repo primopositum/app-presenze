@@ -9,6 +9,7 @@
   import {
     getSpeseByTrasferta,
     getTrasferte,
+    getTrasfertaOwnerId,
     updateTrasferta,
     type Spesa,
     type SpesaCreate,
@@ -65,6 +66,8 @@
   let canEdit = false;
   let isReadOnly = false;
   let isSuperuser = false;
+  let isOwner = false;
+  let ownerId: number | null = null;
   let currentUserId: number | null = null;
   let refreshKey = 0;
   let generatingPdf = false;
@@ -566,8 +569,8 @@
     favoriteAutoId = getFavoriteAutomobileId();
   });
 
-  $: if (item?.utente_id) {
-    timeEntryUser.setUser({ id: item.utente_id } as User);
+  $: if (ownerId !== null) {
+    timeEntryUser.setUser({ id: ownerId } as User);
   }
 
   $: if (isAuthed) {
@@ -583,11 +586,16 @@
   }
 
   $: isLocked = item?.validation_level === 2;
-  $: canEdit = !!item && (isSuperuser || Number(currentUserId) === Number(item.utente_id));
+  $: ownerId = getTrasfertaOwnerId(item);
+  $: isOwner = currentUserId !== null && ownerId !== null && Number(currentUserId) === ownerId;
+  // Scrittura (spese, scontrini, automobile, tragitto): solo superuser o proprietario,
+  // come tutti gli endpoint di mutazione del backend. Lo staff ha solo accesso in lettura.
+  $: canEdit = !!item && (isSuperuser || isOwner);
   $: isReadOnly = isLocked || !canEdit;
+  // Validazione: solo superuser (1→2) oppure proprietario (0→1), come lato backend.
   $: canShowValidateButton = !!item && (
     (isSuperuser && item.validation_level === 1) ||
-    (!isSuperuser && canEdit && item.validation_level === 0)
+    (!isSuperuser && isOwner && item.validation_level === 0)
   );
   $: if (isReadOnly && showSpesaForm) {
     showSpesaForm = false;
@@ -643,6 +651,7 @@
         </button>
       {/if}
 
+      {#if canEdit}
       <button
         type="button"
         on:click={handleGeneratePdf}
@@ -656,6 +665,7 @@
           style={`color: ${palette.secondary.main};`}
         />
       </button>
+      {/if}
 
     </div>
     
@@ -671,6 +681,7 @@
           onSavedFileClick={handleScontrinoGet}
           onSavedFileDelete={handleScontrinoDelete}
           disableSavedFileDelete={isReadOnly}
+          disableUpload={isReadOnly}
           on:uploadComplete={handleReceiptUploadComplete}
         />
       </div>

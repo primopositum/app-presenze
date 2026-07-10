@@ -34,8 +34,12 @@
   export let onSavedFileDelete: ((filename: string) => void | Promise<void>) | null = null;
   export let disableSavedFileDelete = false;
   export let disabled = false;
+  // Blocca solo l'upload (dropzone/input), lasciando attivi lista e download:
+  // usata per i visualizzatori in sola lettura (es. staff su trasferte altrui).
+  export let disableUpload = false;
 
   $: resolvedUserId = userId ?? $timeEntryUser.user?.id ?? 0;
+  $: uploadBlocked = disabled || disableUpload;
 
   let isDragging = false;
   let fileInput: HTMLInputElement;
@@ -204,7 +208,7 @@
   }
 
   async function processFiles(rawFiles: FileList | null): Promise<void> {
-    if (disabled || !rawFiles) return;
+    if (uploadBlocked || !rawFiles) return;
     const filtered = Array.from(rawFiles).filter((f) =>
       acceptedTypes.includes(f.type) || (mode === 'auto' && f.name.toLowerCase().endsWith('.pdf'))
     );
@@ -274,7 +278,7 @@
   }
 
   function handleClick(): void {
-    if (disabled) return;
+    if (uploadBlocked) return;
     fileInput.click();
   }
 
@@ -310,7 +314,7 @@
   }
 
   function handleFileInput(e: Event): void {
-    if (disabled) return;
+    if (uploadBlocked) return;
     const input = e.target as HTMLInputElement;
     void processFiles(input.files);
     input.value = '';
@@ -318,19 +322,19 @@
 
   function handleDrop(e: DragEvent): void {
     e.preventDefault();
-    if (disabled) return;
+    if (uploadBlocked) return;
     isDragging = false;
     void processFiles(e.dataTransfer?.files ?? null);
   }
 
   function handleDragOver(e: DragEvent): void {
     e.preventDefault();
-    if (disabled) return;
+    if (uploadBlocked) return;
     isDragging = true;
   }
 
   function handleDragLeave(): void {
-    if (disabled) return;
+    if (uploadBlocked) return;
     isDragging = false;
   }
 
@@ -428,7 +432,7 @@
     on:dragover={handleDragOver}
     on:dragleave={handleDragLeave}
     class="relative flex cursor-pointer select-none flex-col items-center justify-center gap-2.5 rounded-2xl border-2 border-dashed px-5 py-7 transition-all duration-300 ease-out
-      {disabled ? 'cursor-not-allowed border-orange-200 bg-orange-50 opacity-70' : isDragging ? 'border-indigo-400 bg-indigo-50 shadow-[0_0_0_3px_rgba(99,102,241,0.16)]' : 'border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100 hover:shadow-sm'}"
+      {uploadBlocked ? 'cursor-not-allowed border-orange-200 bg-orange-50 opacity-70' : isDragging ? 'border-indigo-400 bg-indigo-50 shadow-[0_0_0_3px_rgba(99,102,241,0.16)]' : 'border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100 hover:shadow-sm'}"
   >
     <input
       bind:this={fileInput}
@@ -437,7 +441,7 @@
       accept={acceptAttr}
       class="hidden"
       on:change={handleFileInput}
-      disabled={disabled}
+      disabled={uploadBlocked}
     />
 
     <div
@@ -453,7 +457,7 @@
       </svg>
     </div>
 
-    {#if disabled}
+    {#if uploadBlocked}
       <p class="text-sm font-semibold text-orange-700">
         Caricamento bloccato in modifica
       </p>

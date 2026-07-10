@@ -1,6 +1,6 @@
 
 <script lang="ts">
-    import type { Trasferta } from '$lib/services/trasferte';
+    import { getTrasfertaOwnerId, type Trasferta } from '$lib/services/trasferte';
     import { useDeleteTrasferta } from '$lib/hooks/useTrasferte';
     import { timeEntryReload } from '$lib/stores/timeEntryReload';
     import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
@@ -10,9 +10,10 @@
     export let trasf: Trasferta | null = null;
     export let onClick: ((trasf: Trasferta) => void) | undefined;
     let deleting = false;
+    $: ownerId = getTrasfertaOwnerId(trasf);
     $: canDelete = !!trasf
         && trasf.validation_level !== 2
-        && (!!$auth.user?.is_superuser || Number($auth.user?.id) === Number(trasf.utente_id));
+        && (!!$auth.user?.is_superuser || (ownerId !== null && Number($auth.user?.id) === ownerId));
 
     function handleClick() {
         if (!trasf) return;

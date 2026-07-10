@@ -428,7 +428,7 @@
         >
           ←
         </button>
-        <p>Analisi ore su progetti completati e distribuzione in base ai progetti selezionati.</p>
+        <p>Due viste per anno: "Progetti completati" raggruppa per anno di chiusura issue; "Worklog annuali" mostra le ore loggate per data del worklog.</p>
       </div>
       <div class="search-wrap">
         <span class="search-ico">/</span>
@@ -544,6 +544,10 @@
         </button>
       {/if}
     </div>
+    <p class="tree-subtitle">
+      Ore effettivamente loggate nell'anno selezionato, attribuite per data del singolo worklog
+      (indipendentemente dall'anno di chiusura dell'issue).
+    </p>
 
     {#if selectedYear === 'all'}
       <p class="tree-state">Seleziona un anno per caricare i worklog annuali per progetto → issue → worklog.</p>
@@ -906,6 +910,14 @@
     text-transform: uppercase;
     letter-spacing: 0.03em;
     color: #0f172a;
+    font-family: var(--font-mono);
+  }
+  .tree-subtitle {
+    margin: 0.35rem 0 0;
+    max-width: 70ch;
+    color: #64748b;
+    font-size: 0.7rem;
+    line-height: 1.35;
     font-family: var(--font-mono);
   }
   .refresh-tree-btn {

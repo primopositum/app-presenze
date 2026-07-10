@@ -194,6 +194,10 @@
       <p class="subhead hours">
         Ore: {fmtHours(selectedCount > 0 ? selectedHours : totalHours)}
       </p>
+      <p class="subhead note">
+        Anno = data di chiusura issue · ore totali loggate sull'issue (anche di anni precedenti).
+        Per le ore effettivamente lavorate in un anno vedi "Worklog annuali".
+      </p>
     </div>
     <div class="head-actions">
       <button type="button" class="ghost" data-history-hover-exclude on:click={clearSelection} disabled={loading || selectedCount === 0}>
@@ -314,6 +318,13 @@
   }
   .subhead.hours {
     font-weight: 700;
+  }
+  .subhead.note {
+    margin-top: 0.3rem;
+    max-width: 52ch;
+    color: #4d7c5a;
+    font-size: 0.66rem;
+    line-height: 1.35;
   }
 
   .head-actions {

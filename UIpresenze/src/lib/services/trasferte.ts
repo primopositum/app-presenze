@@ -30,7 +30,8 @@ export type ValidationLevel = 0 | 1 | 2;
 
 export type Trasferta = {
   id: number;
-  utente_id: number;
+  utente?: number;      // id proprietario: chiave effettiva restituita dal backend (FK)
+  utente_id?: number;   // alias legacy, non sempre presente nel payload
   utente_nome: string;
   utente_cognome: string;
   automobile?: number | string | null;
@@ -42,6 +43,18 @@ export type Trasferta = {
   note: string | null;
   validation_level: ValidationLevel;
 };
+
+/**
+ * Ritorna l'id del proprietario della trasferta.
+ * Il backend serializza la FK come `utente`; `utente_id` è un alias legacy
+ * che nella risposta reale non è sempre presente.
+ */
+export function getTrasfertaOwnerId(t: Trasferta | null | undefined): number | null {
+  if (!t) return null;
+  const raw = t.utente ?? t.utente_id;
+  const id = Number(raw);
+  return Number.isFinite(id) ? id : null;
+}
 
 export type TrasfertaCreate = {
   utente_email?: string;
