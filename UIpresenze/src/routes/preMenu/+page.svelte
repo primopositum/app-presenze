@@ -66,11 +66,8 @@
 
   function handlePickUser(u: User) {
     timeEntryUser.setUser(u);
-    if ($page.url.pathname === '/preMenu') {
-      goto('/Presenze');
-      return;
-    }
-    goto(route);
+    const target = route.trim();
+    goto(target && target !== '/' ? (target.startsWith('/') ? target : `/${target}`) : '/');
   }
 
   //  const PALETTE = [

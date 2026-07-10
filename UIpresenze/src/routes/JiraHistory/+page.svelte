@@ -50,6 +50,9 @@
   let lastFetchedYear = '';
   let yearlyWorklogRequestId = 0;
   let yearlyWorklogController: AbortController | null = null;
+  let leftPaneEl: HTMLDivElement | null = null;
+  let chartsMaxHeight = '';
+  let layoutResizeObserver: ResizeObserver | null = null;
 
   function issueYear(issue: JiraIssue) {
     const dateValue =
@@ -123,6 +126,16 @@
     yearlyWorklogLoading = false;
     yearlyWorklogProgress = null;
     lastFetchedYear = '';
+  }
+
+  function syncChartsMaxHeight() {
+    if (!leftPaneEl) {
+      chartsMaxHeight = '';
+      return;
+    }
+
+    const height = leftPaneEl.getBoundingClientRect().height;
+    chartsMaxHeight = height > 0 ? `${Math.ceil(height)}px` : '';
   }
 
   function completedIssueIsSubtask(issue: JiraIssue) {
@@ -358,6 +371,19 @@
   );
   $: userSubtaskGroups = groupSubtasksByUser(yearlyWorklogData, knownSubtaskKeys, selectedProjectKeys);
   $: userSubtasksTotalSeconds = userSubtaskGroups.reduce((total, user) => total + user.seconds, 0);
+  $: selectedYearlyProjectKeys = new Set(selectedProjectKeys);
+  $: visibleYearlyWorklogProjects =
+    selectedProjectKeys.length > 0
+      ? (yearlyWorklogData?.projects || []).filter((project) =>
+          selectedYearlyProjectKeys.has(project.project_key)
+        )
+      : [];
+  $: visibleYearlyWorklogSummary = {
+    projectsCount: visibleYearlyWorklogProjects.length,
+    issuesCount: visibleYearlyWorklogProjects.reduce((total, project) => total + project.issues_count, 0),
+    worklogsCount: visibleYearlyWorklogProjects.reduce((total, project) => total + project.worklogs_count, 0),
+    totalSeconds: visibleYearlyWorklogProjects.reduce((total, project) => total + project.total_seconds, 0)
+  };
   $: if (selectedYear === 'all') resetYearlyWorklogs();
   $: if (selectedYear !== 'all' && selectedYear !== lastFetchedYear) {
     lastFetchedYear = selectedYear;
@@ -370,10 +396,18 @@
       goto('/', { replaceState: true });
       return;
     }
+    requestAnimationFrame(syncChartsMaxHeight);
+    if (leftPaneEl) {
+      layoutResizeObserver = new ResizeObserver(syncChartsMaxHeight);
+      layoutResizeObserver.observe(leftPaneEl);
+    }
     void fetchCompletedHistory();
   });
 
-  onDestroy(() => yearlyWorklogController?.abort());
+  onDestroy(() => {
+    yearlyWorklogController?.abort();
+    layoutResizeObserver?.disconnect();
+  });
 
   $: if ($jiraControl.loaded && !$jiraControl.enabled) {
     goto('/', { replaceState: true });
@@ -418,7 +452,7 @@
   </header>
 
   <section class="layout-row">
-    <div class="left-pane">
+    <div class="left-pane" bind:this={leftPaneEl}>
       <JiraCompletedBar
         bind:issuesData={completedIssues}
         bind:selectedProjectKeys
@@ -430,7 +464,7 @@
       />
     </div>
 
-    <aside class="right-pane">
+    <aside class="right-pane" style={chartsMaxHeight ? `max-height:${chartsMaxHeight}` : undefined}>
       <JiraHistoryCharts issues={chartIssues} {selectedProjectKeys} />
     </aside>
   </section>
@@ -522,14 +556,18 @@
       </p>
     {:else if yearlyWorklogError}
       <p class="tree-state error">{yearlyWorklogError}</p>
+    {:else if selectedProjectKeys.length === 0}
+      <p class="tree-state">Seleziona almeno un progetto completato per visualizzare i worklog annuali.</p>
     {:else if !yearlyWorklogData || yearlyWorklogData.projects_count === 0}
       <p class="tree-state">Nessun worklog trovato per l'anno selezionato.</p>
+    {:else if visibleYearlyWorklogProjects.length === 0}
+      <p class="tree-state">Nessun worklog trovato per i progetti selezionati nell'anno scelto.</p>
     {:else}
       <p class="tree-summary">
-        Progetti: {yearlyWorklogData.projects_count} · Issue: {yearlyWorklogData.issues_count} · Worklog: {yearlyWorklogData.worklogs_count} · Ore: {fmtHours(yearlyWorklogData.total_seconds)}
+        Progetti: {visibleYearlyWorklogSummary.projectsCount} · Issue: {visibleYearlyWorklogSummary.issuesCount} · Worklog: {visibleYearlyWorklogSummary.worklogsCount} · Ore: {fmtHours(visibleYearlyWorklogSummary.totalSeconds)}
       </p>
       <div class="tree-projects">
-        {#each yearlyWorklogData.projects as project (project.project_key)}
+        {#each visibleYearlyWorklogProjects as project (project.project_key)}
           <article class="tree-project-card" data-history-hover>
             <h4>{project.project_key} - {project.project_name}</h4>
             <p class="project-meta">
@@ -571,6 +609,8 @@
     max-width: 1456px;
     margin: 0 auto;
     padding: 1.25rem 0 2.4rem;
+    display: flex;
+    flex-direction: column;
   }
   .page-title {
     margin: 0 0 0.7rem;
@@ -696,7 +736,13 @@
     top: 1rem;
   }
 
+  .right-pane {
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
   .subtask-users {
+    order: 4;
     margin-top: 0.95rem;
     border: 1px solid #e2e8f0;
     border-radius: 12px;
@@ -841,6 +887,7 @@
   }
 
   .worklogs-tree {
+    order: 3;
     margin-top: 0.95rem;
     border: 1px solid #e2e8f0;
     border-radius: 12px;
@@ -999,6 +1046,12 @@
 
     .left-pane {
       position: static;
+    }
+
+    .right-pane {
+      max-height: none !important;
+      overflow: visible;
+      padding-right: 0;
     }
   }
   @media (max-width: 720px) {

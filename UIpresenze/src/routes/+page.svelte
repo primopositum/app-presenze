@@ -37,7 +37,7 @@
   <CardImage
     caption="Accedi all'area delle trasferte"
     alt="trasferte"
-    on:click = {()=>{goto('/trasferte')}}
+    on:click = {()=>{redirect('trasferte')}}
     imageSrc="/trasferte.png"
        />
   {#if $jiraControl.loaded && $jiraControl.enabled}
