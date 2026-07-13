@@ -377,6 +377,9 @@
       const stateTrasf = ($page.state as any)?.trasf as Trasferta | undefined;
       item = stateTrasf?.id === routeId ? stateTrasf : null;
 
+      const freshList = await getTrasferte({ tId: routeId });
+      item = freshList.find((t) => Number(t.id) === routeId) ?? null;
+
       if (!item) {
         const list = await getTrasferte();
         item = list.find((t) => Number(t.id) === routeId) ?? null;
@@ -769,23 +772,16 @@
                 <FontAwesomeIcon icon={faFlag} />
               </button>
             </div>
-            <div class="ml-auto inline-grid min-w-[180px] grid-cols-[minmax(110px,1fr)_auto] items-center gap-2 max-sm:ml-0 max-sm:min-w-full max-sm:grid-cols-[1fr_auto]">
-              <input
-                class="w-[160px] max-sm:w-full rounded-[10px] border border-gray-300 bg-white px-2 py-2 text-[0.8rem] outline-none focus:border-gray-400 focus:shadow-[0_0_0_2px_rgba(156,163,175,0.18)]"
-                type="text"
-                placeholder="Coeff. auto selezionata"
-                value={costoKmInput}
-                on:change={handleCoefficienteChange}
-                disabled={creatingSpesa || isReadOnly}
-              />
+            <div class="ml-auto inline-flex items-center justify-end gap-2 max-sm:ml-0 max-sm:w-full max-sm:justify-start">
               <button
-                class="min-w-[44px] cursor-pointer rounded-[10px] border border-gray-300 bg-white px-3 py-2 text-[1rem] font-bold transition hover:bg-gray-50"
+                class="inline-flex min-h-[42px] cursor-pointer items-center gap-2 rounded-[10px] border border-gray-300 bg-white px-3 py-2 text-[0.9rem] font-bold transition hover:bg-gray-50"
                 type="button"
                 on:click={handleCreateKmSpesa}
                 disabled={creatingSpesa || coefficienteSaving || isReadOnly}
                 aria-label="Crea spesa chilometrica"
               >
                 <FontAwesomeIcon icon={faCalculator} />
+                <span>Aggiungi a spesa</span>
               </button>
             </div>
           </div>

@@ -117,6 +117,7 @@ function resolveUId(explicitUId?: number) {
 export type TrasferteListParams = {
   limit?: number;
   date?: string; // YYYY-MM-DD
+  tId?: number | string;
   uId?: number;
   validation?: ValidationLevel;
   azienda?: string;
@@ -126,6 +127,7 @@ export function getTrasferte(params: TrasferteListParams = {}) {
   const qs = new URLSearchParams();
 
   if (params.limit !== undefined) qs.set('limit', String(params.limit));
+  if (params.tId !== undefined && params.tId !== null) qs.set('tId', String(params.tId));
   if (params.date) qs.set('date', params.date);
   if (params.validation !== undefined) qs.set('validation', String(params.validation));
   if (params.azienda) qs.set('azienda', params.azienda);
