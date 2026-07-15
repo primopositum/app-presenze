@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { arc, pie, scaleBand, scaleLinear, scaleOrdinal, schemeTableau10, sum, descending, type PieArcDatum } from 'd3';
+  import { arc, pie, scaleBand, scaleLinear, scaleOrdinal, sum, descending, type PieArcDatum } from 'd3';
 
   type JiraIssue = {
     key: string;
     fields?: {
+      summary?: string;
       assignee?: { displayName?: string } | null;
       project?: { key?: string; name?: string };
       timespent?: number | null;
@@ -41,6 +42,7 @@
   const donutSize = 220;
   const outerRadius = 86;
   const innerRadius = 50;
+  const DONUT_COLORS = ['#2563eb', '#d97706', '#dc2626', '#16a34a', '#0f766e', '#7c2d12', '#4d7c0f', '#be123c', '#1d4ed8', '#a16207'];
   let chartTooltip: ChartTooltip | null = null;
 
   function showChartTooltip(event: MouseEvent, row: ChartRow) {
@@ -130,7 +132,7 @@
   }, {});
   $: totalSeconds = sum(Object.values(grouped).map((v) => v.seconds));
 
-  $: colorScale = scaleOrdinal<string, string>(schemeTableau10);
+  $: colorScale = scaleOrdinal<string, string>(DONUT_COLORS);
 
   $: chartRows = Object.entries(grouped)
     .map(([id, data]) => ({
@@ -144,11 +146,38 @@
     .filter((row) => !(row.id === 'Unassigned' && row.seconds <= 0))
     .sort((a, b) => descending(a.seconds, b.seconds));
 
+  $: completedIssueGrouped = selectedIssues.reduce<Record<string, { label: string; seconds: number }>>(
+    (acc, issue) => {
+      addGroupedSeconds(
+        acc,
+        issue.key,
+        String(issue.fields?.summary || '').trim() || issue.key,
+        taskTotalSeconds(issue.fields)
+      );
+      return acc;
+    },
+    {}
+  );
+  $: completedIssuesTotalSeconds = sum(Object.values(completedIssueGrouped).map((value) => value.seconds));
+  $: completedIssueColorScale = scaleOrdinal<string, string>(DONUT_COLORS);
+  $: completedIssueRows = Object.entries(completedIssueGrouped)
+    .map(([id, data]) => ({
+      id,
+      label: data.label,
+      seconds: data.seconds,
+      hours: data.seconds / 3600,
+      percent: completedIssuesTotalSeconds > 0 ? (data.seconds / completedIssuesTotalSeconds) * 100 : 0,
+      color: completedIssueColorScale(id)
+    }))
+    .filter((row) => row.seconds > 0)
+    .sort((a, b) => descending(a.seconds, b.seconds));
+
   $: pieLayout = pie<ChartRow>()
     .sort(null)
     .value((d) => d.seconds);
 
   $: arcs = pieLayout(chartRows);
+  $: completedIssueArcs = pieLayout(completedIssueRows);
   $: arcPath = arc<PieArcDatum<ChartRow>>().innerRadius(innerRadius).outerRadius(outerRadius);
 
   $: maxLabelLength = chartRows.reduce((acc, row) => Math.max(acc, row.label.length), 0);
@@ -184,7 +213,41 @@
   {#if chartRows.length === 0}
     <p class="empty" data-history-hover>Nessun progetto disponibile per i grafici.</p>
   {:else}
-    <article class="chart-card" data-history-hover>
+    {#if selectedProjectKeys.length > 0 && completedIssueRows.length > 0}
+      <article class="chart-card chart-card-completed-issues" data-history-hover>
+        <h4>Distribuzione ore per issue completata (%)</h4>
+        <div class="donut-wrap">
+          <svg width={donutSize} height={donutSize} viewBox="0 0 220 220" role="img" aria-label="Distribuzione ore per issue completata">
+            <g transform="translate(110,110)">
+              {#each completedIssueArcs as slice (slice.data.id)}
+                <path
+                  class="chart-segment"
+                  data-history-hover-exclude
+                  d={arcPath(slice) || ''}
+                  fill={slice.data.color}
+                  stroke="#fff"
+                  stroke-width="1.5"
+                  on:mouseenter={(event) => showChartTooltip(event, slice.data)}
+                  on:mousemove={(event) => showChartTooltip(event, slice.data)}
+                  on:mouseleave={hideChartTooltip}
+                ></path>
+              {/each}
+            </g>
+          </svg>
+          <ul class="legend">
+            {#each completedIssueRows as row (row.id)}
+              <li data-history-hover>
+                <span class="dot" data-history-hover-exclude style={`--dot:${row.color}`}></span>
+                <span class="name">{row.label}</span>
+                <span class="num">{row.percent.toFixed(1)}%</span>
+              </li>
+            {/each}
+          </ul>
+        </div>
+      </article>
+    {/if}
+
+    <article class="chart-card chart-card-users" data-history-hover>
       <h4>{selectedProjectKeys.length > 0 ? 'Distribuzione ore per utente (%)' : 'Distribuzione ore per progetto (%)'}</h4>
       <div class="donut-wrap">
         <svg width={donutSize} height={donutSize} viewBox="0 0 220 220" role="img" aria-label={selectedProjectKeys.length > 0 ? 'Distribuzione ore per utente' : 'Distribuzione ore per progetto'}>
@@ -216,7 +279,7 @@
       </div>
     </article>
 
-    <article class="chart-card" data-history-hover>
+    <article class="chart-card chart-card-hours" data-history-hover>
       <h4>{selectedProjectKeys.length > 0 ? 'Ore per utente' : 'Ore per progetto'}</h4>
       <div class="bar-wrap">
         <svg width={chartWidth} height={chartHeight + 24} viewBox={`0 0 ${chartWidth} ${chartHeight + 24}`} role="img" aria-label={selectedProjectKeys.length > 0 ? 'Ore per utente' : 'Ore per progetto'}>
@@ -334,6 +397,18 @@
 
   .chart-card:last-child {
     margin-bottom: 0;
+  }
+
+  .chart-card-users {
+    background: #c9ccf8;
+  }
+
+  .chart-card-completed-issues {
+    background: #f2d9ec;
+  }
+
+  .chart-card-hours {
+    background: #cfedef;
   }
 
   .chart-card h4 {

@@ -1,6 +1,4 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
-
   type JiraIssue = {
     key: string;
     fields?: {
@@ -43,8 +41,6 @@
 
   let searchQuery = '';
 
-  const dispatch = createEventDispatcher<{ refresh: void }>();
-
   function clearSelection() {
     selectedProjectKeys = [];
   }
@@ -67,9 +63,7 @@
 
   function toggleProject(key: string) {
     if (!key) return;
-    selectedProjectKeys = selectedProjectKeys.includes(key)
-      ? selectedProjectKeys.filter((k) => k !== key)
-      : [...selectedProjectKeys, key];
+    selectedProjectKeys = selectedProjectKeys.includes(key) && selectedProjectKeys.length === 1 ? [] : [key];
   }
 
   function flattenIssues(issues: JiraIssue[]): JiraIssue[] {
@@ -77,10 +71,6 @@
       issue,
       ...flattenIssues(issue.fields?.subtasks_enriched || [])
     ]);
-  }
-
-  function refreshCompleted() {
-    dispatch('refresh');
   }
 
   $: normalizedSearch = searchQuery.trim().toLowerCase();
@@ -117,9 +107,15 @@
   $: selectedHours = filteredProjects
     .filter((p) => selectedProjectKeys.includes(p.key))
     .reduce((acc, p) => acc + p.seconds, 0);
-  $: if (selectedProjectKeys.length > 0) {
+  $: if (!loading && selectedProjectKeys.length > 0) {
     const available = new Set(projects.map((p) => p.key));
-    selectedProjectKeys = selectedProjectKeys.filter((key) => available.has(key));
+    const nextSelected = selectedProjectKeys.filter((key) => available.has(key)).slice(0, 1);
+    if (
+      nextSelected.length !== selectedProjectKeys.length ||
+      nextSelected.some((key, index) => key !== selectedProjectKeys[index])
+    ) {
+      selectedProjectKeys = nextSelected;
+    }
   }
 
 </script>
@@ -140,7 +136,6 @@
       <button type="button" class="ghost" data-history-hover-exclude on:click={clearSelection} disabled={loading || selectedCount === 0}>
         Pulisci
       </button>
-      <button type="button" on:click={refreshCompleted} disabled={loading}>{loading ? '...' : 'Aggiorna'}</button>
     </div>
   </div>
 

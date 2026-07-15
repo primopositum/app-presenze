@@ -1,6 +1,6 @@
 from rest_framework import serializers
 import base64
-from .models import Utente, TimeEntry, Saldo, Contratto, Trasferta, Spesa, Automobile, Signature, UtilitiesBar
+from .models import Utente, TimeEntry, Saldo, Contratto, Trasferta, Spesa, Automobile, Signature, UtilitiesBar, JiraReference
 from decimal import Decimal
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
@@ -405,5 +405,30 @@ class UtilitiesBarSerializer(serializers.ModelSerializer):
         model = UtilitiesBar
         fields = ["id", "nome", "link", "colore", "icon", "posizione"]
         read_only_fields = ["id", "nome", "link", "colore", "icon", "posizione"]
+
+
+class JiraReferenceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = JiraReference
+        fields = ["id", "name", "price"]
+        read_only_fields = ["id"]
+
+
+class JiraReferenceUpdateSerializer(serializers.Serializer):
+    id = serializers.IntegerField(min_value=1)
+    name = serializers.CharField(max_length=255, required=False)
+    price = serializers.FloatField(required=False)
+
+    def validate(self, attrs):
+        if "name" not in attrs and "price" not in attrs:
+            raise serializers.ValidationError("Indica almeno uno tra name e price.")
+        return attrs
+
+
+class JiraReferenceDeleteSerializer(serializers.Serializer):
+    ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        allow_empty=False,
+    )
 
 

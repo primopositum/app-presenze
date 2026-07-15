@@ -525,6 +525,19 @@ class JiraGlobals(models.Model):
         return f"JiraGlobals ({self.domain})"
 
 
+class JiraReference(models.Model):
+    id = models.BigAutoField(primary_key=True, db_column="ID")
+    name = models.CharField(max_length=255, db_column="Name")
+    price = models.FloatField(db_column="price")
+
+    class Meta:
+        db_table = "JiraReference"
+        ordering = ["name", "id"]
+
+    def __str__(self):
+        return self.name
+
+
 def _get_fernet():
     return Fernet(settings.ENCRYPTION_KEY)
 

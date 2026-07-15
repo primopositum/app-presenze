@@ -8,6 +8,7 @@
     JiraYearWorklogResponse
   } from '$lib/services/jira';
   import JiraCompletedBar from '$lib/components/Jira/JiraCompletedBar.svelte';
+  import JiraCalculatedPricing from '$lib/components/Jira/JiraCalculatedPricing.svelte';
   import JiraHistoryCharts from '$lib/components/Jira/JiraHistoryCharts.svelte';
   import { ensureJiraControlLoaded, jiraControl } from '$lib/stores/jiraControl';
 
@@ -43,6 +44,17 @@
     'Novembre',
     'Dicembre'
   ];
+  const PERIOD_CACHE_PREFIX = 'app-presenze:jira-history:period:v1:';
+  const PERIOD_CACHE_TTL_MS = 10 * 60 * 1000;
+  const PERIOD_CACHE_MAX_ENTRIES = 6;
+
+  type JiraHistoryPeriodCache = {
+    version: 1;
+    cachedAt: number;
+    year: number;
+    month: number | 'all';
+    data: JiraYearWorklogResponse;
+  };
 
   let selectedProjectKeys: string[] = [];
   let completedIssues: JiraIssue[] = [];
@@ -81,15 +93,103 @@
     });
   }
 
-  async function fetchYearlyWorklogs(year: number, month: number | 'all') {
+  function periodCacheKey(year: number, month: number | 'all') {
+    return `${PERIOD_CACHE_PREFIX}${year}:${month}`;
+  }
+
+  function applyYearlyWorklogData(data: JiraYearWorklogResponse) {
+    yearlyWorklogData = data;
+    completedIssues = normalizeCompletedIssues(data.completed_issues || []);
+  }
+
+  function readPeriodCache(year: number, month: number | 'all') {
+    const key = periodCacheKey(year, month);
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+
+      const cached = JSON.parse(raw) as Partial<JiraHistoryPeriodCache>;
+      if (
+        cached.version !== 1 ||
+        cached.year !== year ||
+        cached.month !== month ||
+        typeof cached.cachedAt !== 'number' ||
+        !cached.data ||
+        !Array.isArray(cached.data.projects)
+      ) {
+        localStorage.removeItem(key);
+        return null;
+      }
+
+      return {
+        data: cached.data,
+        fresh: Date.now() - cached.cachedAt < PERIOD_CACHE_TTL_MS
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function prunePeriodCache(currentKey: string, maxEntries = PERIOD_CACHE_MAX_ENTRIES) {
+    const entries: { key: string; cachedAt: number }[] = [];
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (!key?.startsWith(PERIOD_CACHE_PREFIX) || key === currentKey) continue;
+
+      try {
+        const cached = JSON.parse(localStorage.getItem(key) || '{}') as Partial<JiraHistoryPeriodCache>;
+        if (typeof cached.cachedAt === 'number') entries.push({ key, cachedAt: cached.cachedAt });
+        else localStorage.removeItem(key);
+      } catch {
+        localStorage.removeItem(key);
+      }
+    }
+
+    entries
+      .sort((first, second) => first.cachedAt - second.cachedAt)
+      .slice(Math.max(0, maxEntries - 1))
+      .forEach(({ key }) => localStorage.removeItem(key));
+  }
+
+  function savePeriodCache(year: number, month: number | 'all', data: JiraYearWorklogResponse) {
+    const key = periodCacheKey(year, month);
+    const value = JSON.stringify({ version: 1, cachedAt: Date.now(), year, month, data } satisfies JiraHistoryPeriodCache);
+
+    try {
+      prunePeriodCache(key);
+      localStorage.setItem(key, value);
+    } catch {
+      try {
+        prunePeriodCache(key, 1);
+        localStorage.setItem(key, value);
+      } catch {
+        // The response can exceed the browser quota; live data remains available.
+      }
+    }
+  }
+
+  async function fetchYearlyWorklogs(year: number, month: number | 'all', forceRefresh = false) {
     yearlyWorklogController?.abort();
+    const requestId = ++yearlyWorklogRequestId;
+    yearlyWorklogController = null;
+    yearlyWorklogError = '';
+    const cached = readPeriodCache(year, month);
+
+    if (cached) {
+      applyYearlyWorklogData(cached.data);
+      yearlyWorklogProgress = null;
+      if (cached.fresh && !forceRefresh) {
+        yearlyWorklogLoading = false;
+        return;
+      }
+    } else if (yearlyWorklogData?.year !== year || yearlyWorklogData.month !== month) {
+      yearlyWorklogData = null;
+      completedIssues = [];
+    }
+
     const controller = new AbortController();
     yearlyWorklogController = controller;
-    const requestId = ++yearlyWorklogRequestId;
     yearlyWorklogLoading = true;
-    yearlyWorklogData = null;
-    completedIssues = [];
-    yearlyWorklogError = '';
     yearlyWorklogProgress = { loaded: 0, total: 0 };
     try {
       const data = await useJiraWorklogsByYearStream(
@@ -101,14 +201,15 @@
         controller.signal
       );
       if (requestId !== yearlyWorklogRequestId) return;
-      yearlyWorklogData = data;
-      completedIssues = normalizeCompletedIssues(data.completed_issues || []);
+      applyYearlyWorklogData(data);
+      savePeriodCache(year, month, data);
     } catch (e: any) {
       if (requestId !== yearlyWorklogRequestId) return;
       if (e?.name === 'AbortError') return;
-      yearlyWorklogData = null;
-      completedIssues = [];
-      yearlyWorklogError = String(e?.message || e || 'Errore caricamento worklog del periodo');
+      if (!yearlyWorklogData) {
+        completedIssues = [];
+        yearlyWorklogError = String(e?.message || e || 'Errore caricamento worklog del periodo');
+      }
     } finally {
       if (requestId === yearlyWorklogRequestId) {
         yearlyWorklogLoading = false;
@@ -364,6 +465,14 @@
             {/each}
           </select>
         </div>
+        <button
+          type="button"
+          class="refresh-period-btn"
+          on:click={() => fetchYearlyWorklogs(selectedYear, selectedMonth, true)}
+          disabled={yearlyWorklogLoading || !selectedYearIsValid}
+        >
+          {yearlyWorklogLoading ? 'Aggiorno...' : 'Aggiorna'}
+        </button>
       </div>
     </div>
   </header>
@@ -375,7 +484,6 @@
         bind:selectedProjectKeys
         loading={yearlyWorklogLoading}
         error={yearlyWorklogError}
-        on:refresh={() => fetchYearlyWorklogs(selectedYear, selectedMonth)}
       />
     </div>
 
@@ -384,7 +492,7 @@
     </aside>
   </section>
 
-  <section class="subtask-users" data-history-hover>
+  <section class="subtask-users" data-history-hover hidden>
     <div class="subtask-users-head">
       <div>
         <h3>Ore sottotask per utente</h3>
@@ -451,9 +559,6 @@
   <section class="worklogs-tree" data-history-hover>
     <div class="tree-head">
       <h3>Worklog del periodo</h3>
-      <button type="button" class="refresh-tree-btn" on:click={() => fetchYearlyWorklogs(selectedYear, selectedMonth)} disabled={yearlyWorklogLoading}>
-        {yearlyWorklogLoading ? 'Aggiorno...' : 'Aggiorna'}
-      </button>
     </div>
     <p class="tree-subtitle">
       Ore effettivamente loggate nel periodo selezionato, attribuite per data del singolo worklog
@@ -515,6 +620,8 @@
       </div>
     {/if}
   </section>
+
+  <JiraCalculatedPricing />
 </main>
 
 <style>
@@ -587,6 +694,24 @@
     border-color: #94a3b8;
     box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.2);
   }
+  .refresh-period-btn {
+    min-height: 36px;
+    border: 1px solid #d97706;
+    border-radius: 9px;
+    background: #f97316;
+    color: #fff;
+    font-size: 0.72rem;
+    padding: 0.35rem 0.6rem;
+    cursor: pointer;
+    font-family: var(--font-mono);
+  }
+  .refresh-period-btn:hover:not(:disabled) {
+    background: #ea580c;
+  }
+  .refresh-period-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
+  }
   .back-arrow-btn {
     border: 1px solid #cbd5e1;
     background: #fff;
@@ -611,7 +736,7 @@
   }
   .layout-row {
     display: grid;
-    grid-template-columns: 45% minmax(0, 55%);
+    grid-template-columns: 42% minmax(0, 58%);
     gap: 12px;
     align-items: start;
   }
@@ -781,7 +906,7 @@
     margin-top: 0.95rem;
     border: 1px solid #e2e8f0;
     border-radius: 12px;
-    background: #fff;
+    background: #c9ccf8;
     padding: 0.85rem 0.95rem;
   }
   .tree-head {
@@ -806,20 +931,6 @@
     line-height: 1.35;
     font-family: var(--font-mono);
   }
-  .refresh-tree-btn {
-    border: 1px solid #cbd5e1;
-    border-radius: 9px;
-    background: #fff;
-    color: #334155;
-    font-size: 0.72rem;
-    padding: 0.35rem 0.6rem;
-    cursor: pointer;
-    font-family: var(--font-mono);
-  }
-  .refresh-tree-btn:disabled {
-    cursor: not-allowed;
-    opacity: 0.65;
-  }
   .tree-state {
     margin: 0.6rem 0 0;
     font-size: 0.78rem;
@@ -842,7 +953,7 @@
   .tree-project-card {
     border: 1px solid #e2e8f0;
     border-radius: 10px;
-    background: #f8fafc;
+    background: #f2d9ec;
     padding: 0.6rem 0.7rem;
   }
   .tree-project-card h4 {
@@ -864,7 +975,7 @@
   .tree-issue {
     border: 1px solid #cbd5e1;
     border-radius: 8px;
-    background: #fff;
+    background: #f8fafc;
     padding: 0.38rem 0.45rem;
   }
   .tree-issue summary {
