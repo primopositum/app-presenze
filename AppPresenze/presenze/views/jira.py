@@ -494,10 +494,28 @@ def _jql_looks_completed_history(jql: str):
     )
 
 
-def _worklog_seconds_by_author(domain: str, issue_key: str, headers: dict):
+def _worklog_matches_period(worklog: dict, target_year: int | None = None, target_month: int | None = None):
+    if target_year is None:
+        return True
+
+    local_day = _local_date_from_started(str((worklog or {}).get("started") or ""))
+    if not local_day or local_day.year != target_year:
+        return False
+    return target_month is None or local_day.month == target_month
+
+
+def _worklog_seconds_by_author(
+    domain: str,
+    issue_key: str,
+    headers: dict,
+    target_year: int | None = None,
+    target_month: int | None = None,
+):
     totals = {}
     worklogs = _fetch_issue_worklogs(domain, issue_key, headers)
     for worklog in worklogs:
+        if not _worklog_matches_period(worklog, target_year, target_month):
+            continue
         seconds = int(worklog.get("timeSpentSeconds") or 0)
         if seconds <= 0:
             continue
@@ -507,7 +525,13 @@ def _worklog_seconds_by_author(domain: str, issue_key: str, headers: dict):
     return totals
 
 
-def _enrich_completed_issues_with_worklog_authors(search_payload, domain: str, headers: dict):
+def _enrich_completed_issues_with_worklog_authors(
+    search_payload,
+    domain: str,
+    headers: dict,
+    target_year: int | None = None,
+    target_month: int | None = None,
+):
     if not isinstance(search_payload, dict):
         return
     logs = search_payload.setdefault("worklog_enrich_logs", [])
@@ -561,11 +585,19 @@ def _enrich_completed_issues_with_worklog_authors(search_payload, domain: str, h
         max_workers = 1
     failed_issues = 0
     enriched_issues = 0
+    enriched_issue_keys = set()
 
     try:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_map = {
-                executor.submit(_worklog_seconds_by_author, domain, issue_key, headers): (issue_key, fields)
+                executor.submit(
+                    _worklog_seconds_by_author,
+                    domain,
+                    issue_key,
+                    headers,
+                    target_year,
+                    target_month,
+                ): (issue_key, fields)
                 for issue_key, fields in issue_rows
             }
 
@@ -614,6 +646,7 @@ def _enrich_completed_issues_with_worklog_authors(search_payload, domain: str, h
                     "timeSpentSeconds": top_seconds,
                 }
                 enriched_issues += 1
+                enriched_issue_keys.add(issue_key)
     except Exception as exc:
         failed_issues = max(failed_issues, 1)
         _push_log("error", f"Errore generale arricchimento Jira worklog: {exc}")
@@ -627,6 +660,14 @@ def _enrich_completed_issues_with_worklog_authors(search_payload, domain: str, h
     if failed_issues > 0:
         search_payload["worklog_enrich_error"] = True
 
+    if target_year is not None:
+        search_payload["issues"] = [
+            issue
+            for issue in issues
+            if isinstance(issue, dict) and str(issue.get("key") or "").strip() in enriched_issue_keys
+        ]
+        search_payload["total"] = len(search_payload["issues"])
+
 
 def _jira_current_account_id(domain: str, headers: dict):
     url = f"https://{domain}/rest/api/3/myself"
@@ -636,26 +677,45 @@ def _jira_current_account_id(domain: str, headers: dict):
     return str(payload.get("accountId") or "").strip()
 
 
-def _year_worklog_jql(target_year: int) -> str:
+def _worklog_period_bounds(target_year: int, target_month: int | None = None):
+    if target_month is None:
+        return date(target_year, 1, 1), date(target_year, 12, 31)
+    return (
+        date(target_year, target_month, 1),
+        date(target_year, target_month, calendar.monthrange(target_year, target_month)[1]),
+    )
+
+
+def _year_worklog_jql(target_year: int, target_month: int | None = None) -> str:
     # Tutte le issue (incluse sottotask e issue non completate) con almeno
     # un worklog registrato nell'anno target. Il filtro corretto per una vista
     # "ore per anno" è worklogDate, non resolutiondate+Done: quest'ultimo
     # escludeva a monte le sottotask/issue aperte pur avendo ore loggate.
+    start_date, end_date = _worklog_period_bounds(target_year, target_month)
     return (
-        f'worklogDate >= "{date(target_year, 1, 1).isoformat()}"'
-        f' AND worklogDate <= "{date(target_year, 12, 31).isoformat()}"'
+        f'worklogDate >= "{start_date.isoformat()}"'
+        f' AND worklogDate <= "{end_date.isoformat()}"'
         f' ORDER BY updated DESC'
     )
 
 
-def _completed_history_jql(target_year: int | None = None) -> str:
-    year_filter = ""
+def _completed_history_jql(
+    target_year: int | None = None,
+    target_month: int | None = None,
+    completed_only: bool = True,
+) -> str:
+    clauses = []
+    if completed_only:
+        clauses.append('(statusCategory = Done OR status in ("Completed","Completata"))')
     if target_year is not None:
-        year_filter = (
-            f' AND resolutiondate >= "{date(target_year, 1, 1).isoformat()}"'
-            f' AND resolutiondate <= "{date(target_year, 12, 31).isoformat()}"'
+        start_date, end_date = _worklog_period_bounds(target_year, target_month)
+        clauses.append(
+            f'worklogDate >= "{start_date.isoformat()}" AND worklogDate <= "{end_date.isoformat()}"'
         )
-    return f'(statusCategory = Done OR status in ("Completed","Completata")){year_filter} ORDER BY updated DESC'
+    if not clauses:
+        clauses.append("created IS NOT EMPTY")
+    filter_jql = " AND ".join(clauses)
+    return f"{filter_jql} ORDER BY updated DESC"
 
 
 def _completed_history_fields() -> list[str]:
@@ -774,20 +834,33 @@ def _nest_subtasks_into_parents(payload: dict) -> None:
     payload["total"] = len(top_level)
 
 
-def _completed_history_payload(domain: str, headers: dict, target_year: int | None = None):
-    jql = _completed_history_jql(target_year)
+def _completed_history_payload(
+    domain: str,
+    headers: dict,
+    target_year: int | None = None,
+    target_month: int | None = None,
+    completed_only: bool = True,
+):
+    jql = _completed_history_jql(target_year, target_month, completed_only)
     payload = _fetch_jira_search_all(domain, headers, jql, _completed_history_fields())
-    _enrich_completed_issues_with_worklog_authors(payload, domain, headers)
+    _enrich_completed_issues_with_worklog_authors(payload, domain, headers, target_year, target_month)
     _nest_subtasks_into_parents(payload)
     _sort_issues_by_priority(payload)
     payload["view"] = "completed"
     payload["year"] = target_year if target_year is not None else "all"
+    payload["month"] = target_month if target_month is not None else "all"
+    payload["completed"] = completed_only
     payload["jql"] = jql
     return payload
 
 
-def _search_issues_for_year_worklog(domain: str, headers: dict, target_year: int):
-    jql = _year_worklog_jql(target_year)
+def _search_issues_for_year_worklog(
+    domain: str,
+    headers: dict,
+    target_year: int,
+    target_month: int | None = None,
+):
+    jql = _year_worklog_jql(target_year, target_month)
     payload = _fetch_jira_search_all(domain, headers, jql, _completed_history_fields())
     issues = payload.get("issues", [])
     return (issues if isinstance(issues, list) else []), jql
@@ -798,6 +871,7 @@ def _build_year_worklog_payload(
     headers: dict,
     target_year: int,
     issues: list,
+    target_month: int | None = None,
     progress_cb=None,
 ):
     projects_map = {}
@@ -824,26 +898,14 @@ def _build_year_worklog_payload(
 
         worklogs = _fetch_issue_worklogs(domain, issue_key, headers)
 
-        # La issue viene inclusa solo se ha almeno un worklog nell'anno target.
-        # Ma una volta inclusa, portiamo TUTTI i suoi worklog.
-        has_worklog_in_target_year = any(
-            _local_date_from_started(str(wl.get("started") or "")) and
-            _local_date_from_started(str(wl.get("started") or "")).year == target_year
-            for wl in worklogs
-        )
-        if not has_worklog_in_target_year:
-            if progress_cb:
-                progress_cb(idx + 1, total)
-            continue
-
         issue_worklogs = []
         issue_total_seconds = 0
 
         for worklog in worklogs:
             started_value = str(worklog.get("started") or "")
             local_day = _local_date_from_started(started_value)
-            if not local_day:
-                continue  # worklog senza data valida: scartato
+            if not local_day or not _worklog_matches_period(worklog, target_year, target_month):
+                continue
 
             seconds = int(worklog.get("timeSpentSeconds") or 0)
             author = worklog.get("author", {}) or {}
@@ -1530,7 +1592,7 @@ class JiraWorklogView(APIView):
 
     Endpoint:
         GET /api/jira/worklogs/year/?view=tree&year=YYYY
-        GET /api/jira/worklogs/year/?view=completed&year=YYYY|all
+        GET /api/jira/worklogs/year/?view=completed&year=YYYY|all&month=1..12|all&completed=true|false
     """
 
     permission_classes = [IsAuthenticated]
@@ -1558,6 +1620,23 @@ class JiraWorklogView(APIView):
         if view_mode == "tree" and target_year is None:
             return Response({"error": "Parametro year obbligatorio (YYYY)"}, status=400)
 
+        month_raw = (request.GET.get("month") or "").strip().lower()
+        target_month = None
+        if month_raw not in {"", "all", "tutti"}:
+            try:
+                target_month = int(month_raw)
+                if target_month < 1 or target_month > 12:
+                    raise ValueError
+            except ValueError:
+                return Response({"error": "Formato month non valido (usa 1-12)"}, status=400)
+        if target_month is not None and target_year is None:
+            return Response({"error": "Parametro year obbligatorio quando month e' specificato"}, status=400)
+
+        completed_raw = (request.GET.get("completed") or "true").strip().lower()
+        if completed_raw not in {"true", "false"}:
+            return Response({"error": "Parametro completed non valido (usa true o false)"}, status=400)
+        completed_only = completed_raw == "true"
+
         creds, error_response = _jira_credentials_for_user(request.user)
         if error_response:
             return error_response
@@ -1566,15 +1645,24 @@ class JiraWorklogView(APIView):
 
         try:
             if view_mode == "completed":
-                return Response(_completed_history_payload(domain, headers, target_year))
+                return Response(
+                    _completed_history_payload(
+                        domain,
+                        headers,
+                        target_year,
+                        target_month,
+                        completed_only,
+                    )
+                )
 
-            issues, jql = _search_issues_for_year_worklog(domain, headers, target_year)
-            payload = _build_year_worklog_payload(domain, headers, target_year, issues)
+            issues, jql = _search_issues_for_year_worklog(domain, headers, target_year, target_month)
+            payload = _build_year_worklog_payload(domain, headers, target_year, issues, target_month)
 
             return Response(
                 {
                     "view": "tree",
                     "year": target_year,
+                    "month": target_month if target_month is not None else "all",
                     "jql": jql,
                     **payload,
                 }
@@ -1611,7 +1699,7 @@ class JiraWorklogStreamView(APIView):
     Stream SSE dei worklog annuali Jira con progresso incrementale.
 
     Endpoint:
-        GET /api/jira/worklogs/year/stream/?year=YYYY
+        GET /api/jira/worklogs/year/stream/?year=YYYY&month=1..12|all
     """
 
     permission_classes = [IsAuthenticated]
@@ -1629,6 +1717,16 @@ class JiraWorklogStreamView(APIView):
         except ValueError:
             return Response({"error": "Formato year non valido (usa YYYY)"}, status=400)
 
+        month_raw = (request.GET.get("month") or "").strip().lower()
+        target_month = None
+        if month_raw not in {"", "all", "tutti"}:
+            try:
+                target_month = int(month_raw)
+                if target_month < 1 or target_month > 12:
+                    raise ValueError
+            except ValueError:
+                return Response({"error": "Formato month non valido (usa 1-12)"}, status=400)
+
         creds, error_response = _jira_credentials_for_user(request.user)
         if error_response:
             return error_response
@@ -1636,7 +1734,7 @@ class JiraWorklogStreamView(APIView):
         headers = _jira_headers(email, api_token)
 
         try:
-            issues, jql = _search_issues_for_year_worklog(domain, headers, target_year)
+            issues, jql = _search_issues_for_year_worklog(domain, headers, target_year, target_month)
         except requests.exceptions.Timeout:
             return Response({"error": "Timeout connessione a Jira"}, status=504)
         except requests.exceptions.HTTPError as e:
@@ -1671,7 +1769,7 @@ class JiraWorklogStreamView(APIView):
                         for worklog in worklogs:
                             started_value = str(worklog.get("started") or "")
                             local_day = _local_date_from_started(started_value)
-                            if not local_day or local_day.year != target_year:
+                            if not local_day or not _worklog_matches_period(worklog, target_year, target_month):
                                 continue
 
                             seconds = int(worklog.get("timeSpentSeconds") or 0)
@@ -1737,6 +1835,7 @@ class JiraWorklogStreamView(APIView):
                 done_payload = {
                     "type": "done",
                     "year": target_year,
+                    "month": target_month if target_month is not None else "all",
                     "jql": jql,
                     "projects_count": len(projects),
                     "issues_count": total_issues,
