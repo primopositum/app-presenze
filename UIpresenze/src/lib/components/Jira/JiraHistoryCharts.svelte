@@ -65,21 +65,8 @@
 
   function taskTotalSeconds(fields?: JiraIssue['fields']) {
     if (!fields) return 0;
-    const worklogSeconds = (fields.worklog_authors || []).reduce(
+    return (fields.worklog_authors || []).reduce(
       (total, author) => total + Math.max(0, Number(author?.timeSpentSeconds || 0)),
-      0
-    );
-    if (worklogSeconds > 0) return worklogSeconds;
-
-    return (
-      fields.aggregatetimespent ??
-      fields.timespent ??
-      fields.timetracking?.timeSpentSeconds ??
-      fields.aggregatetimeestimate ??
-      fields.timeestimate ??
-      fields.aggregatetimeoriginalestimate ??
-      fields.timeoriginalestimate ??
-      fields.timetracking?.originalEstimateSeconds ??
       0
     );
   }

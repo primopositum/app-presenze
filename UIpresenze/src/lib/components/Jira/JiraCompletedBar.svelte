@@ -39,7 +39,6 @@
   export let issuesData: JiraIssue[] = [];
   export let selectedProjectKeys: string[] = [];
   export let searchQuery = '';
-  export let selectedYear = 'all';
   export let loading = false;
   export let error = '';
 
@@ -51,21 +50,8 @@
 
   function taskTotalSeconds(fields?: JiraIssue['fields']) {
     if (!fields) return 0;
-    const worklogSeconds = (fields.worklog_authors || []).reduce(
+    return (fields.worklog_authors || []).reduce(
       (total, author) => total + Math.max(0, Number(author?.timeSpentSeconds || 0)),
-      0
-    );
-    if (worklogSeconds > 0) return worklogSeconds;
-
-    return (
-      fields.aggregatetimespent ??
-      fields.timespent ??
-      fields.timetracking?.timeSpentSeconds ??
-      fields.aggregatetimeestimate ??
-      fields.timeestimate ??
-      fields.aggregatetimeoriginalestimate ??
-      fields.timeoriginalestimate ??
-      fields.timetracking?.originalEstimateSeconds ??
       0
     );
   }
@@ -121,30 +107,14 @@
     });
   }
 
-  function issueYear(issue: JiraIssue) {
-    const dateValue =
-      issue.fields?.resolutiondate ||
-      issue.fields?.updated ||
-      issue.fields?.created;
-    if (!dateValue) return null;
-    const parsed = new Date(dateValue);
-    const year = parsed.getFullYear();
-    return Number.isFinite(year) ? year : null;
-  }
-
   function refreshCompleted() {
     dispatch('refresh');
   }
 
   $: normalizedSearch = searchQuery.trim().toLowerCase();
-  $: normalizedYear = selectedYear === 'all' ? 'all' : String(selectedYear);
   $: flattenedIssues = flattenIssues(issuesData);
-  $: yearFilteredIssues =
-    normalizedYear === 'all'
-      ? flattenedIssues
-      : flattenedIssues.filter((issue) => String(issueYear(issue) || '') === normalizedYear);
   $: projects = Object.values(
-    yearFilteredIssues.reduce<Record<string, ProjectSummary>>((acc, issue) => {
+    flattenedIssues.reduce<Record<string, ProjectSummary>>((acc, issue) => {
       const projectKey = issue.fields?.project?.key || 'N/D';
       const projectName = issue.fields?.project?.name || 'Progetto non disponibile';
       if (!acc[projectKey]) {
@@ -175,7 +145,7 @@
   $: selectedHours = filteredProjects
     .filter((p) => selectedProjectKeys.includes(p.key))
     .reduce((acc, p) => acc + p.seconds, 0);
-  $: selectedIssues = yearFilteredIssues.filter((issue) =>
+  $: selectedIssues = flattenedIssues.filter((issue) =>
     selectedProjectKeys.includes(issue.fields?.project?.key || 'N/D')
   );
   $: completedSubtasks = selectedIssues.filter(isSubtask);
@@ -195,8 +165,7 @@
         Ore: {fmtHours(selectedCount > 0 ? selectedHours : totalHours)}
       </p>
       <p class="subhead note">
-        Anno = data di chiusura issue · ore totali loggate sull'issue (anche di anni precedenti).
-        Per le ore effettivamente lavorate in un anno vedi "Worklog annuali".
+        Ore calcolate esclusivamente dai worklog registrati nel periodo selezionato.
       </p>
     </div>
     <div class="head-actions">

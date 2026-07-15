@@ -91,16 +91,20 @@ export async function useJiraIssueTime(issueKey: string, filter: JiraIssueTimeFi
   return jiraIssueTime(issueKey, filter);
 }
 
-export async function useJiraWorklogsByYear(year: number | string): Promise<JiraYearWorklogResponse> {
+export async function useJiraWorklogsByYear(
+  year: number | string,
+  month: number | string = 'all'
+): Promise<JiraYearWorklogResponse> {
   const parsedYear = Number(String(year ?? '').trim());
   if (!Number.isInteger(parsedYear) || parsedYear < 1900 || parsedYear > 3000) {
     throw new Error('Anno non valido');
   }
-  return jiraWorklogsByYear(parsedYear);
+  return jiraWorklogsByYear(parsedYear, month);
 }
 
 export async function useJiraWorklogsByYearStream(
   year: number | string,
+  month: number | string = 'all',
   onProgress?: (progress: JiraYearWorklogProgress) => void,
   signal?: AbortSignal
 ): Promise<JiraYearWorklogResponse> {
@@ -108,20 +112,24 @@ export async function useJiraWorklogsByYearStream(
   if (!Number.isInteger(parsedYear) || parsedYear < 1900 || parsedYear > 3000) {
     throw new Error('Anno non valido');
   }
-  return jiraWorklogsByYearStream(parsedYear, onProgress, signal);
+  return jiraWorklogsByYearStream(parsedYear, month, onProgress, signal);
 }
 
-export async function useJiraCompletedHistory(year: number | string = 'all'): Promise<JiraCompletedHistoryResponse> {
+export async function useJiraCompletedHistory(
+  year: number | string = 'all',
+  month: number | string = 'all',
+  completed = true
+): Promise<JiraCompletedHistoryResponse> {
   const rawYear = String(year ?? 'all').trim() || 'all';
   if (rawYear.toLowerCase() === 'all') {
-    return jiraCompletedHistory('all');
+    return jiraCompletedHistory('all', month, completed);
   }
 
   const parsedYear = Number(rawYear);
   if (!Number.isInteger(parsedYear) || parsedYear < 1900 || parsedYear > 3000) {
     throw new Error('Anno non valido');
   }
-  return jiraCompletedHistory(parsedYear);
+  return jiraCompletedHistory(parsedYear, month, completed);
 }
 
 export async function useJiraStatuses(scopeType?: JiraScopeType, scopeValue = ''): Promise<JiraStatusesResponse> {

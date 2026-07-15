@@ -13,8 +13,10 @@
 
   type JiraIssue = JiraHistoryIssue;
   type CompletedHistoryCache = {
-    version: 2;
+    version: 3;
     cachedAt: string;
+    year: number;
+    month: number | 'all';
     issues: JiraIssue[];
   };
   type UserSubtask = {
@@ -34,7 +36,21 @@
     subtasks: UserSubtask[];
   };
 
-  const COMPLETED_HISTORY_CACHE_KEY = 'app-presenze:jira-history:completed:v2';
+  const COMPLETED_HISTORY_CACHE_KEY = 'app-presenze:jira-history:completed:v3';
+  const MONTHS = [
+    'Gennaio',
+    'Febbraio',
+    'Marzo',
+    'Aprile',
+    'Maggio',
+    'Giugno',
+    'Luglio',
+    'Agosto',
+    'Settembre',
+    'Ottobre',
+    'Novembre',
+    'Dicembre'
+  ];
 
   let selectedProjectKeys: string[] = [];
   let searchQuery = '';
@@ -42,28 +58,20 @@
   let completedLoading = false;
   let completedError = '';
   let completedRequestId = 0;
-  let selectedYear = 'all';
+  let selectedYear = new Date().getFullYear();
+  let selectedMonth: number | 'all' = 'all';
   let yearlyWorklogData: JiraYearWorklogResponse | null = null;
   let yearlyWorklogLoading = false;
   let yearlyWorklogError = '';
   let yearlyWorklogProgress: { loaded: number; total: number } | null = null;
-  let lastFetchedYear = '';
+  let lastFetchedPeriod = '';
+  let lastFetchedCompletedPeriod = '';
+  let jiraHistoryReady = false;
   let yearlyWorklogRequestId = 0;
   let yearlyWorklogController: AbortController | null = null;
   let leftPaneEl: HTMLDivElement | null = null;
   let chartsMaxHeight = '';
   let layoutResizeObserver: ResizeObserver | null = null;
-
-  function issueYear(issue: JiraIssue) {
-    const dateValue =
-      issue.fields?.resolutiondate ||
-      issue.fields?.updated ||
-      issue.fields?.created;
-    if (!dateValue) return null;
-    const parsed = new Date(dateValue);
-    const year = parsed.getFullYear();
-    return Number.isFinite(year) ? year : null;
-  }
 
   function fmtHours(seconds: number) {
     const hours = seconds / 3600;
@@ -86,17 +94,19 @@
     });
   }
 
-  async function fetchYearlyWorklogs(year: string) {
+  async function fetchYearlyWorklogs(year: number, month: number | 'all') {
     yearlyWorklogController?.abort();
     const controller = new AbortController();
     yearlyWorklogController = controller;
     const requestId = ++yearlyWorklogRequestId;
     yearlyWorklogLoading = true;
+    yearlyWorklogData = null;
     yearlyWorklogError = '';
     yearlyWorklogProgress = { loaded: 0, total: 0 };
     try {
       const data = await useJiraWorklogsByYearStream(
         year,
+        month,
         (progress) => {
           if (requestId === yearlyWorklogRequestId) yearlyWorklogProgress = progress;
         },
@@ -108,24 +118,13 @@
       if (requestId !== yearlyWorklogRequestId) return;
       if (e?.name === 'AbortError') return;
       yearlyWorklogData = null;
-      yearlyWorklogError = String(e?.message || e || 'Errore caricamento worklog annuali');
+      yearlyWorklogError = String(e?.message || e || 'Errore caricamento worklog del periodo');
     } finally {
       if (requestId === yearlyWorklogRequestId) {
         yearlyWorklogLoading = false;
         yearlyWorklogController = null;
       }
     }
-  }
-
-  function resetYearlyWorklogs() {
-    yearlyWorklogController?.abort();
-    yearlyWorklogController = null;
-    yearlyWorklogRequestId += 1;
-    yearlyWorklogData = null;
-    yearlyWorklogError = '';
-    yearlyWorklogLoading = false;
-    yearlyWorklogProgress = null;
-    lastFetchedYear = '';
   }
 
   function syncChartsMaxHeight() {
@@ -286,24 +285,36 @@
     ]);
   }
 
-  function loadCompletedHistoryCache() {
+  function completedHistoryCacheKey(year: number, month: number | 'all') {
+    return `${COMPLETED_HISTORY_CACHE_KEY}:${year}:${month}`;
+  }
+
+  function loadCompletedHistoryCache(year: number, month: number | 'all') {
+    const cacheKey = completedHistoryCacheKey(year, month);
     try {
-      const raw = localStorage.getItem(COMPLETED_HISTORY_CACHE_KEY);
+      const raw = localStorage.getItem(cacheKey);
       if (!raw) return false;
 
       const payload = JSON.parse(raw) as Partial<CompletedHistoryCache>;
-      if (payload.version !== 2 || !Array.isArray(payload.issues)) {
-        localStorage.removeItem(COMPLETED_HISTORY_CACHE_KEY);
+      if (
+        payload.version !== 3 ||
+        payload.year !== year ||
+        payload.month !== month ||
+        !Array.isArray(payload.issues)
+      ) {
+        localStorage.removeItem(cacheKey);
         return false;
       }
 
       completedIssues = normalizeCompletedIssues(payload.issues);
       try {
         localStorage.setItem(
-          COMPLETED_HISTORY_CACHE_KEY,
+          cacheKey,
           JSON.stringify({
-            version: 2,
+            version: 3,
             cachedAt: String(payload.cachedAt || new Date().toISOString()),
+            year,
+            month,
             issues: completedIssues
           } satisfies CompletedHistoryCache)
         );
@@ -313,36 +324,43 @@
       completedError = '';
       return true;
     } catch {
-      localStorage.removeItem(COMPLETED_HISTORY_CACHE_KEY);
+      localStorage.removeItem(cacheKey);
       return false;
     }
   }
 
-  function saveCompletedHistoryCache(issues: JiraIssue[]) {
+  function saveCompletedHistoryCache(year: number, month: number | 'all', issues: JiraIssue[]) {
     const payload: CompletedHistoryCache = {
-      version: 2,
+      version: 3,
       cachedAt: new Date().toISOString(),
+      year,
+      month,
       issues,
     };
 
     try {
-      localStorage.setItem(COMPLETED_HISTORY_CACHE_KEY, JSON.stringify(payload));
+      localStorage.setItem(completedHistoryCacheKey(year, month), JSON.stringify(payload));
     } catch {
       return;
     }
   }
 
-  async function fetchCompletedHistory(forceRefresh = false) {
-    if (!forceRefresh && loadCompletedHistoryCache()) return;
+  async function fetchCompletedHistory(
+    year: number,
+    month: number | 'all',
+    forceRefresh = false
+  ) {
+    if (!forceRefresh && loadCompletedHistoryCache(year, month)) return;
 
     const requestId = ++completedRequestId;
     completedLoading = true;
+    completedIssues = [];
     completedError = '';
     try {
-      const data = await useJiraCompletedHistory('all');
+      const data = await useJiraCompletedHistory(year, month, true);
       if (requestId !== completedRequestId) return;
       completedIssues = normalizeCompletedIssues(data.issues || []);
-      saveCompletedHistoryCache(completedIssues);
+      saveCompletedHistoryCache(year, month, completedIssues);
     } catch (e: any) {
       if (requestId !== completedRequestId) return;
       completedError = String(e?.message || e || 'Errore caricamento issue completate');
@@ -354,18 +372,7 @@
   }
 
   $: flattenedCompletedIssues = flattenCompletedIssues(completedIssues);
-  $: availableYears = Array.from(
-    new Set(
-      flattenedCompletedIssues
-        .map((issue) => issueYear(issue))
-        .filter((year): year is number => year !== null)
-    )
-  ).sort((a, b) => b - a);
-
-  $: chartIssues =
-    selectedYear === 'all'
-      ? flattenedCompletedIssues
-      : flattenedCompletedIssues.filter((issue) => String(issueYear(issue) || '') === selectedYear);
+  $: chartIssues = flattenedCompletedIssues;
   $: knownSubtaskKeys = new Set(
     flattenedCompletedIssues.filter(completedIssueIsSubtask).map((issue) => issue.key)
   );
@@ -384,10 +391,15 @@
     worklogsCount: visibleYearlyWorklogProjects.reduce((total, project) => total + project.worklogs_count, 0),
     totalSeconds: visibleYearlyWorklogProjects.reduce((total, project) => total + project.total_seconds, 0)
   };
-  $: if (selectedYear === 'all') resetYearlyWorklogs();
-  $: if (selectedYear !== 'all' && selectedYear !== lastFetchedYear) {
-    lastFetchedYear = selectedYear;
-    void fetchYearlyWorklogs(selectedYear);
+  $: selectedPeriod = `${selectedYear}:${selectedMonth}`;
+  $: selectedYearIsValid = Number.isInteger(selectedYear) && selectedYear >= 1900 && selectedYear <= 3000;
+  $: if (jiraHistoryReady && selectedYearIsValid && selectedPeriod !== lastFetchedCompletedPeriod) {
+    lastFetchedCompletedPeriod = selectedPeriod;
+    void fetchCompletedHistory(selectedYear, selectedMonth);
+  }
+  $: if (jiraHistoryReady && selectedYearIsValid && selectedPeriod !== lastFetchedPeriod) {
+    lastFetchedPeriod = selectedPeriod;
+    void fetchYearlyWorklogs(selectedYear, selectedMonth);
   }
 
   onMount(async () => {
@@ -401,7 +413,7 @@
       layoutResizeObserver = new ResizeObserver(syncChartsMaxHeight);
       layoutResizeObserver.observe(leftPaneEl);
     }
-    void fetchCompletedHistory();
+    jiraHistoryReady = true;
   });
 
   onDestroy(() => {
@@ -428,7 +440,7 @@
         >
           ←
         </button>
-        <p>Due viste per anno: "Progetti completati" raggruppa per anno di chiusura issue; "Worklog annuali" mostra le ore loggate per data del worklog.</p>
+        <p>Entrambe le viste mostrano le ore registrate nella data del worklog per il periodo selezionato.</p>
       </div>
       <div class="search-wrap">
         <span class="search-ico">/</span>
@@ -439,14 +451,28 @@
           placeholder="Cerca progetto (chiave o nome)..."
         />
       </div>
-      <div class="year-wrap">
-        <label for="year-filter">Anno</label>
-        <select id="year-filter" class="year-select" bind:value={selectedYear}>
-          <option value="all">Tutti</option>
-          {#each availableYears as year (year)}
-            <option value={String(year)}>{year}</option>
-          {/each}
-        </select>
+      <div class="period-filters">
+        <div class="period-filter">
+          <label for="year-filter">Anno</label>
+          <input
+            id="year-filter"
+            class="period-input"
+            type="number"
+            min="1900"
+            max="3000"
+            step="1"
+            bind:value={selectedYear}
+          />
+        </div>
+        <div class="period-filter">
+          <label for="month-filter">Mese</label>
+          <select id="month-filter" class="period-input" bind:value={selectedMonth}>
+            <option value="all">Tutti i mesi</option>
+            {#each MONTHS as monthName, index (monthName)}
+              <option value={index + 1}>{monthName}</option>
+            {/each}
+          </select>
+        </div>
       </div>
     </div>
   </header>
@@ -457,10 +483,9 @@
         bind:issuesData={completedIssues}
         bind:selectedProjectKeys
         {searchQuery}
-        {selectedYear}
         loading={completedLoading}
         error={completedError}
-        on:refresh={() => fetchCompletedHistory(true)}
+        on:refresh={() => fetchCompletedHistory(selectedYear, selectedMonth, true)}
       />
     </div>
 
@@ -473,19 +498,17 @@
     <div class="subtask-users-head">
       <div>
         <h3>Ore sottotask per utente</h3>
-        <p>Ore effettive dei worklog dell'anno selezionato, separate per autore e sottotask.</p>
+        <p>Ore effettive dei worklog del periodo selezionato, separate per autore e sottotask.</p>
       </div>
       {#if userSubtaskGroups.length > 0}
         <strong>{userSubtaskGroups.length} utenti · {fmtHours(userSubtasksTotalSeconds)}</strong>
       {/if}
     </div>
 
-    {#if selectedYear === 'all'}
-      <p class="tree-state">Seleziona un anno per visualizzare la ripartizione delle sottotask.</p>
-    {:else if yearlyWorklogLoading && !yearlyWorklogData}
+    {#if yearlyWorklogLoading && !yearlyWorklogData}
       <div class="stream-progress" data-history-hover-exclude>
         <div>
-          <span>Caricamento worklog annuali...</span>
+          <span>Caricamento worklog del periodo...</span>
           {#if yearlyWorklogProgress?.total}
             <strong>{yearlyWorklogProgress.loaded}/{yearlyWorklogProgress.total}</strong>
           {/if}
@@ -537,23 +560,19 @@
 
   <section class="worklogs-tree" data-history-hover>
     <div class="tree-head">
-      <h3>Worklog annuali</h3>
-      {#if selectedYear !== 'all'}
-        <button type="button" class="refresh-tree-btn" on:click={() => fetchYearlyWorklogs(selectedYear)} disabled={yearlyWorklogLoading}>
-          {yearlyWorklogLoading ? 'Aggiorno...' : 'Aggiorna'}
-        </button>
-      {/if}
+      <h3>Worklog del periodo</h3>
+      <button type="button" class="refresh-tree-btn" on:click={() => fetchYearlyWorklogs(selectedYear, selectedMonth)} disabled={yearlyWorklogLoading}>
+        {yearlyWorklogLoading ? 'Aggiorno...' : 'Aggiorna'}
+      </button>
     </div>
     <p class="tree-subtitle">
-      Ore effettivamente loggate nell'anno selezionato, attribuite per data del singolo worklog
+      Ore effettivamente loggate nel periodo selezionato, attribuite per data del singolo worklog
       (indipendentemente dall'anno di chiusura dell'issue).
     </p>
 
-    {#if selectedYear === 'all'}
-      <p class="tree-state">Seleziona un anno per caricare i worklog annuali per progetto → issue → worklog.</p>
-    {:else if yearlyWorklogLoading && !yearlyWorklogData}
+    {#if yearlyWorklogLoading && !yearlyWorklogData}
       <p class="tree-state">
-        Caricamento worklog annuali...
+        Caricamento worklog del periodo...
         {#if yearlyWorklogProgress?.total}
           {yearlyWorklogProgress.loaded}/{yearlyWorklogProgress.total}
         {/if}
@@ -563,9 +582,9 @@
     {:else if selectedProjectKeys.length === 0}
       <p class="tree-state">Seleziona almeno un progetto completato per visualizzare i worklog annuali.</p>
     {:else if !yearlyWorklogData || yearlyWorklogData.projects_count === 0}
-      <p class="tree-state">Nessun worklog trovato per l'anno selezionato.</p>
+      <p class="tree-state">Nessun worklog trovato per il periodo selezionato.</p>
     {:else if visibleYearlyWorklogProjects.length === 0}
-      <p class="tree-state">Nessun worklog trovato per i progetti selezionati nell'anno scelto.</p>
+      <p class="tree-state">Nessun worklog trovato per i progetti selezionati nel periodo scelto.</p>
     {:else}
       <p class="tree-summary">
         Progetti: {visibleYearlyWorklogSummary.projectsCount} · Issue: {visibleYearlyWorklogSummary.issuesCount} · Worklog: {visibleYearlyWorklogSummary.worklogsCount} · Ore: {fmtHours(visibleYearlyWorklogSummary.totalSeconds)}
@@ -651,19 +670,25 @@
     width: min(420px, 100%);
     position: relative;
   }
-  .year-wrap {
+  .period-filters {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.55rem;
+  }
+  .period-filter {
     display: grid;
     gap: 0.22rem;
-    min-width: 130px;
+    min-width: 125px;
   }
-  .year-wrap label {
+  .period-filter label {
     font-size: 0.7rem;
     color: #64748b;
     font-family: var(--font-mono);
     text-transform: uppercase;
     letter-spacing: 0.03em;
   }
-  .year-select {
+  .period-input {
+    width: 100%;
     border: 1px solid #cbd5e1;
     border-radius: 10px;
     font-size: 13px;
@@ -673,7 +698,7 @@
     outline: none;
     min-height: 36px;
   }
-  .year-select:focus {
+  .period-input:focus {
     border-color: #94a3b8;
     box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.2);
   }
@@ -1049,8 +1074,11 @@
       min-width: 0;
       width: 100%;
     }
-    .year-wrap {
+    .period-filters {
       width: 100%;
+    }
+    .period-filter {
+      flex: 1 1 0;
     }
     .layout-row {
       grid-template-columns: 1fr;

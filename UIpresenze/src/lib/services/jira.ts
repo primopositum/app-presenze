@@ -209,6 +209,7 @@ export type JiraHistoryIssue = {
 export type JiraYearWorklogResponse = {
   view?: 'tree';
   year: number;
+  month?: number | 'all';
   jql: string;
   projects_count: number;
   issues_count: number;
@@ -225,6 +226,8 @@ export type JiraYearWorklogProgress = {
 export type JiraCompletedHistoryResponse = {
   view?: 'completed';
   year: number | 'all';
+  month?: number | 'all';
+  completed?: boolean;
   jql: string;
   total: number;
   startAt: number;
@@ -368,20 +371,24 @@ export function jiraTimesheetMonth(year: number, month: number, params: JiraTime
   }) as Promise<JiraTimesheetMonthResponse>;
 }
 
-export function jiraWorklogsByYear(year: string | number) {
+export function jiraWorklogsByYear(year: string | number, month: string | number = 'all') {
   return request('/jira/worklogs/year/', {
     view: 'tree',
     year: String(year ?? '').trim(),
+    month: String(month ?? 'all').trim(),
   }) as Promise<JiraYearWorklogResponse>;
 }
 
 export async function jiraWorklogsByYearStream(
   year: string | number,
+  month: string | number = 'all',
   onProgress?: (progress: JiraYearWorklogProgress) => void,
   signal?: AbortSignal
 ): Promise<JiraYearWorklogResponse> {
   const normalizedYear = String(year ?? '').trim();
-  const url = `${BASE}/jira/worklogs/year/stream/?year=${encodeURIComponent(normalizedYear)}`;
+  const normalizedMonth = String(month ?? 'all').trim();
+  const params = new URLSearchParams({ year: normalizedYear, month: normalizedMonth });
+  const url = `${BASE}/jira/worklogs/year/stream/?${params.toString()}`;
   const res = await authFetch(
     url,
     {
@@ -455,11 +462,17 @@ export async function jiraWorklogsByYearStream(
   return result;
 }
 
-export function jiraCompletedHistory(year: string | number = 'all') {
+export function jiraCompletedHistory(
+  year: string | number = 'all',
+  month: string | number = 'all',
+  completed = true
+) {
   const normalizedYear = String(year ?? 'all').trim().toLowerCase();
   return request('/jira/worklogs/year/', {
     view: 'completed',
     year: normalizedYear && normalizedYear !== 'all' ? normalizedYear : '',
+    month: String(month ?? 'all').trim().toLowerCase(),
+    completed: String(completed),
   }) as Promise<JiraCompletedHistoryResponse>;
 }
 
