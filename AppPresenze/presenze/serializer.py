@@ -413,6 +413,11 @@ class JiraReferenceSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "price"]
         read_only_fields = ["id"]
 
+    def validate_name(self, value):
+        if JiraReference.objects.filter(name__iexact=value).exists():
+            raise serializers.ValidationError("Esiste gia un riferimento con questo nome.")
+        return value
+
 
 class JiraReferenceUpdateSerializer(serializers.Serializer):
     id = serializers.IntegerField(min_value=1)

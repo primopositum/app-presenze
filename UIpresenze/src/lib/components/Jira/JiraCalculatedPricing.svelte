@@ -1,10 +1,20 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { jiraReferencesGet, type JiraReference } from '$lib/services/jira';
+  import {
+    jiraReferencesAddJiraProjects,
+    jiraReferencesDelete,
+    jiraReferencesGet,
+    type JiraReference
+  } from '$lib/services/jira';
 
   let references: JiraReference[] = [];
   let loading = true;
   let error = '';
+  let actionError = '';
+  let actionMessage = '';
+  let selectedReferenceId: number | null = null;
+  let deleting = false;
+  let importingProjects = false;
 
   const priceFormatter = new Intl.NumberFormat('it-IT', {
     style: 'currency',
@@ -15,15 +25,53 @@
     return priceFormatter.format(Number(price || 0));
   }
 
+  function sortReferences(items: JiraReference[]) {
+    return [...items].sort((first, second) => first.name.localeCompare(second.name, 'it'));
+  }
+
   async function loadReferences() {
     loading = true;
     error = '';
     try {
-      references = await jiraReferencesGet();
+      references = sortReferences(await jiraReferencesGet());
     } catch (cause: any) {
       error = String(cause?.message || cause || 'Errore caricamento riferimenti prezzo');
     } finally {
       loading = false;
+    }
+  }
+
+  async function deleteSelectedReference() {
+    if (selectedReferenceId === null) return;
+    actionError = '';
+    actionMessage = '';
+    deleting = true;
+    try {
+      await jiraReferencesDelete([selectedReferenceId]);
+      references = references.filter((reference) => reference.id !== selectedReferenceId);
+      selectedReferenceId = null;
+      actionMessage = 'Riferimento eliminato.';
+    } catch (cause: any) {
+      actionError = String(cause?.message || cause || 'Errore eliminazione riferimento');
+    } finally {
+      deleting = false;
+    }
+  }
+
+  async function addJiraProjects() {
+    actionError = '';
+    actionMessage = '';
+    importingProjects = true;
+    try {
+      const response = await jiraReferencesAddJiraProjects();
+      references = sortReferences([...references, ...response.items]);
+      actionMessage = response.count > 0
+        ? `${response.count} progetti Jira aggiunti.`
+        : 'Tutti i progetti Jira sono gia presenti.';
+    } catch (cause: any) {
+      actionError = String(cause?.message || cause || 'Errore importazione progetti Jira');
+    } finally {
+      importingProjects = false;
     }
   }
 
@@ -38,10 +86,24 @@
       <h3>Riferimenti prezzo Jira</h3>
       <p>Valori disponibili per il calcolo dei prezzi delle attivita Jira.</p>
     </div>
-    <button type="button" on:click={loadReferences} disabled={loading}>
-      {loading ? 'Aggiorno...' : 'Aggiorna'}
-    </button>
+    <div class="pricing-actions">
+      <button type="button" class="delete-btn" on:click={deleteSelectedReference} disabled={deleting || selectedReferenceId === null}>
+        {deleting ? 'Elimino...' : 'Elimina'}
+      </button>
+      <button type="button" class="import-btn" on:click={addJiraProjects} disabled={importingProjects}>
+        {importingProjects ? 'Importo...' : 'Aggiungi progetti Jira'}
+      </button>
+      <button type="button" on:click={loadReferences} disabled={loading}>
+        {loading ? 'Aggiorno...' : 'Aggiorna'}
+      </button>
+    </div>
   </div>
+
+  {#if actionError}
+    <p class="state error">{actionError}</p>
+  {:else if actionMessage}
+    <p class="state success">{actionMessage}</p>
+  {/if}
 
   {#if loading && references.length === 0}
     <p class="state">Caricamento riferimenti prezzo...</p>
@@ -54,6 +116,7 @@
       <table>
         <thead>
           <tr>
+            <th scope="col" class="selection-column">Seleziona</th>
             <th scope="col">Nome</th>
             <th scope="col">Prezzo</th>
           </tr>
@@ -61,6 +124,15 @@
         <tbody>
           {#each references as reference (reference.id)}
             <tr data-history-hover>
+              <td class="selection-column">
+                <input
+                  type="radio"
+                  name="selected-jira-reference"
+                  checked={selectedReferenceId === reference.id}
+                  on:change={() => (selectedReferenceId = reference.id)}
+                  aria-label={`Seleziona ${reference.name}`}
+                />
+              </td>
               <td>{reference.name}</td>
               <td>{formatPrice(reference.price)}</td>
             </tr>
@@ -87,6 +159,13 @@
     gap: 0.7rem;
   }
 
+  .pricing-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.35rem;
+  }
+
   h3 {
     margin: 0;
     color: #0f172a;
@@ -105,7 +184,7 @@
     line-height: 1.35;
   }
 
-  .pricing-head button {
+  .pricing-actions button {
     min-height: 32px;
     border: 1px solid #d97706;
     border-radius: 8px;
@@ -117,17 +196,39 @@
     padding: 0.3rem 0.55rem;
   }
 
-  .pricing-head button:hover:not(:disabled) {
+  .pricing-actions button:hover:not(:disabled) {
     background: #ea580c;
   }
 
-  .pricing-head button:disabled {
+  .pricing-actions button:disabled {
     cursor: not-allowed;
     opacity: 0.65;
   }
 
   .state.error {
     color: #b91c1c;
+  }
+
+  .state.success {
+    color: #166534;
+  }
+
+  .delete-btn {
+    border-color: #dc2626 !important;
+    background: #dc2626 !important;
+  }
+
+  .delete-btn:hover:not(:disabled) {
+    background: #b91c1c !important;
+  }
+
+  .import-btn {
+    border-color: #2563eb !important;
+    background: #2563eb !important;
+  }
+
+  .import-btn:hover:not(:disabled) {
+    background: #1d4ed8 !important;
   }
 
   .table-wrap {
@@ -167,9 +268,20 @@
     white-space: nowrap;
   }
 
+  .selection-column {
+    width: 1%;
+    text-align: center !important;
+    white-space: nowrap;
+  }
+
   @media (max-width: 720px) {
     .pricing-head {
       flex-direction: column;
     }
+
+    .pricing-actions {
+      justify-content: flex-start;
+    }
+
   }
 </style>

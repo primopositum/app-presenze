@@ -498,6 +498,14 @@ export function jiraReferencesAdd(items: JiraReferenceInput[]) {
   return requestJson('/jira/reference/add/', 'POST', { items }) as Promise<{ count: number; items: JiraReference[] }>;
 }
 
+export function jiraReferencesAddJiraProjects() {
+  return requestJson('/jira/reference/add/', 'POST', { import_jira_projects: true }) as Promise<{
+    count: number;
+    skipped_count: number;
+    items: JiraReference[];
+  }>;
+}
+
 export function jiraReferencesPut(items: JiraReferenceUpdate[]) {
   return requestJson('/jira/reference/put/', 'PUT', { items }) as Promise<{ count: number; items: JiraReference[] }>;
 }
