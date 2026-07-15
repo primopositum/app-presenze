@@ -525,6 +525,41 @@ def _worklog_seconds_by_author(
     return totals
 
 
+def _apply_worklog_author_totals(fields: dict, totals: dict):
+    if not totals:
+        return False
+
+    sorted_authors = sorted(
+        totals.items(),
+        key=lambda item: (-item[1], item[0].lower()),
+    )
+    fields["worklog_authors"] = [
+        {"displayName": name, "timeSpentSeconds": seconds}
+        for name, seconds in sorted_authors
+    ]
+
+    top_name, top_seconds = sorted_authors[0]
+    fields["assignee"] = {"displayName": top_name}
+    fields["worklog_primary_author"] = {
+        "displayName": top_name,
+        "timeSpentSeconds": top_seconds,
+    }
+    return True
+
+
+def _issue_fields_are_completed(fields: dict):
+    status = (fields or {}).get("status") or {}
+    status_category = status.get("statusCategory") or {}
+    category_key = str(status_category.get("key") or "").strip().casefold()
+    category_name = str(status_category.get("name") or "").strip().casefold()
+    status_name = str(status.get("name") or "").strip().casefold()
+    return (
+        category_key == "done"
+        or category_name in {"done", "completed", "completata"}
+        or status_name in {"done", "completed", "completata"}
+    )
+
+
 def _enrich_completed_issues_with_worklog_authors(
     search_payload,
     domain: str,
@@ -626,27 +661,9 @@ def _enrich_completed_issues_with_worklog_authors(
                 if not totals:
                     continue
 
-                sorted_authors = sorted(
-                    totals.items(),
-                    key=lambda item: (-item[1], item[0].lower()),
-                )
-                workers = [
-                    {"displayName": name, "timeSpentSeconds": seconds}
-                    for name, seconds in sorted_authors
-                ]
-
-                # Manteniamo il contratto FE invariato: assignee.displayName esiste sempre.
-                top_name, top_seconds = sorted_authors[0]
-                fields["assignee"] = {"displayName": top_name}
-
-                # Metadati aggiuntivi utili per debug/estensioni future.
-                fields["worklog_authors"] = workers
-                fields["worklog_primary_author"] = {
-                    "displayName": top_name,
-                    "timeSpentSeconds": top_seconds,
-                }
-                enriched_issues += 1
-                enriched_issue_keys.add(issue_key)
+                if _apply_worklog_author_totals(fields, totals):
+                    enriched_issues += 1
+                    enriched_issue_keys.add(issue_key)
     except Exception as exc:
         failed_issues = max(failed_issues, 1)
         _push_log("error", f"Errore generale arricchimento Jira worklog: {exc}")
@@ -1748,6 +1765,7 @@ class JiraWorklogStreamView(APIView):
                 yield f"data: {json.dumps({'type': 'start', 'total': total}, ensure_ascii=False)}\n\n"
 
                 projects_map = {}
+                completed_issues = []
                 total_worklogs = 0
                 total_seconds = 0
                 total_issues = 0
@@ -1765,6 +1783,7 @@ class JiraWorklogStreamView(APIView):
 
                         issue_worklogs = []
                         issue_total_seconds = 0
+                        author_totals = {}
                         worklogs = _fetch_issue_worklogs(domain, issue_key, headers)
                         for worklog in worklogs:
                             started_value = str(worklog.get("started") or "")
@@ -1789,6 +1808,8 @@ class JiraWorklogStreamView(APIView):
                             )
                             if seconds > 0:
                                 issue_total_seconds += seconds
+                                author_name = str(author.get("displayName") or "").strip() or "Unassigned"
+                                author_totals[author_name] = author_totals.get(author_name, 0) + seconds
 
                         if issue_worklogs:
                             issue_worklogs.sort(key=lambda item: item.get("started") or "", reverse=True)
@@ -1825,12 +1846,20 @@ class JiraWorklogStreamView(APIView):
                             projects_map[project_key]["worklogs_count"] += len(issue_worklogs)
                             projects_map[project_key]["total_seconds"] += issue_total_seconds
 
+                            if _issue_fields_are_completed(fields) and _apply_worklog_author_totals(fields, author_totals):
+                                completed_issues.append(issue)
+
                     yield f"data: {json.dumps({'type': 'progress', 'loaded': idx + 1, 'total': total}, ensure_ascii=False)}\n\n"
 
                 projects = list(projects_map.values())
                 for project_row in projects:
                     project_row["issues"].sort(key=lambda item: (item.get("issue_key") or ""))
                 projects.sort(key=lambda item: (item.get("project_key") or ""))
+
+                completed_issues_count = len(completed_issues)
+                completed_payload = {"issues": completed_issues}
+                _nest_subtasks_into_parents(completed_payload)
+                _sort_issues_by_priority(completed_payload)
 
                 done_payload = {
                     "type": "done",
@@ -1842,6 +1871,8 @@ class JiraWorklogStreamView(APIView):
                     "worklogs_count": total_worklogs,
                     "total_seconds": total_seconds,
                     "projects": projects,
+                    "completed_issues_count": completed_issues_count,
+                    "completed_issues": completed_payload["issues"],
                 }
                 yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
             except requests.exceptions.RequestException as exc:

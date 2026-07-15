@@ -216,6 +216,8 @@ export type JiraYearWorklogResponse = {
   worklogs_count: number;
   total_seconds: number;
   projects: JiraYearWorklogProject[];
+  completed_issues_count?: number;
+  completed_issues?: JiraHistoryIssue[];
 };
 
 export type JiraYearWorklogProgress = {

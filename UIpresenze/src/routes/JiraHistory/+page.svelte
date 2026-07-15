@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { useJiraCompletedHistory, useJiraWorklogsByYearStream } from '$lib/hooks/useJira';
+  import { useJiraWorklogsByYearStream } from '$lib/hooks/useJira';
   import type {
     JiraHistoryIssue,
     JiraYearWorklogIssue,
@@ -12,13 +12,6 @@
   import { ensureJiraControlLoaded, jiraControl } from '$lib/stores/jiraControl';
 
   type JiraIssue = JiraHistoryIssue;
-  type CompletedHistoryCache = {
-    version: 3;
-    cachedAt: string;
-    year: number;
-    month: number | 'all';
-    issues: JiraIssue[];
-  };
   type UserSubtask = {
     key: string;
     summary: string;
@@ -36,7 +29,6 @@
     subtasks: UserSubtask[];
   };
 
-  const COMPLETED_HISTORY_CACHE_KEY = 'app-presenze:jira-history:completed:v3';
   const MONTHS = [
     'Gennaio',
     'Febbraio',
@@ -53,11 +45,7 @@
   ];
 
   let selectedProjectKeys: string[] = [];
-  let searchQuery = '';
   let completedIssues: JiraIssue[] = [];
-  let completedLoading = false;
-  let completedError = '';
-  let completedRequestId = 0;
   let selectedYear = new Date().getFullYear();
   let selectedMonth: number | 'all' = 'all';
   let yearlyWorklogData: JiraYearWorklogResponse | null = null;
@@ -65,7 +53,6 @@
   let yearlyWorklogError = '';
   let yearlyWorklogProgress: { loaded: number; total: number } | null = null;
   let lastFetchedPeriod = '';
-  let lastFetchedCompletedPeriod = '';
   let jiraHistoryReady = false;
   let yearlyWorklogRequestId = 0;
   let yearlyWorklogController: AbortController | null = null;
@@ -101,6 +88,7 @@
     const requestId = ++yearlyWorklogRequestId;
     yearlyWorklogLoading = true;
     yearlyWorklogData = null;
+    completedIssues = [];
     yearlyWorklogError = '';
     yearlyWorklogProgress = { loaded: 0, total: 0 };
     try {
@@ -114,10 +102,12 @@
       );
       if (requestId !== yearlyWorklogRequestId) return;
       yearlyWorklogData = data;
+      completedIssues = normalizeCompletedIssues(data.completed_issues || []);
     } catch (e: any) {
       if (requestId !== yearlyWorklogRequestId) return;
       if (e?.name === 'AbortError') return;
       yearlyWorklogData = null;
+      completedIssues = [];
       yearlyWorklogError = String(e?.message || e || 'Errore caricamento worklog del periodo');
     } finally {
       if (requestId === yearlyWorklogRequestId) {
@@ -285,92 +275,6 @@
     ]);
   }
 
-  function completedHistoryCacheKey(year: number, month: number | 'all') {
-    return `${COMPLETED_HISTORY_CACHE_KEY}:${year}:${month}`;
-  }
-
-  function loadCompletedHistoryCache(year: number, month: number | 'all') {
-    const cacheKey = completedHistoryCacheKey(year, month);
-    try {
-      const raw = localStorage.getItem(cacheKey);
-      if (!raw) return false;
-
-      const payload = JSON.parse(raw) as Partial<CompletedHistoryCache>;
-      if (
-        payload.version !== 3 ||
-        payload.year !== year ||
-        payload.month !== month ||
-        !Array.isArray(payload.issues)
-      ) {
-        localStorage.removeItem(cacheKey);
-        return false;
-      }
-
-      completedIssues = normalizeCompletedIssues(payload.issues);
-      try {
-        localStorage.setItem(
-          cacheKey,
-          JSON.stringify({
-            version: 3,
-            cachedAt: String(payload.cachedAt || new Date().toISOString()),
-            year,
-            month,
-            issues: completedIssues
-          } satisfies CompletedHistoryCache)
-        );
-      } catch {
-        void 0;
-      }
-      completedError = '';
-      return true;
-    } catch {
-      localStorage.removeItem(cacheKey);
-      return false;
-    }
-  }
-
-  function saveCompletedHistoryCache(year: number, month: number | 'all', issues: JiraIssue[]) {
-    const payload: CompletedHistoryCache = {
-      version: 3,
-      cachedAt: new Date().toISOString(),
-      year,
-      month,
-      issues,
-    };
-
-    try {
-      localStorage.setItem(completedHistoryCacheKey(year, month), JSON.stringify(payload));
-    } catch {
-      return;
-    }
-  }
-
-  async function fetchCompletedHistory(
-    year: number,
-    month: number | 'all',
-    forceRefresh = false
-  ) {
-    if (!forceRefresh && loadCompletedHistoryCache(year, month)) return;
-
-    const requestId = ++completedRequestId;
-    completedLoading = true;
-    completedIssues = [];
-    completedError = '';
-    try {
-      const data = await useJiraCompletedHistory(year, month, true);
-      if (requestId !== completedRequestId) return;
-      completedIssues = normalizeCompletedIssues(data.issues || []);
-      saveCompletedHistoryCache(year, month, completedIssues);
-    } catch (e: any) {
-      if (requestId !== completedRequestId) return;
-      completedError = String(e?.message || e || 'Errore caricamento issue completate');
-    } finally {
-      if (requestId === completedRequestId) {
-        completedLoading = false;
-      }
-    }
-  }
-
   $: flattenedCompletedIssues = flattenCompletedIssues(completedIssues);
   $: chartIssues = flattenedCompletedIssues;
   $: knownSubtaskKeys = new Set(
@@ -393,10 +297,6 @@
   };
   $: selectedPeriod = `${selectedYear}:${selectedMonth}`;
   $: selectedYearIsValid = Number.isInteger(selectedYear) && selectedYear >= 1900 && selectedYear <= 3000;
-  $: if (jiraHistoryReady && selectedYearIsValid && selectedPeriod !== lastFetchedCompletedPeriod) {
-    lastFetchedCompletedPeriod = selectedPeriod;
-    void fetchCompletedHistory(selectedYear, selectedMonth);
-  }
   $: if (jiraHistoryReady && selectedYearIsValid && selectedPeriod !== lastFetchedPeriod) {
     lastFetchedPeriod = selectedPeriod;
     void fetchYearlyWorklogs(selectedYear, selectedMonth);
@@ -442,15 +342,6 @@
         </button>
         <p>Entrambe le viste mostrano le ore registrate nella data del worklog per il periodo selezionato.</p>
       </div>
-      <div class="search-wrap">
-        <span class="search-ico">/</span>
-        <input
-          type="text"
-          class="search-input"
-          bind:value={searchQuery}
-          placeholder="Cerca progetto (chiave o nome)..."
-        />
-      </div>
       <div class="period-filters">
         <div class="period-filter">
           <label for="year-filter">Anno</label>
@@ -482,10 +373,9 @@
       <JiraCompletedBar
         bind:issuesData={completedIssues}
         bind:selectedProjectKeys
-        {searchQuery}
-        loading={completedLoading}
-        error={completedError}
-        on:refresh={() => fetchCompletedHistory(selectedYear, selectedMonth, true)}
+        loading={yearlyWorklogLoading}
+        error={yearlyWorklogError}
+        on:refresh={() => fetchYearlyWorklogs(selectedYear, selectedMonth)}
       />
     </div>
 
@@ -665,11 +555,6 @@
     font-size: 0.82rem;
     font-family: var(--font-mono);
   }
-  .search-wrap {
-    min-width: 320px;
-    width: min(420px, 100%);
-    position: relative;
-  }
   .period-filters {
     display: flex;
     align-items: flex-end;
@@ -724,30 +609,6 @@
     color: #0f172a;
     background: #f8fafc;
   }
-  .search-ico {
-    position: absolute;
-    left: 10px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: #64748b;
-    font-size: 13px;
-    pointer-events: none;
-  }
-  .search-input {
-    width: 100%;
-    border: 1px solid #cbd5e1;
-    border-radius: 10px;
-    font-size: 13px;
-    color: #0f172a;
-    background: #fff;
-    padding: 8px 10px 8px 28px;
-    outline: none;
-  }
-  .search-input:focus {
-    border-color: #94a3b8;
-    box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.2);
-  }
-
   .layout-row {
     display: grid;
     grid-template-columns: 45% minmax(0, 55%);
@@ -1069,10 +930,6 @@
     }
     .header-main {
       flex-direction: column;
-    }
-    .search-wrap {
-      min-width: 0;
-      width: 100%;
     }
     .period-filters {
       width: 100%;

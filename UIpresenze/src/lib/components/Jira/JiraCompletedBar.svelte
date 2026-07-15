@@ -38,9 +38,10 @@
 
   export let issuesData: JiraIssue[] = [];
   export let selectedProjectKeys: string[] = [];
-  export let searchQuery = '';
   export let loading = false;
   export let error = '';
+
+  let searchQuery = '';
 
   const dispatch = createEventDispatcher<{ refresh: void }>();
 
@@ -71,40 +72,11 @@
       : [...selectedProjectKeys, key];
   }
 
-  function isSubtask(issue: JiraIssue) {
-    const issueType = issue.fields?.issuetype;
-    if (!issueType) return false;
-    if (issueType.subtask === true) return true;
-
-    const typeName = String(issueType?.name || '').toLowerCase();
-    return (
-      typeName.includes('sub-task') ||
-      typeName.includes('subtask') ||
-      typeName.includes('sotto-attività') ||
-      typeName.includes('sottoattività') ||
-      typeName.includes('sottotask')
-    );
-  }
-
   function flattenIssues(issues: JiraIssue[]): JiraIssue[] {
     return (issues || []).flatMap((issue) => [
       issue,
       ...flattenIssues(issue.fields?.subtasks_enriched || [])
     ]);
-  }
-
-  $: if (issuesData.length > 0) {
-    const flat = flattenIssues(issuesData);
-    const subtaskTypes = [
-      ...new Set(flat.map((issue) => issue.fields?.issuetype?.name).filter(Boolean))
-    ];
-    console.table({
-      issuesData: issuesData.length,
-      flattenedTotal: flat.length,
-      nestedSubtasks: flat.length - issuesData.length,
-      subtaskTypesFound: subtaskTypes.join(', '),
-      detectedAsSubtask: flat.filter(isSubtask).length
-    });
   }
 
   function refreshCompleted() {
@@ -145,10 +117,6 @@
   $: selectedHours = filteredProjects
     .filter((p) => selectedProjectKeys.includes(p.key))
     .reduce((acc, p) => acc + p.seconds, 0);
-  $: selectedIssues = flattenedIssues.filter((issue) =>
-    selectedProjectKeys.includes(issue.fields?.project?.key || 'N/D')
-  );
-  $: completedSubtasks = selectedIssues.filter(isSubtask);
   $: if (selectedProjectKeys.length > 0) {
     const available = new Set(projects.map((p) => p.key));
     selectedProjectKeys = selectedProjectKeys.filter((key) => available.has(key));
@@ -175,6 +143,13 @@
       <button type="button" on:click={refreshCompleted} disabled={loading}>{loading ? '...' : 'Aggiorna'}</button>
     </div>
   </div>
+
+  <input
+    type="text"
+    class="search-input"
+    bind:value={searchQuery}
+    placeholder="Cerca progetto (chiave o nome)..."
+  />
 
   {#if loading}
     <div class="progress-shell" data-history-hover-exclude aria-live="polite">
@@ -218,32 +193,6 @@
         {/each}
       </div>
     </div>
-    {#if selectedProjectKeys.length > 0}
-      <div class="subtasks-panel" data-history-hover-exclude>
-        <h4>Sottotask completate ({completedSubtasks.length})</h4>
-        {#if completedSubtasks.length === 0}
-          <p class="subtasks-empty">Nessuna sottotask completata trovata per i progetti selezionati.</p>
-        {:else}
-          <div class="subtasks-list">
-            {#each completedSubtasks as issue (issue.key)}
-              <article class="subtask-item" data-history-hover>
-                <div class="subtask-head">
-                  <span class="subtask-key" data-history-hover-exclude>{issue.key}</span>
-                  <span class="subtask-hours" data-history-hover-exclude>{fmtHours(Math.max(0, Number(taskTotalSeconds(issue.fields) || 0)))}</span>
-                </div>
-                <p class="subtask-summary">{issue.fields?.summary || '-'}</p>
-                <p class="subtask-meta">
-                  {issue.fields?.assignee?.displayName || 'Unassigned'}
-                  {#if issue.fields?.status?.name}
-                    • {issue.fields?.status?.name}
-                  {/if}
-                </p>
-              </article>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    {/if}
   {/if}
 </section>
 
@@ -324,6 +273,23 @@
     cursor: not-allowed;
   }
 
+  .search-input {
+    width: 100%;
+    border: 1px solid #86efac;
+    border-radius: 8px;
+    background: #fff;
+    color: #14532d;
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    padding: 0.5rem 0.65rem;
+    margin-bottom: 0.65rem;
+    outline: none;
+  }
+  .search-input:focus {
+    border-color: #22c55e;
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.16);
+  }
+
   .state {
     font-size: 0.82rem;
     color: #166534;
@@ -388,7 +354,7 @@
   }
 
   .cards-scroll {
-    margin-top: 0.9rem;
+    margin-top: 0.25rem;
     max-height: 68vh;
     overflow-y: auto;
     padding-right: 4px;
@@ -458,71 +424,6 @@
     color: #166534;
     font-family: var(--font-mono);
   }
-  .subtasks-panel {
-    margin-top: 0.85rem;
-    border: 1px solid #bbf7d0;
-    border-radius: 12px;
-    background: #f8fff9;
-    padding: 0.65rem;
-  }
-  .subtasks-panel h4 {
-    margin: 0 0 0.55rem;
-    font-size: 0.76rem;
-    color: #14532d;
-    text-transform: uppercase;
-    font-family: var(--font-mono);
-    letter-spacing: 0.03em;
-  }
-  .subtasks-empty {
-    margin: 0;
-    font-size: 0.74rem;
-    color: #166534;
-    font-family: var(--font-mono);
-  }
-  .subtasks-list {
-    display: grid;
-    gap: 7px;
-    max-height: 260px;
-    overflow: auto;
-    padding-right: 3px;
-  }
-  .subtask-item {
-    border: 1px solid #dcfce7;
-    background: #ffffff;
-    border-radius: 9px;
-    padding: 0.5rem 0.6rem;
-  }
-  .subtask-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 7px;
-    margin-bottom: 0.25rem;
-  }
-  .subtask-key,
-  .subtask-hours {
-    font-size: 10px;
-    font-family: var(--font-mono);
-    color: #14532d;
-    background: #ecfdf5;
-    border: 1px solid #86efac;
-    border-radius: 999px;
-    padding: 2px 7px;
-    white-space: nowrap;
-  }
-  .subtask-summary {
-    margin: 0 0 0.25rem;
-    font-size: 0.74rem;
-    color: #14532d;
-    line-height: 1.3;
-  }
-  .subtask-meta {
-    margin: 0;
-    font-size: 0.68rem;
-    color: #166534;
-    font-family: var(--font-mono);
-  }
-
   @media (max-width: 1100px) {
     .cards-scroll {
       max-height: 56vh;
