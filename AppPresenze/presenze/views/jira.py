@@ -760,20 +760,24 @@ def _completed_history_fields() -> list[str]:
 def _fetch_jira_search_all(domain: str, headers: dict, jql: str, fields: list[str], start_at: int = 0, page_size: int = 100):
     search_url = f"https://{domain}/rest/api/3/search/jql"
     collected_issues = []
-    total = 0
     payload = {}
     next_page_token = None
+    seen_page_tokens = set()
+    seen_issue_ids = set()
+    offset = max(0, int(start_at or 0))
+    try:
+        normalized_page_size = max(1, min(100, int(page_size or 100)))
+    except (TypeError, ValueError):
+        normalized_page_size = 100
 
     while True:
         params = {
             "jql": jql,
             "fields": fields,
-            "maxResults": page_size,
+            "maxResults": normalized_page_size,
         }
         if next_page_token:
             params["nextPageToken"] = next_page_token
-        else:
-            params["startAt"] = max(0, int(start_at or 0))
 
         response = requests.get(search_url, params=params, headers=headers, timeout=10)
         response.raise_for_status()
@@ -783,20 +787,35 @@ def _fetch_jira_search_all(domain: str, headers: dict, jql: str, fields: list[st
 
         batch = page_payload.get("issues", [])
         if isinstance(batch, list):
-            collected_issues.extend(batch)
+            for issue in batch:
+                if not isinstance(issue, dict):
+                    collected_issues.append(issue)
+                    continue
+                issue_id = str(issue.get("id") or issue.get("key") or "").strip()
+                if issue_id and issue_id in seen_issue_ids:
+                    continue
+                if issue_id:
+                    seen_issue_ids.add(issue_id)
+                collected_issues.append(issue)
 
-        total = int(page_payload.get("total", len(collected_issues)) or len(collected_issues))
-
-        # L'endpoint /search/jql pagina con nextPageToken e non restituisce
-        # né un total affidabile né isLast: si continua finché arriva un token.
-        next_page_token = page_payload.get("nextPageToken")
-        if not next_page_token or not batch:
+        if page_payload.get("isLast") is True:
             break
 
-    payload["issues"] = collected_issues
-    payload["startAt"] = start_at
-    payload["maxResults"] = len(collected_issues)
-    payload["total"] = len(collected_issues)  # il total di Jira non è affidabile con token pagination
+        # Continua finche Jira fornisce un token nuovo; anche una pagina vuota
+        # puo essere seguita da altre issue valide.
+        returned_token = str(page_payload.get("nextPageToken") or "").strip()
+        if not returned_token or returned_token in seen_page_tokens:
+            break
+        seen_page_tokens.add(returned_token)
+        next_page_token = returned_token
+
+    visible_issues = collected_issues[offset:]
+    payload["issues"] = visible_issues
+    payload["startAt"] = offset
+    payload["maxResults"] = len(visible_issues)
+    payload["total"] = len(collected_issues)
+    payload["isLast"] = True
+    payload.pop("nextPageToken", None)
     return payload
 
 
@@ -1265,11 +1284,27 @@ class JiraProxyView(APIView):
                     page_size=max_results,
                 )
                 status_code = 200
+            elif start_at > 0:
+                payload = _fetch_jira_search_all(
+                    domain,
+                    headers,
+                    params["jql"],
+                    params["fields"],
+                    start_at=start_at,
+                    page_size=100,
+                )
+                try:
+                    requested_page_size = max(1, int(max_results))
+                except (TypeError, ValueError):
+                    requested_page_size = 20
+                payload["issues"] = payload.get("issues", [])[:requested_page_size]
+                payload["maxResults"] = len(payload["issues"])
+                payload["isLast"] = start_at + len(payload["issues"]) >= payload["total"]
+                status_code = 200
             else:
                 request_params = {
                     **params,
                     "maxResults": max_results,
-                    "startAt": start_at,
                 }
                 response = requests.get(url, params=request_params, headers=headers, timeout=10)
                 response.raise_for_status()

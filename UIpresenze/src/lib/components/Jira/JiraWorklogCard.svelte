@@ -62,6 +62,9 @@
   $: hintedProjectCode =
     normalizeUpper(projectCode) || (fixedIssueKey ? normalizeUpper(fixedIssueKey.split('-')[0] || '') : '');
   $: activeDate = normalizeTrim(worklogDate) || normalizeTrim(day) || todayIsoDate();
+  $: if (fixedIssueKey && selectedIssueKey !== fixedIssueKey) {
+    selectedIssueKey = fixedIssueKey;
+  }
 
   if (!worklogDate) {
     worklogDate = todayIsoDate();
@@ -157,41 +160,35 @@
     clearComposerMessages();
     loggableIssuesError = '';
     showWorklogComposer = true;
-    if (fixedIssueKey && !selectedIssueKey) {
+    if (fixedIssueKey) {
       selectedIssueKey = fixedIssueKey;
+      return;
     }
 
     if (loggableIssuesLoaded && !force) return;
 
     loadingLoggableIssues = true;
     try {
-      const pageSize = 100;
-      let startAt = 0;
-      let total = Number.POSITIVE_INFINITY;
-      const allIssues: JiraLoggableIssue[] = [];
-
-      while (startAt < total) {
-        const data = await jiraSearch({
-          jql: 'created is not EMPTY ORDER BY updated DESC',
-          fields: 'summary,project,status',
-          maxResults: pageSize,
-          startAt
-        });
-
-        const batch = (data?.issues || []) as JiraLoggableIssue[];
-        allIssues.push(...batch);
-        const reportedTotal = Number(data?.total);
-        total = Number.isFinite(reportedTotal) && reportedTotal >= 0 ? reportedTotal : allIssues.length;
-        if (batch.length === 0) break;
-        startAt += batch.length;
+      const data = await jiraSearch({
+        jql: 'created is not EMPTY ORDER BY updated DESC',
+        fields: 'summary,project,status',
+        // 0 delega al backend la paginazione completa tramite nextPageToken Jira.
+        maxResults: 0
+      });
+      const issuesByKey = new Map<string, JiraLoggableIssue>();
+      for (const issue of (data?.issues || []) as JiraLoggableIssue[]) {
+        const key = normalizeTrim(issue?.key);
+        if (key && !issuesByKey.has(normalizeUpper(key))) {
+          issuesByKey.set(normalizeUpper(key), issue);
+        }
       }
-
-      loggableIssues = allIssues;
+      loggableIssues = [...issuesByKey.values()];
       loggableIssuesLoaded = true;
-      const preferredIssueKey = fixedIssueKey || selectedIssueKey;
-      if (preferredIssueKey && loggableIssues.some((issue) => issue.key === preferredIssueKey)) {
-        selectedIssueKey = preferredIssueKey;
-      } else if (preferredIssueKey && !selectedIssueKey) {
+      const preferredIssueKey = selectedIssueKey;
+      if (
+        preferredIssueKey &&
+        loggableIssues.some((issue) => normalizeUpper(issue.key) === normalizeUpper(preferredIssueKey))
+      ) {
         selectedIssueKey = preferredIssueKey;
       } else if (!selectedIssueKey && loggableIssues.length > 0) {
         selectedIssueKey = loggableIssues[0].key;
@@ -249,7 +246,9 @@
 
     creatingWorklog = true;
     try {
-      const selectedIssue = loggableIssues.find((issue) => issue.key === selectedIssueKey);
+      const selectedIssue = loggableIssues.find(
+        (issue) => normalizeUpper(issue.key) === normalizeUpper(selectedIssueKey)
+      );
       const computedProjectCode =
         selectedIssue?.fields?.project?.key || hintedProjectCode || selectedIssueKey.split('-')[0] || '';
       const commentText = worklogComment.trim();
@@ -369,14 +368,16 @@
         <div class="composer-head">
           <strong>Nuovo worklog</strong>
           <div class="composer-actions">
-            <button
-              class="composer-ghost"
-              type="button"
-              on:click|stopPropagation={() => loadLoggableIssues(true)}
-              disabled={loadingLoggableIssues || creatingWorklog}
-            >
-              Aggiorna lista
-            </button>
+            {#if !fixedIssueKey}
+              <button
+                class="composer-ghost"
+                type="button"
+                on:click|stopPropagation={() => loadLoggableIssues(true)}
+                disabled={loadingLoggableIssues || creatingWorklog}
+              >
+                Aggiorna lista
+              </button>
+            {/if}
             <button
               class="composer-ghost"
               type="button"
@@ -407,48 +408,54 @@
           </label>
         </div>
 
-        {#if hintedProjectCode}
-          <p class="project-lock">Progetto suggerito: <code>{hintedProjectCode}</code></p>
-        {/if}
-
-        <label class="composer-block">
-          <span>Cerca progetto/issue</span>
-          <input
-            type="text"
-            bind:value={loggableSearch}
-            placeholder="Filtra per codice progetto, issue key o summary..."
-            disabled={loadingLoggableIssues}
-          />
-        </label>
-
-        <label class="composer-block">
-          <span>Progetto / issue selezionato: {selectedIssueKey || 'nessuno'}</span>
-          <div class="issue-live-list" aria-live="polite">
-            {#if filteredLoggableIssues.length === 0}
-              <p class="issue-empty">Nessun risultato</p>
-            {:else}
-              {#each filteredLoggableIssues.slice(0, 20) as issue (issue.key)}
-                <button
-                  type="button"
-                  class="issue-item"
-                  class:selected={selectedIssueKey === issue.key}
-                  on:click|stopPropagation={() => pickIssue(issue.key)}
-                >
-                  <small>{issue.key}</small>
-                  <strong>{issueProjectLabel(issue)}</strong>
-                  <span>{issue.fields?.summary || '-'}</span>
-                </button>
-              {/each}
-            {/if}
-            {#if fixedIssueKey && !filteredLoggableIssues.some((issue) => issue.key === fixedIssueKey)}
+        {#if fixedIssueKey}
+          <div class="composer-block">
+            <span>Issue selezionata automaticamente</span>
+            <div class="issue-live-list issue-context-list" aria-live="polite">
               <div class="issue-item selected issue-item-static">
                 <small>{fixedIssueKey}</small>
                 <strong>{hintedProjectCode || '-'}</strong>
                 <span>{issueSummary || 'Issue selezionata dal contesto'}</span>
               </div>
-            {/if}
+            </div>
           </div>
-        </label>
+        {:else}
+          {#if hintedProjectCode}
+            <p class="project-lock">Progetto suggerito: <code>{hintedProjectCode}</code></p>
+          {/if}
+
+          <label class="composer-block">
+            <span>Cerca progetto/issue</span>
+            <input
+              type="text"
+              bind:value={loggableSearch}
+              placeholder="Filtra per codice progetto, issue key o summary..."
+              disabled={loadingLoggableIssues}
+            />
+          </label>
+
+          <label class="composer-block">
+            <span>Progetto / issue selezionato: {selectedIssueKey || 'nessuno'}</span>
+            <div class="issue-live-list" aria-live="polite">
+              {#if filteredLoggableIssues.length === 0}
+                <p class="issue-empty">Nessun risultato</p>
+              {:else}
+                {#each filteredLoggableIssues.slice(0, 20) as issue (issue.key)}
+                  <button
+                    type="button"
+                    class="issue-item"
+                    class:selected={normalizeUpper(selectedIssueKey) === normalizeUpper(issue.key)}
+                    on:click|stopPropagation={() => pickIssue(issue.key)}
+                  >
+                    <small>{issue.key}</small>
+                    <strong>{issueProjectLabel(issue)}</strong>
+                    <span>{issue.fields?.summary || '-'}</span>
+                  </button>
+                {/each}
+              {/if}
+            </div>
+          </label>
+        {/if}
 
         <label class="composer-block">
           <span>Commento (opzionale)</span>
@@ -648,6 +655,10 @@
     border-radius: 8px;
     background: #fff;
     padding: 0.35rem;
+  }
+
+  .issue-context-list {
+    max-height: none;
   }
 
   .issue-item {
