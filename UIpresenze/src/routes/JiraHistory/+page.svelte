@@ -378,6 +378,14 @@
 
   $: flattenedCompletedIssues = flattenCompletedIssues(completedIssues);
   $: chartIssues = flattenedCompletedIssues;
+  $: selectedProjectNames = Array.from(
+    new Set(
+      chartIssues
+        .filter((issue) => selectedProjectKeys.includes(issue.fields?.project?.key || 'N/D'))
+        .map((issue) => String(issue.fields?.project?.name || '').trim())
+        .filter(Boolean)
+    )
+  );
   $: knownSubtaskKeys = new Set(
     flattenedCompletedIssues.filter(completedIssueIsSubtask).map((issue) => issue.key)
   );
@@ -621,7 +629,10 @@
     {/if}
   </section>
 
-  <JiraCalculatedPricing />
+  <JiraCalculatedPricing
+    {selectedProjectNames}
+    selectedProjectWorklogs={visibleYearlyWorklogProjects}
+  />
 </main>
 
 <style>
