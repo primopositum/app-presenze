@@ -29,11 +29,12 @@ from .scontrini import (
 from .automobili import (AutomobileListCreateView, AutomobileDetailView, AutomobileDeleteView, AutomobilePatchView)
 from .signatures import signature_create, signature_latest
 from .utilitiesbar import UtilitiesBarListView
-from .jira_reference import (
-    JiraReferenceAddView,
-    JiraReferenceDeleteView,
-    JiraReferenceGetView,
-    JiraReferencePutView,
+from .clienti import (
+    ClienteListCreateView,
+    ClienteDetailView,
+    ContrattoClienteListCreateView,
+    ContrattoClienteDetailView,
+    ContrattoClientePoolTaskView,
 )
 from .jira import (
     JiraProxyView,

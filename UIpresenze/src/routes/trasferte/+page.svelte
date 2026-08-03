@@ -336,6 +336,7 @@
           <p class="state error">{autoError}</p>
         {/if}
         <LoaderOverlay show={loading} />
+        <LoaderOverlay show={generatingDossier} message="PDF in generazione" />
         {#if showForm}
         <CreateTrasfertaForm onCreated={loadTrasferte} onClose={() => (showForm = false)} />
         {/if}

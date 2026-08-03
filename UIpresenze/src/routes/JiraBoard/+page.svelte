@@ -13,7 +13,7 @@
   import JiraCard from '$lib/components/Jira/JiraCard.svelte';
   import ToastState from '$lib/components/ToastState.svelte';
   import { auth } from '$lib/stores/auth';
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { ensureJiraControlLoaded, jiraControl } from '$lib/stores/jiraControl';
 
   let scopeValue = '';
@@ -76,6 +76,8 @@
 
   // Searchbar state
   let searchQuery = '';
+  let debouncedSearchQuery = '';
+  let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let assigneeFilter = '';
 
   const STATUS_META: Record<string, { accent: string; text: string }> = {
@@ -123,7 +125,7 @@
     return acc;
   }, {});
 
-  $: normalizedQuery = searchQuery.trim().toLowerCase();
+  $: normalizedQuery = debouncedSearchQuery.trim().toLowerCase();
   $: parsedScopePresets = scopePresets
     .map((raw) => parseScopePreset(raw))
     .filter((preset): preset is { raw: string; type: JiraScopeType; value: string } => !!preset);
@@ -146,18 +148,26 @@
   });
   $: groupedByStatus = (() => {
     const normalizeStatus = (status: string) => status.trim().toLocaleUpperCase('it-IT');
-    const groups = statuses
-      .map((status) => ({
-        status,
-        items: filtered.filter((issue) => (issue.fields?.status?.name || 'Senza stato') === status)
-      }))
-      .filter((group) => group.items.length > 0 || normalizeStatus(group.status) === 'COMPLETATA');
+    const issuesByStatus = new Map<string, JiraIssue[]>();
+    let hasNoStatus = false;
 
-    const hasNoStatus = filtered.some((issue) => !(issue.fields?.status?.name || '').trim());
+    for (const issue of filtered) {
+      const status = String(issue.fields?.status?.name || '').trim() || 'Senza stato';
+      if (status === 'Senza stato') hasNoStatus = true;
+      const items = issuesByStatus.get(status) || [];
+      items.push(issue);
+      issuesByStatus.set(status, items);
+    }
+
+    const keepEmptyStatusColumns = new Set(['COMPLETATA', 'IN CORSO']);
+    const groups = statuses
+      .map((status) => ({ status, items: issuesByStatus.get(status) || [] }))
+      .filter((group) => group.items.length > 0 || keepEmptyStatusColumns.has(normalizeStatus(group.status)));
+
     if (hasNoStatus && !groups.some((group) => group.status === 'Senza stato')) {
       groups.push({
         status: 'Senza stato',
-        items: filtered.filter((issue) => (issue.fields?.status?.name || 'Senza stato') === 'Senza stato')
+        items: issuesByStatus.get('Senza stato') || []
       });
     }
 
@@ -200,6 +210,22 @@
     requestAnimationFrame(() => {
       toastOpen = true;
     });
+  }
+
+  function handleSearchInput(event: Event) {
+    searchQuery = (event.currentTarget as HTMLInputElement).value;
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      debouncedSearchQuery = searchQuery;
+      searchDebounceTimer = null;
+    }, 200);
+  }
+
+  function clearSearchQuery() {
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = null;
+    searchQuery = '';
+    debouncedSearchQuery = '';
   }
 
   function canDropToStatus(targetStatus: string) {
@@ -410,21 +436,16 @@
     loaded = false;
 
     try {
-      const data = await useJiraSearch({
-        scopeValue,
-        assigneeFilter
-      });
+      const [data, statusesData] = await Promise.all([
+        useJiraSearch({ scopeValue, assigneeFilter }),
+        useJiraStatuses(undefined, scopeValue).catch(() => null)
+      ]);
       issues = (data?.issues || []) as JiraIssue[];
-      try {
-        const statusesData = await useJiraStatuses(undefined, scopeValue);
-        jiraStatuses = Array.isArray(statusesData?.statuses)
-          ? statusesData.statuses
-              .map((item) => String(item?.name || '').trim())
-              .filter((name, index, arr) => !!name && arr.findIndex((val) => val.toLowerCase() === name.toLowerCase()) === index)
-          : [];
-      } catch {
-        jiraStatuses = [];
-      }
+      jiraStatuses = Array.isArray(statusesData?.statuses)
+        ? statusesData.statuses
+            .map((item) => String(item?.name || '').trim())
+            .filter((name, index, arr) => !!name && arr.findIndex((val) => val.toLowerCase() === name.toLowerCase()) === index)
+        : [];
       lastUpdate = new Date().toLocaleTimeString('it-IT');
       loaded = true;
       if (activeStatus !== 'all' && !statuses.includes(activeStatus)) {
@@ -456,6 +477,10 @@
     await fetchTasks();
     persistenceReady = true;
     handleWindowScroll();
+  });
+
+  onDestroy(() => {
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
   });
 
   $: if ($jiraControl.loaded && !$jiraControl.enabled) {
@@ -523,12 +548,13 @@
       <span class="search-icon">/</span>
       <input
         class="search-input"
-        bind:value={searchQuery}
+        value={searchQuery}
+        on:input={handleSearchInput}
         placeholder="Cerca per titolo, chiave o assegnato..."
         type="text"
       />
       {#if searchQuery}
-        <button class="clear-btn" on:click={() => (searchQuery = '')}>x</button>
+        <button class="clear-btn" on:click={clearSearchQuery}>x</button>
       {/if}
     </div>
 
@@ -1104,6 +1130,8 @@
   .drag-card-wrap {
     cursor: grab;
     transition: transform 0.14s ease, opacity 0.14s ease, filter 0.14s ease;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 220px;
   }
   .drag-card-wrap:active {
     cursor: grabbing;

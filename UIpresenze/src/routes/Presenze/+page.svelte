@@ -54,6 +54,22 @@
     return `${y}-${m}-${d}`;
   }
 
+  function parseJiraTimeToSeconds(value?: string) {
+    if (!value) return 0;
+    const text = value.toLowerCase();
+    const hours = text.match(/(\d+)\s*h/);
+    const minutes = text.match(/(\d+)\s*m/);
+    const seconds = text.match(/(\d+)\s*s/);
+    return (Number(hours?.[1]) || 0) * 3600 + (Number(minutes?.[1]) || 0) * 60 + (Number(seconds?.[1]) || 0);
+  }
+
+  function jiraActivitySeconds(activity: JiraTimesheetActivity) {
+    const seconds = Number(activity.time_spent_seconds);
+    return Number.isFinite(seconds) && seconds > 0
+      ? seconds
+      : parseJiraTimeToSeconds(activity.time_spent);
+  }
+
   const today = new Date(); 
   const todayYmd = formatLocalYmd(today);
   let year = today.getFullYear();
@@ -444,6 +460,33 @@ export const loadData = async () => {
     selectedJiraEmail
   );
 
+  $: incompleteJiraWorklogDates = (() => {
+    if (
+      !$jiraControl.enabled ||
+      !$jiraTimesheetMonthData ||
+      $jiraTimesheetMonthData.year !== year ||
+      $jiraTimesheetMonthData.month !== month
+    ) return [];
+
+    return dayHours.flatMap((day) => {
+      if (day.date >= todayYmd) return [];
+
+      const expectedSeconds = (day.entries || []).reduce((total, entry) => {
+        if (entry.type !== 1 && entry.type !== 3) return total;
+        return total + Math.max(0, Number(entry.ore_tot) || 0) * 3600;
+      }, 0);
+      if (expectedSeconds <= 0) return [];
+
+      const loggedSeconds = getJiraActivitiesForDay(
+        $jiraTimesheetMonthData,
+        day.date,
+        selectedJiraEmail
+      ).reduce((total, activity) => total + jiraActivitySeconds(activity), 0);
+
+      return loggedSeconds < expectedSeconds ? [day.date] : [];
+    });
+  })();
+
   $: if (selectedDate) {
     selectedEntries = entries.filter((entry) => entry.data === selectedDate);
   } else {
@@ -597,6 +640,7 @@ export const loadData = async () => {
       </div>
 
       <LoaderOverlay show={loading} />
+      <LoaderOverlay show={generatingPdf} message="PDF in generazione" />
     </div>
   </div>
   <div class="my-2 rounded-xl border border-orange-100 bg-white/95 p-2 shadow-sm sm:hidden">
@@ -642,6 +686,8 @@ export const loadData = async () => {
         {year}
         {month}
         {dayHours}
+        {selectedDate}
+        incompleteWorklogDates={incompleteJiraWorklogDates}
         maxVisibleEntries={2}
         on:selectDay={(e) => {
           selectedDate = e.detail.date;

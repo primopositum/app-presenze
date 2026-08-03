@@ -8,8 +8,8 @@
     JiraYearWorklogResponse
   } from '$lib/services/jira';
   import JiraCompletedBar from '$lib/components/Jira/JiraCompletedBar.svelte';
-  import JiraCalculatedPricing from '$lib/components/Jira/JiraCalculatedPricing.svelte';
   import JiraHistoryCharts from '$lib/components/Jira/JiraHistoryCharts.svelte';
+  import ClientiSection from '$lib/components/Jira/ClientiSection.svelte';
   import { ensureJiraControlLoaded, jiraControl } from '$lib/stores/jiraControl';
 
   type JiraIssue = JiraHistoryIssue;
@@ -378,14 +378,6 @@
 
   $: flattenedCompletedIssues = flattenCompletedIssues(completedIssues);
   $: chartIssues = flattenedCompletedIssues;
-  $: selectedProjectNames = Array.from(
-    new Set(
-      chartIssues
-        .filter((issue) => selectedProjectKeys.includes(issue.fields?.project?.key || 'N/D'))
-        .map((issue) => String(issue.fields?.project?.name || '').trim())
-        .filter(Boolean)
-    )
-  );
   $: knownSubtaskKeys = new Set(
     flattenedCompletedIssues.filter(completedIssueIsSubtask).map((issue) => issue.key)
   );
@@ -484,6 +476,8 @@
       </div>
     </div>
   </header>
+
+  <ClientiSection />
 
   <section class="layout-row">
     <div class="left-pane" bind:this={leftPaneEl}>
@@ -629,10 +623,6 @@
     {/if}
   </section>
 
-  <JiraCalculatedPricing
-    {selectedProjectNames}
-    selectedProjectWorklogs={visibleYearlyWorklogProjects}
-  />
 </main>
 
 <style>

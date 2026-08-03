@@ -2,13 +2,26 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.contrib.auth import get_user_model
 from django import forms
-from .models import TimeEntry, Saldo, Contratto, Automobile, Trasferta, UtilitiesBar, JiraCredentials, JiraGlobals
+from .models import TimeEntry, Saldo, Contratto, Cliente, ContrattoCliente, Automobile, Trasferta, UtilitiesBar, JiraCredentials, JiraGlobals
 
 admin.site.register(TimeEntry)
 admin.site.register(Saldo)
 admin.site.register(Automobile)
 admin.site.register(Trasferta)
 admin.site.register(UtilitiesBar)
+
+
+@admin.register(Cliente)
+class ClienteAdmin(admin.ModelAdmin):
+    list_display = ("id", "nome", "telefono")
+    search_fields = ("nome", "telefono")
+
+
+@admin.register(ContrattoCliente)
+class ContrattoClienteAdmin(admin.ModelAdmin):
+    list_display = ("id", "cliente", "value", "data_creazione", "data_fine")
+    list_filter = ("cliente",)
+    search_fields = ("cliente__nome",)
 
 
 class JiraCredentialsAdminForm(forms.ModelForm):

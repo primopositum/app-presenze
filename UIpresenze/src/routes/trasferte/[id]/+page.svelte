@@ -614,6 +614,7 @@
 
 <div class=" p-4 grid gap-3">
   <LoaderOverlay show={loading} />
+  <LoaderOverlay show={generatingPdf} message="PDF in generazione" />
   {#key refreshKey}
 
   <div>

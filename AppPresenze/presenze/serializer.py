@@ -1,6 +1,6 @@
 from rest_framework import serializers
 import base64
-from .models import Utente, TimeEntry, Saldo, Contratto, Trasferta, Spesa, Automobile, Signature, UtilitiesBar, JiraReference
+from .models import Utente, TimeEntry, Saldo, Contratto, Cliente, ContrattoCliente, Trasferta, Spesa, Automobile, Signature, UtilitiesBar
 from decimal import Decimal
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
@@ -407,33 +407,65 @@ class UtilitiesBarSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "nome", "link", "colore", "icon", "posizione"]
 
 
-class JiraReferenceSerializer(serializers.ModelSerializer):
+class ClienteSerializer(serializers.ModelSerializer):
     class Meta:
-        model = JiraReference
-        fields = ["id", "name", "price"]
-        read_only_fields = ["id"]
-
-    def validate_name(self, value):
-        if JiraReference.objects.filter(name__iexact=value).exists():
-            raise serializers.ValidationError("Esiste gia un riferimento con questo nome.")
-        return value
+        model = Cliente
+        fields = ("id", "nome", "indirizzo", "telefono")
+        read_only_fields = ("id",)
 
 
-class JiraReferenceUpdateSerializer(serializers.Serializer):
-    id = serializers.IntegerField(min_value=1)
-    name = serializers.CharField(max_length=255, required=False)
-    price = serializers.FloatField(required=False)
+class ContrattoClienteSerializer(serializers.ModelSerializer):
+    cliente_id = serializers.PrimaryKeyRelatedField(
+        source="cliente",
+        queryset=Cliente.objects.all(),
+        write_only=True,
+    )
+    cliente = ClienteSerializer(read_only=True)
+    data_creazione = serializers.DateField(required=False)
+    data_fine = serializers.DateField(required=False)
+
+    class Meta:
+        model = ContrattoCliente
+        fields = (
+            "id",
+            "cliente",
+            "cliente_id",
+            "value",
+            "pool_task",
+            "data_creazione",
+            "data_fine",
+        )
+        read_only_fields = ("id",)
+
+    def validate_pool_task(self, value):
+        normalized_tasks = []
+        for raw_task in value:
+            task = raw_task.strip() if isinstance(raw_task, str) else ""
+            if not task:
+                raise serializers.ValidationError("Ogni task deve essere una stringa non vuota.")
+            if task in normalized_tasks:
+                raise serializers.ValidationError("La stessa task non puo comparire piu volte.")
+            normalized_tasks.append(task)
+        return normalized_tasks
 
     def validate(self, attrs):
-        if "name" not in attrs and "price" not in attrs:
-            raise serializers.ValidationError("Indica almeno uno tra name e price.")
+        if self.instance:
+            immutable_fields = [
+                field
+                for field in ("data_creazione", "data_fine")
+                if field in self.initial_data
+            ]
+            if immutable_fields:
+                raise serializers.ValidationError(
+                    {field: "Questo campo non puo essere modificato dopo la creazione." for field in immutable_fields}
+                )
+        else:
+            missing_fields = [
+                field for field in ("data_creazione", "data_fine") if field not in attrs
+            ]
+            if missing_fields:
+                raise serializers.ValidationError(
+                    {field: "Questo campo e obbligatorio alla creazione." for field in missing_fields}
+                )
         return attrs
-
-
-class JiraReferenceDeleteSerializer(serializers.Serializer):
-    ids = serializers.ListField(
-        child=serializers.IntegerField(min_value=1),
-        allow_empty=False,
-    )
-
 

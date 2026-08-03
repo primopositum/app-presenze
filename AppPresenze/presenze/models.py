@@ -1,5 +1,4 @@
 from django.db import models
-from django.db.models.functions import Lower
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.utils import timezone
 from django.contrib.postgres.fields import ArrayField
@@ -20,6 +19,21 @@ def validate_ore_sett_len_5(value):
         return
     if len(value) != 5:
         raise ValidationError("ore_sett deve contenere esattamente 5 valori (lun-ven).")
+
+
+def validate_pool_task(value):
+    """Normalizza semanticamente il pool: task non vuote e senza duplicati."""
+    if value is None:
+        return
+
+    tasks = []
+    for raw_task in value:
+        task = raw_task.strip() if isinstance(raw_task, str) else ""
+        if not task:
+            raise ValidationError("Ogni pool_task deve essere una stringa non vuota.")
+        if task in tasks:
+            raise ValidationError("pool_task non puo contenere duplicati.")
+        tasks.append(task)
 
 
 # ---------------------------
@@ -237,6 +251,49 @@ class Contratto(models.Model):
 
 
 # ---------------------------
+# Clienti e contratti commerciali
+# ---------------------------
+
+class Cliente(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    nome = models.CharField(max_length=255)
+    indirizzo = models.CharField(max_length=255, blank=True, default="")
+    telefono = models.CharField(max_length=50, blank=True, default="")
+
+    class Meta:
+        db_table = "Cliente"
+        ordering = ["nome", "id"]
+
+    def __str__(self):
+        return self.nome
+
+
+class ContrattoCliente(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    cliente = models.ForeignKey(
+        Cliente,
+        on_delete=models.PROTECT,
+        related_name="contratti_commerciali",
+    )
+    value = models.DecimalField(max_digits=12, decimal_places=2)
+    pool_task = ArrayField(
+        base_field=models.CharField(max_length=255),
+        default=list,
+        blank=True,
+        validators=[validate_pool_task],
+    )
+    data_creazione = models.DateField()
+    data_fine = models.DateField()
+
+    class Meta:
+        db_table = "ContrattoCliente"
+        ordering = ["-data_creazione", "-id"]
+
+    def __str__(self):
+        return f"Contratto commerciale {self.cliente.nome} ({self.data_creazione})"
+
+
+# ---------------------------
 # Automobile
 # ---------------------------
 
@@ -404,7 +461,7 @@ class Spesa(models.Model):
 class UtilitiesBar(models.Model):
     class IconName(models.TextChoices):
         CONFLUENCE = "faConfluence", "Confluence"
-        JIRA = "faJira", "Jira"
+        JIRA = "faJira", "Jira" 
         CIRCLE = "faCircle", "Circle"
         AMAZON = "faAmazon", "Amazon"
         AWS = "faAws", "AWS"
@@ -524,22 +581,6 @@ class JiraGlobals(models.Model):
 
     def __str__(self):
         return f"JiraGlobals ({self.domain})"
-
-
-class JiraReference(models.Model):
-    id = models.BigAutoField(primary_key=True, db_column="ID")
-    name = models.CharField(max_length=255, db_column="Name")
-    price = models.FloatField(db_column="price")
-
-    class Meta:
-        db_table = "JiraReference"
-        ordering = ["name", "id"]
-        constraints = [
-            models.UniqueConstraint(Lower("name"), name="jira_reference_name_ci_unique"),
-        ]
-
-    def __str__(self):
-        return self.name
 
 
 def _get_fernet():

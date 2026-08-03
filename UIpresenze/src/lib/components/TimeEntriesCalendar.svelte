@@ -23,6 +23,8 @@
   export let year: number;
   export let month: number; // 1-12
   export let dayHours: DayHours[] = [];
+  export let selectedDate: string | null = null;
+  export let incompleteWorklogDates: string[] = [];
   export let maxVisibleEntries: number = 2; // Numero massimo di entries da mostrare
 
   const dispatch = createEventDispatcher<{
@@ -55,6 +57,8 @@
     }
     return acc;
   }, {});
+
+  $: incompleteWorklogDateSet = new Set(incompleteWorklogDates);
 
   function iso(y: number, m: number, d: number) {
     const mm = String(m).padStart(2, '0');
@@ -158,6 +162,8 @@
     {#each Array(daysInMonth) as _, idx}
       {@const day = idx + 1}
       {@const dstr = iso(year, month, day)}
+      {@const isSelected = selectedDate === dstr}
+      {@const hasIncompleteWorklog = incompleteWorklogDateSet.has(dstr)}
       {@const today = new Date()}
       {@const isToday = today.getFullYear() === year && today.getMonth() + 1 === month && today.getDate() === day}
       {@const hours = byDate[dstr]}
@@ -180,6 +186,7 @@
           relative
           transition-colors
           ${isDisabled ? `${vBg || 'bg-[#e5e7eb]'} text-gray-700` : `cursor-pointer ${vBg || (weekendEmpty ? 'bg-[#dbeafe]' : weekend ? 'bg-[#e5e7eb]' : 'bg-[#d1d5db]')} hover:brightness-95`}
+          ${isSelected ? '!bg-orange-200 !border-orange-400 ring-2 ring-orange-300' : ''}
           ${isToday ? 'outline outline-3 outline-green-500 border-none' : 'border-gray-400'}
         `}
         on:click={() => handleDay(day)}
@@ -194,6 +201,14 @@
             title="Presente almeno una nota in questo giorno"
             aria-label="Giorno con nota"
           ></span>
+        {/if}
+
+        {#if hasIncompleteWorklog}
+          <span
+            class="absolute bottom-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[11px] font-bold leading-none text-white shadow-sm"
+            title="Worklog Jira incompleto per le ore registrate"
+            aria-label="Worklog Jira incompleto"
+          >!</span>
         {/if}
 
         <!-- Numero giorno -->

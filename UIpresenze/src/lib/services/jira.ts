@@ -141,18 +141,6 @@ export type JiraIssueTimeResponse = {
   filters: { started?: string | null };
 };
 
-export type JiraReference = {
-  id: number;
-  name: string;
-  price: number;
-};
-
-export type JiraReferenceInput = Pick<JiraReference, 'name' | 'price'>;
-
-export type JiraReferenceUpdate = Partial<JiraReferenceInput> & {
-  id: number;
-};
-
 export type JiraYearWorklogItem = {
   worklog_id?: string;
   author?: string;
@@ -488,30 +476,6 @@ export function jiraCompletedHistory(
     month: String(month ?? 'all').trim().toLowerCase(),
     completed: String(completed),
   }) as Promise<JiraCompletedHistoryResponse>;
-}
-
-export function jiraReferencesGet() {
-  return requestJson('/jira/reference/get/', 'GET') as Promise<JiraReference[]>;
-}
-
-export function jiraReferencesAdd(items: JiraReferenceInput[]) {
-  return requestJson('/jira/reference/add/', 'POST', { items }) as Promise<{ count: number; items: JiraReference[] }>;
-}
-
-export function jiraReferencesAddJiraProjects() {
-  return requestJson('/jira/reference/add/', 'POST', { import_jira_projects: true }) as Promise<{
-    count: number;
-    skipped_count: number;
-    items: JiraReference[];
-  }>;
-}
-
-export function jiraReferencesPut(items: JiraReferenceUpdate[]) {
-  return requestJson('/jira/reference/put/', 'PUT', { items }) as Promise<{ count: number; items: JiraReference[] }>;
-}
-
-export function jiraReferencesDelete(ids: number[]) {
-  return requestJson('/jira/reference/delete/', 'DELETE', { ids }) as Promise<{ count: number; deleted_ids: number[] }>;
 }
 
 export function jiraStatuses(scopeType = '', scopeValue = '') {

@@ -1,5 +1,6 @@
 import base64
 import calendar
+import hashlib
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -7,6 +8,7 @@ from datetime import date, datetime, time, timedelta, timezone as dt_timezone
 from urllib.parse import urlparse
 
 import requests
+from django.core.cache import cache
 from django.db.models import Sum
 from django.http import StreamingHttpResponse
 from django.utils import timezone as django_timezone
@@ -275,6 +277,21 @@ def _extract_project_key_for_statuses(scope_type_raw: str, scope_value_raw: str)
     return project_key
 
 
+def _jira_statuses_cache_key(user, domain: str, jira_email: str, scope_type: str, scope_value: str):
+    """Cache isolata per utente e credenziali Jira, senza dati sensibili nella chiave."""
+    source = "|".join(
+        [
+            str(getattr(user, "pk", "")),
+            str(domain or "").casefold(),
+            str(jira_email or "").casefold(),
+            str(scope_type or "").casefold(),
+            str(scope_value or "").casefold(),
+        ]
+    )
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    return f"jira:statuses:v1:{digest}"
+
+
 def _status_category_rank(category_key: str):
     key = str(category_key or "").strip().casefold()
     if key in {"new", "todo", "to do", "to-do"}:
@@ -371,6 +388,7 @@ _PRIORITY_NAME_ORDER = {
     "trivial": 5,
 }
 _WORKLOG_ENRICH_MAX_WORKERS = 8
+_JIRA_STATUSES_CACHE_TIMEOUT_SECONDS = 10 * 60
 
 
 def _parse_time_spent_to_seconds(time_spent: str):
@@ -1351,6 +1369,11 @@ class JiraStatusesView(APIView):
         domain, email, api_token = creds
         headers = _jira_headers(email, api_token)
 
+        cache_key = _jira_statuses_cache_key(request.user, domain, email, scope_type, scope_value)
+        cached_payload = cache.get(cache_key)
+        if cached_payload is not None:
+            return Response(cached_payload)
+
         project_key = _extract_project_key_for_statuses(scope_type, scope_value)
         source = "global"
         url = f"https://{domain}/rest/api/3/status"
@@ -1369,14 +1392,14 @@ class JiraStatusesView(APIView):
                 status_rows = payload if isinstance(payload, list) else []
 
             statuses = _normalize_status_rows(status_rows)
-            return Response(
-                {
-                    "source": source,
-                    "project_key": project_key or None,
-                    "count": len(statuses),
-                    "statuses": statuses,
-                }
-            )
+            response_payload = {
+                "source": source,
+                "project_key": project_key or None,
+                "count": len(statuses),
+                "statuses": statuses,
+            }
+            cache.set(cache_key, response_payload, timeout=_JIRA_STATUSES_CACHE_TIMEOUT_SECONDS)
+            return Response(response_payload)
         except requests.exceptions.Timeout:
             return Response({"error": "Timeout connessione a Jira"}, status=504)
         except requests.exceptions.HTTPError as exc:
