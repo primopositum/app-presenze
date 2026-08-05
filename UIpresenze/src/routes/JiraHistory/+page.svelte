@@ -7,7 +7,7 @@
     JiraYearWorklogIssue,
     JiraYearWorklogResponse
   } from '$lib/services/jira';
-  import JiraCompletedBar from '$lib/components/Jira/JiraCompletedBar.svelte';
+  import JiraWorklogIssuesBar from '$lib/components/Jira/JiraWorklogIssuesBar.svelte';
   import JiraHistoryCharts from '$lib/components/Jira/JiraHistoryCharts.svelte';
   import ClientiSection from '$lib/components/Jira/ClientiSection.svelte';
   import { ensureJiraControlLoaded, jiraControl } from '$lib/stores/jiraControl';
@@ -49,12 +49,15 @@
     'Novembre',
     'Dicembre'
   ];
-  const PERIOD_CACHE_PREFIX = 'app-presenze:jira-history:period:v1:';
+  // v2: il payload espone `worklog_issues` (issue con ore loggate, senza filtro di
+  // stato) al posto di `completed_issues`. Il bump invalida le entry gia' in cache.
+  const PERIOD_CACHE_ROOT = 'app-presenze:jira-history:period:';
+  const PERIOD_CACHE_PREFIX = `${PERIOD_CACHE_ROOT}v2:`;
   const PERIOD_CACHE_TTL_MS = 10 * 60 * 1000;
   const PERIOD_CACHE_MAX_ENTRIES = 6;
 
   type JiraHistoryPeriodCache = {
-    version: 1;
+    version: 2;
     cachedAt: number;
     year: number;
     month: number | 'all';
@@ -62,7 +65,7 @@
   };
 
   let selectedProjectKeys: string[] = [];
-  let completedIssues: JiraIssue[] = [];
+  let worklogIssues: JiraIssue[] = [];
   let selectedYear = new Date().getFullYear();
   let selectedMonth: number | 'all' = 'all';
   let yearlyWorklogData: JiraYearWorklogResponse | null = null;
@@ -104,7 +107,7 @@
 
   function applyYearlyWorklogData(data: JiraYearWorklogResponse) {
     yearlyWorklogData = data;
-    completedIssues = normalizeCompletedIssues(data.completed_issues || []);
+    worklogIssues = normalizeWorklogIssues(data.worklog_issues || []);
   }
 
   function readPeriodCache(year: number, month: number | 'all') {
@@ -115,7 +118,7 @@
 
       const cached = JSON.parse(raw) as Partial<JiraHistoryPeriodCache>;
       if (
-        cached.version !== 1 ||
+        cached.version !== 2 ||
         cached.year !== year ||
         cached.month !== month ||
         typeof cached.cachedAt !== 'number' ||
@@ -137,9 +140,16 @@
 
   function prunePeriodCache(currentKey: string, maxEntries = PERIOD_CACHE_MAX_ENTRIES) {
     const entries: { key: string; cachedAt: number }[] = [];
+    const legacyKeys: string[] = [];
     for (let index = 0; index < localStorage.length; index += 1) {
       const key = localStorage.key(index);
-      if (!key?.startsWith(PERIOD_CACHE_PREFIX) || key === currentKey) continue;
+      if (!key?.startsWith(PERIOD_CACHE_ROOT)) continue;
+      if (!key.startsWith(PERIOD_CACHE_PREFIX)) {
+        // Entry di versioni precedenti dello schema: non verranno mai piu' lette.
+        legacyKeys.push(key);
+        continue;
+      }
+      if (key === currentKey) continue;
 
       try {
         const cached = JSON.parse(localStorage.getItem(key) || '{}') as Partial<JiraHistoryPeriodCache>;
@@ -150,6 +160,8 @@
       }
     }
 
+    legacyKeys.forEach((key) => localStorage.removeItem(key));
+
     entries
       .sort((first, second) => first.cachedAt - second.cachedAt)
       .slice(Math.max(0, maxEntries - 1))
@@ -158,7 +170,7 @@
 
   function savePeriodCache(year: number, month: number | 'all', data: JiraYearWorklogResponse) {
     const key = periodCacheKey(year, month);
-    const value = JSON.stringify({ version: 1, cachedAt: Date.now(), year, month, data } satisfies JiraHistoryPeriodCache);
+    const value = JSON.stringify({ version: 2, cachedAt: Date.now(), year, month, data } satisfies JiraHistoryPeriodCache);
 
     try {
       prunePeriodCache(key);
@@ -189,7 +201,7 @@
       }
     } else if (yearlyWorklogData?.year !== year || yearlyWorklogData.month !== month) {
       yearlyWorklogData = null;
-      completedIssues = [];
+      worklogIssues = [];
     }
 
     const controller = new AbortController();
@@ -212,7 +224,7 @@
       if (requestId !== yearlyWorklogRequestId) return;
       if (e?.name === 'AbortError') return;
       if (!yearlyWorklogData) {
-        completedIssues = [];
+        worklogIssues = [];
         yearlyWorklogError = String(e?.message || e || 'Errore caricamento worklog del periodo');
       }
     } finally {
@@ -233,7 +245,7 @@
     chartsMaxHeight = height > 0 ? `${Math.ceil(height)}px` : '';
   }
 
-  function completedIssueIsSubtask(issue: JiraIssue) {
+  function worklogIssueIsSubtask(issue: JiraIssue) {
     const typeName = String(issue.fields?.issuetype?.name || '').toLowerCase();
     return Boolean(
       issue.fields?.issuetype?.subtask ||
@@ -317,7 +329,7 @@
       .sort((a, b) => b.seconds - a.seconds || a.name.localeCompare(b.name));
   }
 
-  function normalizeCompletedIssue(issue: JiraIssue): JiraIssue | null {
+  function normalizeWorklogIssue(issue: JiraIssue): JiraIssue | null {
     const key = String(issue?.key || '');
     if (!key) return null;
 
@@ -336,8 +348,8 @@
         parent: fields.parent
           ? { key: fields.parent.key, fields: { summary: fields.parent.fields?.summary } }
           : null,
-        subtasks: normalizeCompletedIssues(fields.subtasks || []),
-        subtasks_enriched: normalizeCompletedIssues(fields.subtasks_enriched || []),
+        subtasks: normalizeWorklogIssues(fields.subtasks || []),
+        subtasks_enriched: normalizeWorklogIssues(fields.subtasks_enriched || []),
         project: fields.project ? { key: fields.project.key, name: fields.project.name } : undefined,
         timespent: fields.timespent ?? null,
         aggregatetimespent: fields.aggregatetimespent ?? null,
@@ -368,23 +380,23 @@
     };
   }
 
-  function normalizeCompletedIssues(issues: JiraIssue[]): JiraIssue[] {
+  function normalizeWorklogIssues(issues: JiraIssue[]): JiraIssue[] {
     return (issues || [])
-      .map(normalizeCompletedIssue)
+      .map(normalizeWorklogIssue)
       .filter((issue): issue is JiraIssue => issue !== null);
   }
 
-  function flattenCompletedIssues(issues: JiraIssue[]): JiraIssue[] {
+  function flattenWorklogIssues(issues: JiraIssue[]): JiraIssue[] {
     return (issues || []).flatMap((issue) => [
       issue,
-      ...flattenCompletedIssues(issue.fields?.subtasks_enriched || [])
+      ...flattenWorklogIssues(issue.fields?.subtasks_enriched || [])
     ]);
   }
 
-  $: flattenedCompletedIssues = flattenCompletedIssues(completedIssues);
-  $: chartIssues = flattenedCompletedIssues;
+  $: flattenedWorklogIssues = flattenWorklogIssues(worklogIssues);
+  $: chartIssues = flattenedWorklogIssues;
   $: knownSubtaskKeys = new Set(
-    flattenedCompletedIssues.filter(completedIssueIsSubtask).map((issue) => issue.key)
+    flattenedWorklogIssues.filter(worklogIssueIsSubtask).map((issue) => issue.key)
   );
   $: userSubtaskGroups = groupSubtasksByUser(yearlyWorklogData, knownSubtaskKeys, selectedProjectKeys);
   $: userSubtasksTotalSeconds = userSubtaskGroups.reduce((total, user) => total + user.seconds, 0);
@@ -491,8 +503,8 @@
 
   <section class="layout-row">
     <div class="left-pane" bind:this={leftPaneEl}>
-      <JiraCompletedBar
-        bind:issuesData={completedIssues}
+      <JiraWorklogIssuesBar
+        bind:issuesData={worklogIssues}
         bind:selectedProjectKeys
         loading={yearlyWorklogLoading}
         error={yearlyWorklogError}

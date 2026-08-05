@@ -120,10 +120,10 @@
 
 </script>
 
-<section class="completed-bar" data-history-hover-exclude>
+<section class="worklog-bar" data-history-hover-exclude>
   <div class="head">
     <div>
-      <h2>Progetti completati</h2>
+      <h2>Progetti con ore loggate</h2>
       <p class="subhead">{selectedCount} selezionati su {totalCount}</p>
       <p class="subhead hours">
         Ore: {fmtHours(selectedCount > 0 ? selectedHours : totalHours)}
@@ -149,7 +149,7 @@
   {#if loading}
     <div class="progress-shell" data-history-hover-exclude aria-live="polite">
       <div class="progress-meta">
-        <span>Caricamento issue completate</span>
+        <span>Caricamento issue con ore loggate</span>
         <strong>...</strong>
       </div>
       <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
@@ -163,7 +163,7 @@
   {:else if loading && issuesData.length === 0}
     <div class="state">Caricamento...</div>
   {:else if filteredProjects.length === 0}
-    <div class="state">Nessun progetto completato trovato</div>
+    <div class="state">Nessun progetto con ore loggate trovato</div>
   {:else}
     <div class="cards-scroll">
       <div class="cards">
@@ -192,7 +192,7 @@
 </section>
 
 <style>
-  .completed-bar {
+  .worklog-bar {
     border: 1px solid #bbf7d0;
     border-radius: 14px;
     background: linear-gradient(180deg, #f0fdf4, #ffffff 35%);

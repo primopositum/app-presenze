@@ -565,19 +565,6 @@ def _apply_worklog_author_totals(fields: dict, totals: dict):
     return True
 
 
-def _issue_fields_are_completed(fields: dict):
-    status = (fields or {}).get("status") or {}
-    status_category = status.get("statusCategory") or {}
-    category_key = str(status_category.get("key") or "").strip().casefold()
-    category_name = str(status_category.get("name") or "").strip().casefold()
-    status_name = str(status.get("name") or "").strip().casefold()
-    return (
-        category_key == "done"
-        or category_name in {"done", "completed", "completata"}
-        or status_name in {"done", "completed", "completata"}
-    )
-
-
 def _enrich_completed_issues_with_worklog_authors(
     search_payload,
     domain: str,
@@ -1823,7 +1810,7 @@ class JiraWorklogStreamView(APIView):
                 yield f"data: {json.dumps({'type': 'start', 'total': total}, ensure_ascii=False)}\n\n"
 
                 projects_map = {}
-                completed_issues = []
+                worklog_issues = []
                 total_worklogs = 0
                 total_seconds = 0
                 total_issues = 0
@@ -1904,8 +1891,11 @@ class JiraWorklogStreamView(APIView):
                             projects_map[project_key]["worklogs_count"] += len(issue_worklogs)
                             projects_map[project_key]["total_seconds"] += issue_total_seconds
 
-                            if _issue_fields_are_completed(fields) and _apply_worklog_author_totals(fields, author_totals):
-                                completed_issues.append(issue)
+                            # Nessun filtro sullo stato: la barra elenca tutte le issue
+                            # con ore effettivamente loggate nel periodo. Il gate resta
+                            # solo sui totali per autore (worklog con secondi > 0).
+                            if _apply_worklog_author_totals(fields, author_totals):
+                                worklog_issues.append(issue)
 
                     yield f"data: {json.dumps({'type': 'progress', 'loaded': idx + 1, 'total': total}, ensure_ascii=False)}\n\n"
 
@@ -1914,10 +1904,10 @@ class JiraWorklogStreamView(APIView):
                     project_row["issues"].sort(key=lambda item: (item.get("issue_key") or ""))
                 projects.sort(key=lambda item: (item.get("project_key") or ""))
 
-                completed_issues_count = len(completed_issues)
-                completed_payload = {"issues": completed_issues}
-                _nest_subtasks_into_parents(completed_payload)
-                _sort_issues_by_priority(completed_payload)
+                worklog_issues_count = len(worklog_issues)
+                worklog_issues_payload = {"issues": worklog_issues}
+                _nest_subtasks_into_parents(worklog_issues_payload)
+                _sort_issues_by_priority(worklog_issues_payload)
 
                 done_payload = {
                     "type": "done",
@@ -1929,8 +1919,8 @@ class JiraWorklogStreamView(APIView):
                     "worklogs_count": total_worklogs,
                     "total_seconds": total_seconds,
                     "projects": projects,
-                    "completed_issues_count": completed_issues_count,
-                    "completed_issues": completed_payload["issues"],
+                    "worklog_issues_count": worklog_issues_count,
+                    "worklog_issues": worklog_issues_payload["issues"],
                 }
                 yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
             except requests.exceptions.RequestException as exc:

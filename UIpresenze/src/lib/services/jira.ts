@@ -216,8 +216,9 @@ export type JiraYearWorklogResponse = {
   worklogs_count: number;
   total_seconds: number;
   projects: JiraYearWorklogProject[];
-  completed_issues_count?: number;
-  completed_issues?: JiraHistoryIssue[];
+  // Issue con ore loggate nel periodo, senza filtro sullo stato corrente.
+  worklog_issues_count?: number;
+  worklog_issues?: JiraHistoryIssue[];
 };
 
 export type JiraYearWorklogProgress = {
