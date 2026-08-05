@@ -29,6 +29,11 @@
     worklogsCount: number;
     subtasks: UserSubtask[];
   };
+  type ContractPoolTask = {
+    key: string;
+    summary: string;
+    seconds: number;
+  };
 
   const MONTHS = [
     'Gennaio',
@@ -396,6 +401,13 @@
     worklogsCount: visibleYearlyWorklogProjects.reduce((total, project) => total + project.worklogs_count, 0),
     totalSeconds: visibleYearlyWorklogProjects.reduce((total, project) => total + project.total_seconds, 0)
   };
+  $: jiraPoolTasks = (yearlyWorklogData?.projects || []).flatMap((project): ContractPoolTask[] =>
+    project.issues.map((issue) => ({
+      key: issue.issue_key,
+      summary: issue.issue_summary || '-',
+      seconds: Math.max(0, Number(issue.total_seconds || 0))
+    }))
+  );
   $: selectedPeriod = `${selectedYear}:${selectedMonth}`;
   $: selectedYearIsValid = Number.isInteger(selectedYear) && selectedYear >= 1900 && selectedYear <= 3000;
   $: if (jiraHistoryReady && selectedYearIsValid && selectedPeriod !== lastFetchedPeriod) {
@@ -476,8 +488,6 @@
       </div>
     </div>
   </header>
-
-  <ClientiSection />
 
   <section class="layout-row">
     <div class="left-pane" bind:this={leftPaneEl}>
@@ -623,6 +633,7 @@
     {/if}
   </section>
 
+  <ClientiSection jiraTasks={jiraPoolTasks} />
 </main>
 
 <style>

@@ -20,5 +20,7 @@
   ),
   :global(.jira-history-hover-root button:not([data-history-hover-exclude]):hover) {
     background-color: #fff7ed !important;
+    color: #000 !important;
   }
+
 </style>
