@@ -118,7 +118,8 @@ export async function useJiraWorklogsByYearStream(
 export async function useJiraCompletedHistory(
   year: number | string = 'all',
   month: number | string = 'all',
-  completed = true
+  // Vedi jiraCompletedHistory: default senza filtro di stato.
+  completed = false
 ): Promise<JiraCompletedHistoryResponse> {
   const rawYear = String(year ?? 'all').trim() || 'all';
   if (rawYear.toLowerCase() === 'all') {

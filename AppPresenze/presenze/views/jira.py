@@ -740,12 +740,8 @@ def _completed_history_jql(
     completed_only: bool = True,
 ) -> str:
     clauses = []
-    # Vincolo di completamento disattivato: il JQL non filtra piu' per stato, cosi'
-    # la vista restituisce tutte le issue con ore loggate nel periodo a prescindere
-    # dallo stato corrente. Il parametro `completed_only` resta nella firma e nel
-    # payload di risposta solo per compatibilita' con il contratto esistente.
-    # if completed_only:
-    #     clauses.append('(statusCategory = Done OR status in ("Completed","Completata"))')
+    if completed_only:
+        clauses.append('(statusCategory = Done OR status in ("Completed","Completata"))')
     if target_year is not None:
         start_date, end_date = _worklog_period_bounds(target_year, target_month)
         clauses.append(

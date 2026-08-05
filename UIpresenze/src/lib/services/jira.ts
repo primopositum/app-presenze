@@ -467,7 +467,9 @@ export async function jiraWorklogsByYearStream(
 export function jiraCompletedHistory(
   year: string | number = 'all',
   month: string | number = 'all',
-  completed = true
+  // Storico completo: nessun filtro sullo stato corrente della issue.
+  // Passa `true` per limitare il risultato alle sole issue Done/Completata.
+  completed = false
 ) {
   const normalizedYear = String(year ?? 'all').trim().toLowerCase();
   return request('/jira/worklogs/year/', {
