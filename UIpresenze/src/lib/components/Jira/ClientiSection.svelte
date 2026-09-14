@@ -31,20 +31,22 @@
   type ClienteForm = { id: number | null; nome: string; indirizzo: string; telefono: string };
   type ContrattoForm = {
     id: number | null;
-    cliente_id: string;
+    contract_id: string;
+    client_id: string;
     value: string;
-    data_creazione: string;
-    data_fine: string;
+    start_date: string;
+    end_date: string;
     pool_task: string[];
   };
 
   const emptyClienteForm = (): ClienteForm => ({ id: null, nome: '', indirizzo: '', telefono: '' });
   const emptyContrattoForm = (): ContrattoForm => ({
     id: null,
-    cliente_id: '',
+    contract_id: '',
+    client_id: '',
     value: '',
-    data_creazione: '',
-    data_fine: '',
+    start_date: '',
+    end_date: '',
     pool_task: []
   });
 
@@ -173,7 +175,7 @@
   function deleteConfirmationMessage(target: DeleteTarget) {
     return target.type === 'cliente'
       ? `Sei veramente sicuro di eliminare il cliente ${target.cliente.nome}? Se lo elimini perderai il valore delle task associate.`
-      : `Sei veramente sicuro di eliminare il contratto per ${target.contratto.cliente.nome}? Se lo elimini perderai il valore delle task associate.`;
+      : `Sei veramente sicuro di eliminare il contratto per ${target.contratto.client.nome}? Se lo elimini perderai il valore delle task associate.`;
   }
 
   async function confirmDelete() {
@@ -205,14 +207,17 @@
   async function saveContratto() {
     savingContratto = true;
     try {
-      const clienteId = Number(contrattoForm.cliente_id);
+      const clienteId = Number(contrattoForm.client_id);
       if (!Number.isInteger(clienteId) || clienteId <= 0) throw new Error('Seleziona un cliente.');
+      const normalizedContractId = String(contrattoForm.contract_id ?? '').trim();
+      if (!normalizedContractId) throw new Error('L\'ID del contratto è obbligatorio.');
       const normalizedValue = String(contrattoForm.value ?? '').trim();
       if (!normalizedValue) throw new Error('Il valore del contratto è obbligatorio.');
 
       if (contrattoForm.id === null) return;
       await useContrattoClienteUpdate(contrattoForm.id, {
-        cliente_id: clienteId,
+        contract_id: normalizedContractId,
+        client_id: clienteId,
         value: normalizedValue,
         pool_task: contrattoForm.pool_task
       });
@@ -230,10 +235,11 @@
   function editContratto(contratto: ContrattoCliente) {
     contrattoForm = {
       id: contratto.id,
-      cliente_id: String(contratto.cliente.id),
+      contract_id: contratto.contract_id,
+      client_id: String(contratto.client.id),
       value: String(contratto.value),
-      data_creazione: contratto.data_creazione,
-      data_fine: contratto.data_fine,
+      start_date: contratto.start_date,
+      end_date: contratto.end_date || '',
       pool_task: [...(contratto.pool_task || [])]
     };
   }
@@ -311,14 +317,15 @@
       <h3>Modifica contratto</h3>
       <label>
         Cliente
-        <select bind:value={contrattoForm.cliente_id} required>
+        <select bind:value={contrattoForm.client_id} required>
           <option value="">Seleziona cliente</option>
           {#each clienti as cliente (cliente.id)}<option value={String(cliente.id)}>{cliente.nome}</option>{/each}
         </select>
       </label>
+      <label>ID contratto <input bind:value={contrattoForm.contract_id} required /></label>
       <label>Valore <input type="number" min="0" step="0.01" bind:value={contrattoForm.value} required /></label>
-      <label>Data creazione <input type="date" bind:value={contrattoForm.data_creazione} required readonly={contrattoForm.id !== null} /></label>
-      <label>Data fine <input type="date" bind:value={contrattoForm.data_fine} required readonly={contrattoForm.id !== null} /></label>
+      <label>Data inizio <input type="date" bind:value={contrattoForm.start_date} required readonly={contrattoForm.id !== null} /></label>
+      <label>Data fine <input type="date" bind:value={contrattoForm.end_date} required readonly={contrattoForm.id !== null} /></label>
       <div class="form-actions">
         <button type="submit" disabled={savingContratto || clienti.length === 0}>{savingContratto ? 'Salvo...' : 'Salva contratto'}</button>
         <button type="button" class="secondary" on:click={() => (contrattoForm = emptyContrattoForm())}>Annulla</button>
@@ -358,7 +365,7 @@
           on:click={() => selectContratto(contratto)}
           on:keydown={(event) => selectContrattoOnKeydown(event, contratto)}
         >
-          <div class="contract-heading"><div><strong>{contratto.cliente.nome}</strong><span>€ {Number(contratto.value).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span><small>{contratto.data_creazione} → {contratto.data_fine}</small></div><div class="row-actions"><button type="button" on:click={() => editContratto(contratto)}>Modifica</button><button type="button" class="danger" on:click={() => requestDeleteContratto(contratto)}>Elimina</button></div></div>
+          <div class="contract-heading"><div><strong>{contratto.contract_id}</strong><span>{contratto.client.nome}</span><span>€ {Number(contratto.value).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span><small>{contratto.start_date} → {contratto.end_date}</small></div><div class="row-actions"><button type="button" on:click={() => editContratto(contratto)}>Modifica</button><button type="button" class="danger" on:click={() => requestDeleteContratto(contratto)}>Elimina</button></div></div>
           <div class="pool"><span>Pool task</span><div class="task-list">{#each contratto.pool_task as task (`${contratto.id}-${task}`)}<span class="task-chip">{task}<button type="button" aria-label={`Rimuovi ${task}`} on:click={() => deleteTask(contratto, task)}>×</button></span>{/each}</div><div class="add-task"><input placeholder="PROJ-123" value={poolTaskInputs[contratto.id] || ''} on:input={(event) => (poolTaskInputs = { ...poolTaskInputs, [contratto.id]: event.currentTarget.value })} /><button type="button" on:click={() => appendTask(contratto)}>Aggiungi</button></div></div>
         </section>
       {/each}</div>{/if}
@@ -369,7 +376,7 @@
         <div class="detail-heading">
           <div>
             <span>Contratto selezionato</span>
-            <h3>{selectedContratto.cliente.nome}</h3>
+            <h3>{selectedContratto.contract_id}</h3>
           </div>
           <div class="row-actions">
             <button type="button" on:click={() => editContratto(selectedContratto)}>Modifica</button>
@@ -377,9 +384,11 @@
           </div>
         </div>
         <dl class="contract-data">
+          <div><dt>ID contratto</dt><dd>{selectedContratto.contract_id}</dd></div>
+          <div><dt>Cliente</dt><dd>{selectedContratto.client.nome}</dd></div>
           <div><dt>Valore</dt><dd>€ {Number(selectedContratto.value).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</dd></div>
-          <div><dt>Data creazione</dt><dd>{selectedContratto.data_creazione}</dd></div>
-          <div><dt>Data fine</dt><dd>{selectedContratto.data_fine}</dd></div>
+          <div><dt>Data inizio</dt><dd>{selectedContratto.start_date}</dd></div>
+          <div><dt>Data fine</dt><dd>{selectedContratto.end_date}</dd></div>
         </dl>
         <div class="pool">
           <span>Pool task</span>

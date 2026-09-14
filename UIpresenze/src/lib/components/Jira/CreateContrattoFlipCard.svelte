@@ -10,9 +10,10 @@
   export let onNotify: ((message: string, success: boolean) => void) | undefined = undefined;
 
   let clienteId = '';
+  let contractId = '';
   let value = '';
-  let dataCreazione = '';
-  let dataFine = '';
+  let startDate = '';
+  let endDate = '';
   let saving = false;
 
   async function createContratto() {
@@ -20,19 +21,22 @@
     try {
       const parsedClienteId = Number(clienteId);
       if (!Number.isInteger(parsedClienteId) || parsedClienteId <= 0) throw new Error('Seleziona un cliente.');
+      const normalizedContractId = String(contractId ?? '').trim();
       const normalizedValue = String(value ?? '').trim();
-      if (!normalizedValue || !dataCreazione || !dataFine) throw new Error('Valore e date sono obbligatori.');
+      if (!normalizedContractId || !normalizedValue || !startDate || !endDate) throw new Error('ID contratto, valore e date sono obbligatori.');
       await useContrattoClienteCreate({
-        cliente_id: parsedClienteId,
+        contract_id: normalizedContractId,
+        client_id: parsedClienteId,
         value: normalizedValue,
         pool_task: [],
-        data_creazione: dataCreazione,
-        data_fine: dataFine
+        start_date: startDate,
+        end_date: endDate
       });
       clienteId = '';
+      contractId = '';
       value = '';
-      dataCreazione = '';
-      dataFine = '';
+      startDate = '';
+      endDate = '';
       onClose?.();
       onNotify?.('Contratto commerciale creato.', true);
       await onCreated?.();
@@ -54,9 +58,10 @@
     <form class="card-face card-back" on:submit|preventDefault={createContratto}>
       <div class="card-title"><strong>Crea contratto</strong><button type="button" class="close" data-history-hover-exclude on:click={() => onClose?.()} aria-label="Torna alla scelta di creazione">×</button></div>
       <label>Cliente <select bind:value={clienteId} required><option value="">Seleziona cliente</option>{#each clienti as cliente (cliente.id)}<option value={String(cliente.id)}>{cliente.nome}</option>{/each}</select></label>
+      <label>ID contratto <input bind:value={contractId} required /></label>
       <label>Valore <input type="number" min="0" step="0.01" bind:value required /></label>
-      <label>Data creazione <input type="date" bind:value={dataCreazione} required /></label>
-      <label>Data fine <input type="date" bind:value={dataFine} required /></label>
+      <label>Data inizio <input type="date" bind:value={startDate} required /></label>
+      <label>Data fine <input type="date" bind:value={endDate} required /></label>
       <button type="submit" data-history-hover-exclude disabled={saving}>{saving ? 'Creo...' : 'Crea contratto'}</button>
     </form>
   </div>

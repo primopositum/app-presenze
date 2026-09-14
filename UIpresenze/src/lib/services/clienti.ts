@@ -13,22 +13,37 @@ export type ClientePayload = Omit<Cliente, 'id'>;
 
 export type ContrattoCliente = {
   id: number;
-  cliente: Cliente;
+  contract_id: string;
+  client: Cliente;
+  client_id: number;
   value: string;
   pool_task: string[];
-  data_creazione: string;
-  data_fine: string;
+  start_date: string;
+  end_date: string | null;
+  periodicity: Periodicity | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Periodicity = {
+  periodic_value: string;
+  period_days: number;
+  first_meeting_date: string;
+  notification_days: number;
 };
 
 export type ContrattoClienteCreatePayload = {
-  cliente_id: number;
+  contract_id: string;
+  client_id: number;
   value: string | number;
   pool_task?: string[];
-  data_creazione: string;
-  data_fine: string;
+  start_date: string;
+  end_date: string;
 };
 
-export type ContrattoClienteUpdatePayload = Pick<ContrattoClienteCreatePayload, 'cliente_id' | 'value' | 'pool_task'>;
+export type ContrattoClienteUpdatePayload = Partial<
+  Pick<ContrattoClienteCreatePayload, 'contract_id' | 'client_id' | 'value' | 'pool_task' | 'start_date' | 'end_date'>
+>;
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
