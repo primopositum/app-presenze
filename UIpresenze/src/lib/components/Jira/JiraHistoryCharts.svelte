@@ -330,6 +330,7 @@
     background: #ffffff;
     padding: 0.9rem;
     min-width: 0;
+    min-height: 720px;
   }
 
   h3 {
@@ -520,6 +521,9 @@
   }
 
   @media (max-width: 1200px) {
+    .charts-shell {
+      min-height: 0;
+    }
     .donut-wrap {
       grid-template-columns: 1fr;
       justify-items: center;

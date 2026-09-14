@@ -198,6 +198,7 @@
     background: linear-gradient(180deg, #f0fdf4, #ffffff 35%);
     padding: 0.9rem;
     min-width: 0;
+    min-height: 720px;
   }
 
   .head {
@@ -419,9 +420,12 @@
     color: #166534;
     font-family: var(--font-mono);
   }
-  @media (max-width: 1100px) {
+  @media (max-width: 1200px) {
     .cards-scroll {
       max-height: 56vh;
+    }
+    .worklog-bar {
+      min-height: 0;
     }
   }
 </style>

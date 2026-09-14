@@ -49,6 +49,19 @@
 </div>
 
 <style>
-  .flip-card { min-height: 245px; perspective: 1100px; } .flip-card-inner { position: relative; width: 100%; min-height: 245px; transition: transform .55s ease; transform-style: preserve-3d; } .flipped .flip-card-inner { transform: rotateY(180deg); }
-  .card-face { position: absolute; inset: 0; box-sizing: border-box; display: grid; align-content: center; gap: .6rem; padding: 1rem; border: 1px solid #bfdbfe; border-radius: 12px; background: #eff6ff; backface-visibility: hidden; -webkit-backface-visibility: hidden; } .card-front { border: 1px dashed #60a5fa; color: #1e3a8a; cursor: pointer; justify-items: center; font: inherit; } .card-front:hover { background: #dbeafe; transform: translateY(-2px); } small { color: #475569; } .card-back { transform: rotateY(180deg); background: #fff; text-align: left; } .card-title { display: flex; justify-content: space-between; align-items: center; gap: .5rem; color: #0f172a; } label { display: grid; gap: .25rem; color: #334155; font-size: .75rem; font-weight: 600; } input { width: 100%; box-sizing: border-box; padding: .42rem .5rem; border: 1px solid #cbd5e1; border-radius: 6px; font: inherit; } button[type='submit'] { width: fit-content; max-width: 100%; border: 0; border-radius: 7px; padding: .42rem .65rem; color: #fff; background: #2563eb; font: inherit; cursor: pointer; overflow-wrap: anywhere; } button:disabled { opacity: .6; cursor: not-allowed; } .close { flex: 0 0 auto; border: 0; background: transparent; color: #475569; font-size: 1.35rem; cursor: pointer; }
+  .flip-card { --card-height: min(600px, calc(100dvh - 2rem)); height: var(--card-height); perspective: 1100px; }
+  .flip-card-inner { position: relative; width: 100%; height: 100%; transition: transform .55s ease; transform-style: preserve-3d; }
+  .flipped .flip-card-inner { transform: rotateY(180deg); }
+  .card-face { position: absolute; inset: 0; box-sizing: border-box; display: grid; align-content: start; gap: .6rem; padding: 1rem; border: 1px solid #bfdbfe; border-radius: 12px; background: #eff6ff; backface-visibility: hidden; -webkit-backface-visibility: hidden; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; }
+  .card-front { align-content: center; border: 1px dashed #60a5fa; color: #1e3a8a; cursor: pointer; justify-items: center; font: inherit; }
+  .card-front:hover { background: #dbeafe; transform: translateY(-2px); }
+  small { color: #475569; }
+  .card-back { transform: rotateY(180deg); background: #fff; text-align: left; }
+  .card-title { display: flex; align-items: center; gap: .5rem; color: #0f172a; }
+  .card-title strong { flex: 1; }
+  label { display: grid; gap: .25rem; color: #334155; font-size: .75rem; font-weight: 600; }
+  input { width: 100%; box-sizing: border-box; padding: .42rem .5rem; border: 1px solid #cbd5e1; border-radius: 6px; font: inherit; }
+  button[type='submit'] { width: fit-content; max-width: 100%; border: 0; border-radius: 7px; padding: .42rem .65rem; color: #fff; background: #2563eb; font: inherit; cursor: pointer; overflow-wrap: anywhere; }
+  button:disabled { opacity: .6; cursor: not-allowed; }
+  .close { flex: 0 0 auto; border: 0; background: transparent; color: #475569; font-size: 1.35rem; cursor: pointer; }
 </style>

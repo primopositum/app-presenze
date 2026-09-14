@@ -14,7 +14,7 @@ export type ClientePayload = Omit<Cliente, 'id'>;
 export type ContrattoCliente = {
   id: number;
   contract_id: string;
-  client: Cliente;
+  client?: Cliente;
   client_id: number;
   value: string;
   pool_task: string[];
@@ -32,6 +32,13 @@ export type Periodicity = {
   notification_days: number;
 };
 
+export type PeriodicityPayload = {
+  periodic_value: string | number;
+  period_days: number;
+  first_meeting_date: string;
+  notification_days: number;
+};
+
 export type ContrattoClienteCreatePayload = {
   contract_id: string;
   client_id: number;
@@ -39,6 +46,7 @@ export type ContrattoClienteCreatePayload = {
   pool_task?: string[];
   start_date: string;
   end_date: string;
+  periodicity?: PeriodicityPayload | null;
 };
 
 export type ContrattoClienteUpdatePayload = Partial<

@@ -79,6 +79,7 @@
   let leftPaneEl: HTMLDivElement | null = null;
   let chartsMaxHeight = '';
   let layoutResizeObserver: ResizeObserver | null = null;
+  const MIN_ANALYTICS_PANE_HEIGHT = 720;
 
   function fmtHours(seconds: number) {
     const hours = seconds / 3600;
@@ -242,7 +243,7 @@
     }
 
     const height = leftPaneEl.getBoundingClientRect().height;
-    chartsMaxHeight = height > 0 ? `${Math.ceil(height)}px` : '';
+    chartsMaxHeight = height > 0 ? `${Math.max(MIN_ANALYTICS_PANE_HEIGHT, Math.ceil(height))}px` : '';
   }
 
   function worklogIssueIsSubtask(issue: JiraIssue) {
@@ -768,6 +769,7 @@
   .left-pane,
   .right-pane {
     min-width: 0;
+    min-height: 720px;
   }
 
   .left-pane {
@@ -1078,10 +1080,12 @@
 
     .left-pane {
       position: static;
+      min-height: 0;
     }
 
     .right-pane {
       max-height: none !important;
+      min-height: 0;
       overflow: visible;
       padding-right: 0;
     }

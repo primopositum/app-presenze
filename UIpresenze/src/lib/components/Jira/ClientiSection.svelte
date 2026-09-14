@@ -52,6 +52,7 @@
 
   let clienti: Cliente[] = [];
   let contratti: ContrattoCliente[] = [];
+  let contractSearch = '';
   let loading = true;
   let savingCliente = false;
   let savingContratto = false;
@@ -68,6 +69,17 @@
   let deleting = false;
 
   $: selectedContratto = contratti.find((contratto) => contratto.id === selectedContrattoId) || null;
+  $: normalizedContractSearch = contractSearch.trim().toLowerCase();
+  $: filteredContracts = contratti.filter((contratto) => {
+    if (!normalizedContractSearch) return true;
+    return [
+      contratto.contract_id,
+      contractClientName(contratto),
+      contratto.start_date,
+      contratto.end_date || '',
+      ...(contratto.pool_task || [])
+    ].some((value) => String(value).toLowerCase().includes(normalizedContractSearch));
+  });
   $: jiraTasksByKey = new Map(jiraTasks.map((task) => [task.key.trim().toUpperCase(), task]));
   $: selectedPoolTaskRows = buildPoolTaskRows(selectedContratto, jiraTasksByKey);
   $: selectedPoolTaskTotalSeconds = selectedPoolTaskRows.reduce((total, task) => total + task.seconds, 0);
@@ -105,6 +117,10 @@
 
   function formatCurrency(value: number) {
     return value.toLocaleString('it-IT', { style: 'currency', currency: 'EUR' });
+  }
+
+  function contractClientName(contratto: ContrattoCliente) {
+    return contratto.client?.nome || 'Cliente non disponibile';
   }
 
   async function loadData() {
@@ -175,7 +191,7 @@
   function deleteConfirmationMessage(target: DeleteTarget) {
     return target.type === 'cliente'
       ? `Sei veramente sicuro di eliminare il cliente ${target.cliente.nome}? Se lo elimini perderai il valore delle task associate.`
-      : `Sei veramente sicuro di eliminare il contratto per ${target.contratto.client.nome}? Se lo elimini perderai il valore delle task associate.`;
+      : `Sei veramente sicuro di eliminare il contratto per ${contractClientName(target.contratto)}? Se lo elimini perderai il valore delle task associate.`;
   }
 
   async function confirmDelete() {
@@ -236,7 +252,7 @@
     contrattoForm = {
       id: contratto.id,
       contract_id: contratto.contract_id,
-      client_id: String(contratto.client.id),
+      client_id: String(contratto.client_id),
       value: String(contratto.value),
       start_date: contratto.start_date,
       end_date: contratto.end_date || '',
@@ -336,27 +352,23 @@
 
   <button type="button" class="list-toggle" on:click={() => (listsOpen = !listsOpen)} aria-expanded={listsOpen}>
     <span>{listsOpen ? '⌃' : '⌄'}</span>
-    Clienti e contratti esistenti ({clienti.length + contratti.length})
+    Contratti esistenti ({contratti.length})
   </button>
 
   {#if listsOpen}<div class="data-grid">
-    <article class="list-card clienti-card">
-      <h3>Clienti ({clienti.length})</h3>
-      {#if loading}<p>Caricamento...</p>
-      {:else if clienti.length === 0}<p>Nessun cliente presente.</p>
-      {:else}<ul>{#each clienti as cliente (cliente.id)}
-        <li>
-          <div><strong>{cliente.nome}</strong>{#if cliente.indirizzo}<span>{cliente.indirizzo}</span>{/if}{#if cliente.telefono}<span>{cliente.telefono}</span>{/if}</div>
-          <div class="row-actions"><button type="button" on:click={() => editCliente(cliente)}>Modifica</button><button type="button" class="danger" on:click={() => requestDeleteCliente(cliente)}>Elimina</button></div>
-        </li>
-      {/each}</ul>{/if}
-    </article>
+    <aside class="contracts-tools">
+      <h3>Cerca contratti</h3>
+      <label class="search-label" for="contracts-search">Ricerca</label>
+      <input id="contracts-search" class="contracts-search" bind:value={contractSearch} placeholder="ID, cliente, data o task Jira" />
+      <p>{filteredContracts.length} di {contratti.length} contratti</p>
+    </aside>
 
     <article class="list-card contracts-card">
-      <h3>Contratti ({contratti.length})</h3>
+      <h3>Contratti ({filteredContracts.length})</h3>
       {#if loading}<p>Caricamento...</p>
       {:else if contratti.length === 0}<p>Nessun contratto commerciale presente.</p>
-      {:else}<div class="contracts-list">{#each contratti as contratto (contratto.id)}
+      {:else if filteredContracts.length === 0}<p>Nessun contratto corrisponde alla ricerca.</p>
+      {:else}<div class="contracts-list">{#each filteredContracts as contratto (contratto.id)}
         <section
           class="contract-row"
           class:contract-selected={selectedContrattoId === contratto.id}
@@ -365,7 +377,7 @@
           on:click={() => selectContratto(contratto)}
           on:keydown={(event) => selectContrattoOnKeydown(event, contratto)}
         >
-          <div class="contract-heading"><div><strong>{contratto.contract_id}</strong><span>{contratto.client.nome}</span><span>€ {Number(contratto.value).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span><small>{contratto.start_date} → {contratto.end_date}</small></div><div class="row-actions"><button type="button" on:click={() => editContratto(contratto)}>Modifica</button><button type="button" class="danger" on:click={() => requestDeleteContratto(contratto)}>Elimina</button></div></div>
+          <div class="contract-heading"><div><strong>{contratto.contract_id}</strong><span>{contractClientName(contratto)}</span><span>€ {Number(contratto.value).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span><small>{contratto.start_date} → {contratto.end_date}</small></div><div class="row-actions"><button type="button" on:click={() => editContratto(contratto)}>Modifica</button><button type="button" class="danger" on:click={() => requestDeleteContratto(contratto)}>Elimina</button></div></div>
           <div class="pool"><span>Pool task</span><div class="task-list">{#each contratto.pool_task as task (`${contratto.id}-${task}`)}<span class="task-chip">{task}<button type="button" aria-label={`Rimuovi ${task}`} on:click={() => deleteTask(contratto, task)}>×</button></span>{/each}</div><div class="add-task"><input placeholder="PROJ-123" value={poolTaskInputs[contratto.id] || ''} on:input={(event) => (poolTaskInputs = { ...poolTaskInputs, [contratto.id]: event.currentTarget.value })} /><button type="button" on:click={() => appendTask(contratto)}>Aggiungi</button></div></div>
         </section>
       {/each}</div>{/if}
@@ -385,7 +397,7 @@
         </div>
         <dl class="contract-data">
           <div><dt>ID contratto</dt><dd>{selectedContratto.contract_id}</dd></div>
-          <div><dt>Cliente</dt><dd>{selectedContratto.client.nome}</dd></div>
+          <div><dt>Cliente</dt><dd>{contractClientName(selectedContratto)}</dd></div>
           <div><dt>Valore</dt><dd>€ {Number(selectedContratto.value).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</dd></div>
           <div><dt>Data inizio</dt><dd>{selectedContratto.start_date}</dd></div>
           <div><dt>Data fine</dt><dd>{selectedContratto.end_date}</dd></div>
@@ -443,14 +455,18 @@
   button { max-width: 100%; border: 0; border-radius: 7px; padding: .42rem .65rem; color: white; background: #2563eb; cursor: pointer; font: inherit; font-size: .78rem; overflow-wrap: anywhere; } button:disabled { opacity: .6; cursor: not-allowed; } button.secondary { background: #64748b; } button.danger { background: #dc2626; } .refresh-button { background: #475569; } .list-toggle { width: 100%; display: flex; align-items: center; gap: .45rem; margin-top: 1rem; background: #334155; text-align: left; } .list-toggle span { flex: 0 0 auto; font-size: 1rem; }
   .editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
   .data-grid { display: grid; grid-template-columns: minmax(190px, .42fr) minmax(230px, .7fr) minmax(300px, 1.15fr); align-items: start; gap: .7rem; max-height: 460px; margin-top: .7rem; padding: .1rem .45rem .1rem .1rem; overflow-y: auto; overscroll-behavior: contain; } .data-grid > * { min-width: 0; }
-  .editor-card, .list-card { padding: .85rem; border: 1px solid #e2e8f0; border-radius: 9px; background: #f8fafc; }
+  .editor-card, .list-card, .contracts-tools { padding: .85rem; border: 1px solid #e2e8f0; border-radius: 9px; background: #f8fafc; }
   .list-card { padding: .7rem; }
-  .clienti-card { max-width: 285px; }
+  .contracts-tools { align-self: start; }
+  .contracts-tools h3 { margin-bottom: .7rem; }
+  .search-label { margin: 0 0 .25rem; }
+  .contracts-search { min-width: 0; }
+  .contracts-tools p { margin: .55rem 0 0; color: #64748b; font-size: .72rem; }
   label { display: grid; gap: .25rem; margin: .55rem 0; color: #334155; font-size: .78rem; font-weight: 600; } input, select { width: 100%; box-sizing: border-box; padding: .43rem .5rem; border: 1px solid #cbd5e1; border-radius: 6px; background: white; color: #0f172a; font: inherit; } input[readonly] { background: #e2e8f0; color: #475569; }
   .form-actions { margin-top: .8rem; }
-  ul, .contracts-list { display: grid; gap: .45rem; margin: 0; padding: 0; list-style: none; }
-  li, .contract-row { padding: .6rem .7rem; border: 1px solid #e2e8f0; border-radius: 7px; background: #fff; }
-  li, li > div:first-child { display: flex; } li { justify-content: space-between; align-items: center; gap: .5rem; } li > div:first-child { flex-direction: column; } li span, small { color: #64748b; font-size: .75rem; }
+  .contracts-list { display: grid; gap: .45rem; margin: 0; padding: 0; }
+  .contract-row { padding: .6rem .7rem; border: 1px solid #e2e8f0; border-radius: 7px; background: #fff; }
+  small { color: #64748b; font-size: .75rem; }
   .contract-row { cursor: pointer; transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease; }
   .contract-row:hover, .contract-selected { border-color: #93c5fd; background: #eff6ff; }
   .contract-selected { box-shadow: inset 3px 0 0 #2563eb; }
@@ -468,7 +484,7 @@
   .delete-confirm-backdrop { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: rgb(15 23 42 / .68); cursor: default; }
   .delete-confirm-content { position: relative; z-index: 1; width: min(100%, 390px); }
   @media (max-width: 980px) { .data-grid { grid-template-columns: minmax(180px, .45fr) minmax(0, 1fr); } .contract-detail { grid-column: 1 / -1; } }
-  @media (max-width: 760px) { .editor-grid, .data-grid { grid-template-columns: 1fr; } .data-grid { max-height: 420px; } .clienti-card { max-width: none; } .contract-detail { grid-column: auto; } .contract-data { grid-template-columns: 1fr; } .section-header, .contract-heading, .detail-heading, li { align-items: flex-start; flex-direction: column; } .pool-task-result { grid-template-columns: 1fr; gap: .25rem; } .row-actions { flex-wrap: wrap; } }
+  @media (max-width: 760px) { .editor-grid, .data-grid { grid-template-columns: 1fr; } .data-grid { max-height: 420px; } .contract-detail { grid-column: auto; } .contract-data { grid-template-columns: 1fr; } .section-header, .contract-heading, .detail-heading { align-items: flex-start; flex-direction: column; } .pool-task-result { grid-template-columns: 1fr; gap: .25rem; } .row-actions { flex-wrap: wrap; } }
 </style>
 
 {#if deleteTarget}
