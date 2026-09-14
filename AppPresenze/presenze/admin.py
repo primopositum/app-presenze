@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.contrib.auth import get_user_model
 from django import forms
-from .models import TimeEntry, Saldo, Contratto, Cliente, ContrattoCliente, Automobile, Trasferta, UtilitiesBar, JiraCredentials, JiraGlobals
+from .models import TimeEntry, Saldo, Contratto, Cliente, ContrattoCliente, Periodicita, Automobile, Trasferta, UtilitiesBar, JiraCredentials, JiraGlobals
 
 admin.site.register(TimeEntry)
 admin.site.register(Saldo)
@@ -19,9 +19,15 @@ class ClienteAdmin(admin.ModelAdmin):
 
 @admin.register(ContrattoCliente)
 class ContrattoClienteAdmin(admin.ModelAdmin):
-    list_display = ("id", "cliente", "value", "data_creazione", "data_fine")
-    list_filter = ("cliente",)
-    search_fields = ("cliente__nome",)
+    list_display = ("id", "contract_id", "client", "value", "start_date", "end_date")
+    list_filter = ("client",)
+    search_fields = ("contract_id", "client__nome")
+
+
+@admin.register(Periodicita)
+class PeriodicitaAdmin(admin.ModelAdmin):
+    list_display = ("contract", "periodic_value", "period_days", "notification_days", "first_meeting_date")
+    list_select_related = ("contract", "contract__client")
 
 
 class JiraCredentialsAdminForm(forms.ModelForm):

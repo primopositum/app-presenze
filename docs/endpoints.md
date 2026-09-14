@@ -75,6 +75,23 @@ Autenticazione: Bearer token su quasi tutte le rotte.
 | POST | `/automobili/<auto_id>/PDFauto/` | Upload PDF auto del mese |
 | GET | `/automobili/PDFauto/mese-corrente/` | Lista PDF auto del mese corrente |
 
+## Clienti e contratti commerciali
+
+| Metodo | Path | Cosa fa |
+|---|---|---|
+| GET,POST | `/clienti/` | Lista o crea cliente |
+| GET,PUT,PATCH,DELETE | `/clienti/<pk>/` | Dettaglio, modifica o eliminazione cliente |
+| GET,POST | `/contratti-clienti/` | Lista o crea contratto commerciale |
+| GET,PUT,PATCH,DELETE | `/contratti-clienti/<pk>/` | Dettaglio, modifica o eliminazione contratto commerciale |
+| POST,DELETE | `/contratti-clienti/<pk>/pool-task/` | Aggiunge o rimuove una task dal pool |
+
+I contratti usano le chiavi inglesi `contract_id`, `client`, `client_id`, `start_date`, `end_date`,
+`value`, `pool_task`, `periodicity`, `created_at` e `updated_at`. `periodicity` è
+opzionale: quando presente richiede `periodic_value`, `period_days`,
+`first_meeting_date` e `notification_days`; l'invio di `null` la rimuove.
+`contract_id` è una stringa obbligatoria e univoca, usata come identificativo
+amministrativo leggibile.
+
 ## Note rapide su permessi
 
 - Utente normale: in genere puo operare solo sulle proprie risorse.

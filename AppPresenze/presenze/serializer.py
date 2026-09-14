@@ -1,6 +1,7 @@
 from rest_framework import serializers
 import base64
-from .models import Utente, TimeEntry, Saldo, Contratto, Cliente, ContrattoCliente, Trasferta, Spesa, Automobile, Signature, UtilitiesBar
+
+from .models import Utente, TimeEntry, Saldo, Contratto, Cliente, ContrattoCliente, Periodicita, Trasferta, Spesa, Automobile, Signature, UtilitiesBar
 from decimal import Decimal
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
@@ -414,28 +415,41 @@ class ClienteSerializer(serializers.ModelSerializer):
         read_only_fields = ("id",)
 
 
+class PeriodicitaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Periodicita
+        fields = (
+            "periodic_value",
+            "period_days",
+            "first_meeting_date",
+            "notification_days",
+        )
+
+
 class ContrattoClienteSerializer(serializers.ModelSerializer):
-    cliente_id = serializers.PrimaryKeyRelatedField(
-        source="cliente",
+    client_id = serializers.PrimaryKeyRelatedField(
+        source="client",
         queryset=Cliente.objects.all(),
-        write_only=True,
     )
-    cliente = ClienteSerializer(read_only=True)
-    data_creazione = serializers.DateField(required=False)
-    data_fine = serializers.DateField(required=False)
+    client = ClienteSerializer(read_only=True)
+    periodicity = PeriodicitaSerializer(required=False, allow_null=True)
 
     class Meta:
         model = ContrattoCliente
         fields = (
             "id",
-            "cliente",
-            "cliente_id",
+            "contract_id",
+            "client",
+            "client_id",
             "value",
             "pool_task",
-            "data_creazione",
-            "data_fine",
+            "start_date",
+            "end_date",
+            "periodicity",
+            "created_at",
+            "updated_at",
         )
-        read_only_fields = ("id",)
+        read_only_fields = ("id", "created_at", "updated_at")
 
     def validate_pool_task(self, value):
         normalized_tasks = []
@@ -449,23 +463,45 @@ class ContrattoClienteSerializer(serializers.ModelSerializer):
         return normalized_tasks
 
     def validate(self, attrs):
-        if self.instance:
-            immutable_fields = [
-                field
-                for field in ("data_creazione", "data_fine")
-                if field in self.initial_data
-            ]
-            if immutable_fields:
-                raise serializers.ValidationError(
-                    {field: "Questo campo non puo essere modificato dopo la creazione." for field in immutable_fields}
-                )
-        else:
-            missing_fields = [
-                field for field in ("data_creazione", "data_fine") if field not in attrs
-            ]
+        periodicity = attrs.get("periodicity", serializers.empty)
+        if periodicity is not serializers.empty and periodicity is not None:
+            required_fields = ("periodic_value", "period_days", "first_meeting_date", "notification_days")
+            missing_fields = [field for field in required_fields if field not in periodicity]
             if missing_fields:
                 raise serializers.ValidationError(
-                    {field: "Questo campo e obbligatorio alla creazione." for field in missing_fields}
+                    {"periodicity": {field: "This field is required when periodicity is supplied." for field in missing_fields}}
                 )
+
+        start_date = attrs.get("start_date", self.instance.start_date if self.instance else None)
+        end_date = attrs.get("end_date", self.instance.end_date if self.instance else None)
+        if start_date and end_date and end_date < start_date:
+            raise serializers.ValidationError({"end_date": "End date must be on or after start date."})
         return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        periodicity = validated_data.pop("periodicity", None)
+        contract = ContrattoCliente.objects.create(**validated_data)
+        if periodicity:
+            Periodicita.objects.create(contract=contract, **periodicity)
+        return contract
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        periodicity = validated_data.pop("periodicity", serializers.empty)
+        for key, value in validated_data.items():
+            setattr(instance, key, value)
+        instance.save()
+
+        if periodicity is not serializers.empty:
+            if periodicity is None:
+                Periodicita.objects.filter(contract=instance).delete()
+            else:
+                Periodicita.objects.update_or_create(contract=instance, defaults=periodicity)
+            # select_related("periodicity") ha già messo in cache la relazione inversa:
+            # senza svuotarla la risposta restituirebbe la periodicità precedente.
+            periodicity_rel = instance._meta.get_field("periodicity")
+            if periodicity_rel.is_cached(instance):
+                periodicity_rel.delete_cached_value(instance)
+        return instance
 

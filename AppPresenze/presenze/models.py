@@ -3,7 +3,9 @@ from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, Permis
 from django.utils import timezone
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator
 from django.conf import settings
+from django.utils.translation import gettext_lazy as _
 from cryptography.fernet import Fernet
 import uuid
 from decimal import Decimal, ROUND_HALF_UP
@@ -34,6 +36,16 @@ def validate_pool_task(value):
         if task in tasks:
             raise ValidationError("pool_task non puo contenere duplicati.")
         tasks.append(task)
+
+
+class TimeStampedModel(models.Model):
+    """Base astratta con i campi di audit comuni."""
+
+    created_at = models.DateTimeField(_("created at"), auto_now_add=True)
+    updated_at = models.DateTimeField(_("updated at"), auto_now=True)
+
+    class Meta:
+        abstract = True
 
 
 # ---------------------------
@@ -268,29 +280,109 @@ class Cliente(models.Model):
         return self.nome
 
 
-class ContrattoCliente(models.Model):
+class ContrattoCliente(TimeStampedModel):
     id = models.BigAutoField(primary_key=True)
-    cliente = models.ForeignKey(
+    contract_id = models.CharField(
+        _("contract ID"),
+        max_length=100,
+        unique=True,
+        help_text=_("Human-friendly unique contract identifier."),
+    )
+    client = models.ForeignKey(
         Cliente,
         on_delete=models.PROTECT,
-        related_name="contratti_commerciali",
+        related_name="commercial_contracts",
     )
-    value = models.DecimalField(max_digits=12, decimal_places=2)
+    value = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))],
+        help_text=_("Total contract value as signed."),
+    )
     pool_task = ArrayField(
         base_field=models.CharField(max_length=255),
         default=list,
         blank=True,
         validators=[validate_pool_task],
     )
-    data_creazione = models.DateField()
-    data_fine = models.DateField()
+    start_date = models.DateField(_("start date"))
+    end_date = models.DateField(_("end date"), null=True, blank=True)
 
     class Meta:
         db_table = "ContrattoCliente"
-        ordering = ["-data_creazione", "-id"]
+        ordering = ["-start_date", "-id"]
+        constraints = [
+            models.CheckConstraint(
+                name="commercial_contract_dates_consistent",
+                condition=models.Q(end_date__isnull=True) | models.Q(end_date__gte=models.F("start_date")),
+            ),
+            models.CheckConstraint(
+                name="commercial_contract_value_positive",
+                condition=models.Q(value__gt=0),
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["start_date"], name="commercial_contract_start_idx"),
+        ]
 
     def __str__(self):
-        return f"Contratto commerciale {self.cliente.nome} ({self.data_creazione})"
+        return f"{self.contract_id} — {self.client.nome}"
+
+    @property
+    def is_periodic(self) -> bool:
+        return hasattr(self, "periodicity")
+
+
+class Periodicita(TimeStampedModel):
+    contract = models.OneToOneField(
+        ContrattoCliente,
+        on_delete=models.CASCADE,
+        related_name="periodicity",
+        primary_key=True,
+        verbose_name=_("contract"),
+    )
+    periodic_value = models.DecimalField(
+        _("periodic value"),
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+    period_days = models.PositiveIntegerField(
+        _("period days"),
+        validators=[MinValueValidator(1)],
+        help_text=_("Duration of the period in days."),
+    )
+    notification_days = models.PositiveIntegerField(
+        _("notification days"),
+        validators=[MinValueValidator(1)],
+        help_text=_("Number of notification lead days."),
+    )
+    first_meeting_date = models.DateField(_("first meeting date"))
+
+    class Meta:
+        verbose_name = _("periodicity")
+        verbose_name_plural = _("periodicities")
+        constraints = [
+            models.CheckConstraint(
+                name="periodicity_value_positive",
+                condition=models.Q(periodic_value__gt=0),
+            ),
+            models.CheckConstraint(
+                name="periodicity_period_days_positive",
+                condition=models.Q(period_days__gte=1),
+            ),
+            models.CheckConstraint(
+                name="periodicity_notification_days_positive",
+                condition=models.Q(notification_days__gte=1),
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.period_label} — {self.periodic_value} €"
+
+    @property
+    def period_label(self) -> str:
+        return str(_("every %(days)d days") % {"days": self.period_days})
 
 
 # ---------------------------

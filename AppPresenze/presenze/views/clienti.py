@@ -21,7 +21,7 @@ class ClienteDetailView(RetrieveUpdateDestroyAPIView):
 
     def destroy(self, request, *args, **kwargs):
         cliente = self.get_object()
-        if cliente.contratti_commerciali.exists():
+        if cliente.commercial_contracts.exists():
             return Response(
                 {"detail": "Non puoi eliminare un cliente con contratti commerciali associati."},
                 status=status.HTTP_409_CONFLICT,
@@ -31,13 +31,13 @@ class ClienteDetailView(RetrieveUpdateDestroyAPIView):
 
 
 class ContrattoClienteListCreateView(ListCreateAPIView):
-    queryset = ContrattoCliente.objects.select_related("cliente")
+    queryset = ContrattoCliente.objects.select_related("client", "periodicity")
     serializer_class = ContrattoClienteSerializer
     permission_classes = [IsAuthenticated]
 
 
 class ContrattoClienteDetailView(RetrieveUpdateDestroyAPIView):
-    queryset = ContrattoCliente.objects.select_related("cliente")
+    queryset = ContrattoCliente.objects.select_related("client", "periodicity")
     serializer_class = ContrattoClienteSerializer
     permission_classes = [IsAuthenticated]
 
@@ -47,7 +47,7 @@ class ContrattoClientePoolTaskView(APIView):
 
     def _get_contratto(self, pk):
         try:
-            return ContrattoCliente.objects.select_related("cliente").get(pk=pk)
+            return ContrattoCliente.objects.select_related("client", "periodicity").get(pk=pk)
         except ContrattoCliente.DoesNotExist:
             return None
 

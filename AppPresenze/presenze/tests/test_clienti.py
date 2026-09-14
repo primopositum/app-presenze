@@ -3,7 +3,7 @@ from datetime import date
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
-from presenze.models import Cliente, ContrattoCliente
+from presenze.models import Cliente, ContrattoCliente, Periodicita
 from .helpers import auth_client, make_utente
 
 
@@ -20,11 +20,12 @@ class ClientiContrattiApiTests(TestCase):
 
     def create_contratto(self, **overrides):
         payload = {
-            "cliente_id": self.cliente.id,
+            "contract_id": "ACME-2026-001",
+            "client_id": self.cliente.id,
             "value": "1500.00",
             "pool_task": ["PROJ-1", "PROJ-2", "PROJ-3"],
-            "data_creazione": "2026-08-01",
-            "data_fine": "2026-12-31",
+            "start_date": "2026-08-01",
+            "end_date": "2026-12-31",
         }
         payload.update(overrides)
         response = self.client.post(CONTRATTI_URL, payload, format="json")
@@ -54,18 +55,30 @@ class ClientiContrattiApiTests(TestCase):
         self.assertEqual(update_cliente.status_code, 200, update_cliente.data)
         self.assertEqual(update_cliente.data["telefono"], "3331234567")
 
-        contratto = self.create_contratto(cliente_id=beta_id)
+        contratto = self.create_contratto(client_id=beta_id)
+        self.assertIsNone(contratto["periodicity"])
+        self.assertEqual(contratto["contract_id"], "ACME-2026-001")
+        self.assertEqual(contratto["client_id"], beta_id)
         update_contratto = self.client.patch(
             f"{CONTRATTI_URL}{contratto['id']}/",
-            {"value": "2000.50"},
+            {"contract_id": "BETA-2026-001", "value": "2000.50", "end_date": "2027-01-01"},
             format="json",
         )
         self.assertEqual(update_contratto.status_code, 200, update_contratto.data)
         self.assertEqual(update_contratto.data["value"], "2000.50")
+        self.assertEqual(update_contratto.data["contract_id"], "BETA-2026-001")
+        self.assertEqual(update_contratto.data["end_date"], "2027-01-01")
 
         put_contratto = self.client.put(
             f"{CONTRATTI_URL}{contratto['id']}/",
-            {"cliente_id": beta_id, "value": "2100.00", "pool_task": ["PROJ-4"]},
+            {
+                "client_id": beta_id,
+                "contract_id": "BETA-2026-001",
+                "value": "2100.00",
+                "pool_task": ["PROJ-4"],
+                "start_date": "2026-08-01",
+                "end_date": "2027-01-01",
+            },
             format="json",
         )
         self.assertEqual(put_contratto.status_code, 200, put_contratto.data)
@@ -78,24 +91,110 @@ class ClientiContrattiApiTests(TestCase):
         response = self.client.post(
             CONTRATTI_URL,
             {
-                "cliente_id": 999999,
+                "client_id": 999999,
+                "contract_id": "UNKNOWN-2026-001",
                 "value": "1.00",
-                "data_creazione": "2026-08-01",
-                "data_fine": "2026-12-31",
+                "start_date": "2026-08-01",
+                "end_date": "2026-12-31",
             },
             format="json",
         )
         self.assertEqual(response.status_code, 400)
 
-    def test_date_non_modificabili_dopo_la_creazione(self):
-        contratto = self.create_contratto()
-        response = self.client.patch(
-            f"{CONTRATTI_URL}{contratto['id']}/",
-            {"data_fine": "2027-01-01"},
+    def test_contract_id_deve_essere_univoco(self):
+        self.create_contratto()
+        response = self.client.post(
+            CONTRATTI_URL,
+            {
+                "contract_id": "ACME-2026-001",
+                "client_id": self.cliente.id,
+                "value": "100.00",
+                "start_date": "2027-01-01",
+                "end_date": "2027-12-31",
+            },
             format="json",
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("data_fine", response.data)
+        self.assertIn("contract_id", response.data)
+
+    def test_date_modificabili_dopo_la_creazione(self):
+        contratto = self.create_contratto()
+        response = self.client.patch(
+            f"{CONTRATTI_URL}{contratto['id']}/",
+            {"end_date": "2027-01-01"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["end_date"], "2027-01-01")
+
+    def test_contratto_rifiuta_date_incoerenti(self):
+        response = self.client.post(
+            CONTRATTI_URL,
+            {
+                "client_id": self.cliente.id,
+                "contract_id": "ACME-2026-INVALID",
+                "value": "100.00",
+                "start_date": "2026-08-15",
+                "end_date": "2026-08-01",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("end_date", response.data)
+
+    def test_periodicity_create_update_and_delete(self):
+        contratto = self.create_contratto(
+            periodicity={
+                "periodic_value": "250.00",
+                "period_days": 30,
+                "first_meeting_date": "2026-08-15",
+                "notification_days": 7,
+            }
+        )
+        self.assertEqual(contratto["periodicity"]["period_days"], 30)
+        self.assertTrue(Periodicita.objects.filter(contract_id=contratto["id"]).exists())
+
+        updated = self.client.patch(
+            f"{CONTRATTI_URL}{contratto['id']}/",
+            {
+                "periodicity": {
+                    "periodic_value": "300.00",
+                    "period_days": 60,
+                    "first_meeting_date": "2026-09-15",
+                    "notification_days": 10,
+                }
+            },
+            format="json",
+        )
+        self.assertEqual(updated.status_code, 200, updated.data)
+        self.assertEqual(updated.data["periodicity"]["periodic_value"], "300.00")
+
+        unchanged = self.client.patch(
+            f"{CONTRATTI_URL}{contratto['id']}/",
+            {"value": "1600.00"},
+            format="json",
+        )
+        self.assertEqual(unchanged.status_code, 200, unchanged.data)
+        self.assertEqual(unchanged.data["periodicity"]["period_days"], 60)
+
+        deleted = self.client.patch(
+            f"{CONTRATTI_URL}{contratto['id']}/",
+            {"periodicity": None},
+            format="json",
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.data)
+        self.assertIsNone(deleted.data["periodicity"])
+        self.assertFalse(Periodicita.objects.filter(contract_id=contratto["id"]).exists())
+
+    def test_periodicity_requires_all_fields_even_on_patch(self):
+        contratto = self.create_contratto()
+        response = self.client.patch(
+            f"{CONTRATTI_URL}{contratto['id']}/",
+            {"periodicity": {"periodic_value": "250.00"}},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("periodicity", response.data)
 
     def test_pool_task_append_idempotente_e_rimozione_compatta(self):
         contratto = self.create_contratto()
@@ -114,16 +213,31 @@ class ClientiContrattiApiTests(TestCase):
         response = self.client.delete(f"{CLIENTI_URL}{self.cliente.id}/")
         self.assertEqual(response.status_code, 409)
 
+    def test_delete_contratto_elimina_anche_periodicity(self):
+        contratto = self.create_contratto(
+            periodicity={
+                "periodic_value": "250.00",
+                "period_days": 30,
+                "first_meeting_date": "2026-08-15",
+                "notification_days": 7,
+            }
+        )
+        self.assertTrue(Periodicita.objects.filter(contract_id=contratto["id"]).exists())
+        response = self.client.delete(f"{CONTRATTI_URL}{contratto['id']}/")
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Periodicita.objects.filter(contract_id=contratto["id"]).exists())
+
 
 class ContrattoClienteModelTests(TestCase):
     def test_pool_task_non_accetta_duplicati(self):
         cliente = Cliente.objects.create(nome="Acme Srl")
         contratto = ContrattoCliente(
-            cliente=cliente,
+            contract_id="ACME-2026-001",
+            client=cliente,
             value="10.00",
             pool_task=["PROJ-1", "PROJ-1"],
-            data_creazione=date(2026, 8, 1),
-            data_fine=date(2026, 12, 31),
+            start_date=date(2026, 8, 1),
+            end_date=date(2026, 12, 31),
         )
         with self.assertRaises(ValidationError):
             contratto.full_clean()
