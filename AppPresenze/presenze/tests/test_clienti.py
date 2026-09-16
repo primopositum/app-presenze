@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
@@ -59,6 +60,7 @@ class ClientiContrattiApiTests(TestCase):
         self.assertIsNone(contratto["periodicity"])
         self.assertEqual(contratto["contract_id"], "ACME-2026-001")
         self.assertEqual(contratto["client_id"], beta_id)
+        self.assertEqual(contratto["current_value"], "1500.00")
         update_contratto = self.client.patch(
             f"{CONTRATTI_URL}{contratto['id']}/",
             {"contract_id": "BETA-2026-001", "value": "2000.50", "end_date": "2027-01-01"},
@@ -229,6 +231,48 @@ class ClientiContrattiApiTests(TestCase):
 
 
 class ContrattoClienteModelTests(TestCase):
+    def test_current_value_matura_periodi_e_non_modifica_il_valore_firmato(self):
+        cliente = Cliente.objects.create(nome="Acme Srl")
+        contratto = ContrattoCliente.objects.create(
+            contract_id="ACME-2026-PERIODICO",
+            client=cliente,
+            value=Decimal("1000.00"),
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 5, 31),
+        )
+        Periodicita.objects.create(
+            contract=contratto,
+            periodic_value=Decimal("100.00"),
+            period_days=30,
+            first_meeting_date=date(2026, 1, 15),
+            notification_days=7,
+        )
+
+        self.assertTrue(contratto.is_periodic)
+        self.assertEqual(contratto.value_at(date(2026, 4, 15)), Decimal("1300.00"))
+        self.assertEqual(contratto.value_at(date(2026, 12, 31)), Decimal("1400.00"))
+        contratto.refresh_from_db()
+        self.assertEqual(contratto.value, Decimal("1000.00"))
+
+    def test_current_value_non_matura_prima_del_primo_incontro(self):
+        cliente = Cliente.objects.create(nome="Acme Srl")
+        contratto = ContrattoCliente.objects.create(
+            contract_id="ACME-2026-FUTURO",
+            client=cliente,
+            value=Decimal("1000.00"),
+            start_date=date(2026, 1, 1),
+        )
+        periodicita = Periodicita.objects.create(
+            contract=contratto,
+            periodic_value=Decimal("100.00"),
+            period_days=30,
+            first_meeting_date=date(2026, 6, 1),
+            notification_days=7,
+        )
+
+        self.assertEqual(periodicita.periods_elapsed(date(2026, 5, 27)), 0)
+        self.assertEqual(contratto.value_at(date(2026, 5, 27)), Decimal("1000.00"))
+
     def test_pool_task_non_accetta_duplicati(self):
         cliente = Cliente.objects.create(nome="Acme Srl")
         contratto = ContrattoCliente(

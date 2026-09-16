@@ -198,7 +198,11 @@
     background: linear-gradient(180deg, #f0fdf4, #ffffff 35%);
     padding: 0.9rem;
     min-width: 0;
-    min-height: 720px;
+    /* Altezza imposta dal contenitore: solo la lista dei progetti scorre. */
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
   }
 
   .head {
@@ -206,12 +210,7 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: 0.8rem;
-    margin-bottom: 0.8rem;
-    position: sticky;
-    top: 0;
-    z-index: 4;
-    background: linear-gradient(180deg, #f0fdf4 76%, rgba(240, 253, 244, 0));
-    padding-bottom: 0.35rem;
+    margin-bottom: 0.65rem;
   }
 
   .head h2 {
@@ -350,8 +349,9 @@
   }
 
   .cards-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
     margin-top: 0.25rem;
-    max-height: 68vh;
     overflow-y: auto;
     padding-right: 4px;
   }
@@ -419,13 +419,5 @@
     font-size: 0.74rem;
     color: #166534;
     font-family: var(--font-mono);
-  }
-  @media (max-width: 1200px) {
-    .cards-scroll {
-      max-height: 56vh;
-    }
-    .worklog-bar {
-      min-height: 0;
-    }
   }
 </style>

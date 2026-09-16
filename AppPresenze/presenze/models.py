@@ -332,6 +332,17 @@ class ContrattoCliente(TimeStampedModel):
     def is_periodic(self) -> bool:
         return hasattr(self, "periodicity")
 
+    def value_at(self, ref_date) -> Decimal:
+        """Restituisce il valore maturato dal contratto alla data indicata."""
+        if not self.is_periodic:
+            return self.value
+        return self.value + self.periodicity.accrued_value(ref_date, end_date=self.end_date)
+
+    @property
+    def current_value(self) -> Decimal:
+        """Valore del contratto maturato alla data locale configurata in Django."""
+        return self.value_at(timezone.localdate())
+
 
 class Periodicita(TimeStampedModel):
     contract = models.OneToOneField(
@@ -383,6 +394,19 @@ class Periodicita(TimeStampedModel):
     @property
     def period_label(self) -> str:
         return str(_("every %(days)d days") % {"days": self.period_days})
+
+    def periods_elapsed(self, ref_date, end_date=None) -> int:
+        """Numero di periodi maturati, limitato alla fine del contratto se presente."""
+        if end_date is not None and ref_date > end_date:
+            ref_date = end_date
+        days = (ref_date - self.first_meeting_date).days
+        if days < 0:
+            return 0
+        return days // self.period_days
+
+    def accrued_value(self, ref_date, end_date=None) -> Decimal:
+        """Valore aggiuntivo maturato nei periodi trascorsi."""
+        return self.periods_elapsed(ref_date, end_date) * self.periodic_value
 
 
 # ---------------------------

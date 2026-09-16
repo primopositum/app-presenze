@@ -427,6 +427,7 @@ class PeriodicitaSerializer(serializers.ModelSerializer):
 
 
 class ContrattoClienteSerializer(serializers.ModelSerializer):
+    current_value = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     client_id = serializers.PrimaryKeyRelatedField(
         source="client",
         queryset=Cliente.objects.all(),
@@ -442,6 +443,7 @@ class ContrattoClienteSerializer(serializers.ModelSerializer):
             "client",
             "client_id",
             "value",
+            "current_value",
             "pool_task",
             "start_date",
             "end_date",

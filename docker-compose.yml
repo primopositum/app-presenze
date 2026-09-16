@@ -56,6 +56,25 @@ services:
     restart: unless-stopped
     networks:
       - app-network
+  # ===========================================
+  # EMAIL CONTRACT ALERT - alert incontri periodici
+  # ===========================================
+  email_contract_alert:
+    build:
+      context: ./AppPresenze
+      dockerfile: Dockerfile
+    env_file:
+      - ./AppPresenze/.env
+    environment:
+      TZ: Europe/Rome
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["/bin/sh", "/app/scripts/email_contract_alert.sh"]
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - app-network
 
 networks:
   app-network:

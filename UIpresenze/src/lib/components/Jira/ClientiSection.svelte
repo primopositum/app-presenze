@@ -7,11 +7,13 @@
     useContrattiClientiList,
     useContrattoClienteDelete,
     useContrattoClientePoolTaskAppend,
-    useContrattoClientePoolTaskDelete,
-    useContrattoClienteUpdate
+    useContrattoClientePoolTaskDelete
   } from '$lib/hooks/useClienti';
   import type { Cliente, ContrattoCliente } from '$lib/services/clienti';
   import ClientiCreateCards from '$lib/components/Jira/ClientiCreateCards.svelte';
+  import ContractListItem from '$lib/components/Jira/ContractListItem.svelte';
+  import ContractTaskPool from '$lib/components/Jira/ContractTaskPool.svelte';
+  import EditContrattoModal from '$lib/components/Jira/EditContrattoModal.svelte';
   import DeleteConfirmCard from '$lib/components/DeleteConfirmCard.svelte';
   import ToastState from '$lib/components/ToastState.svelte';
 
@@ -22,6 +24,7 @@
   };
 
   type PoolTaskRow = JiraPoolTask & { found: boolean; costoOrario: number; guadagno: number };
+  type ClientSortDirection = 'asc' | 'desc' | null;
   type DeleteTarget =
     | { type: 'cliente'; cliente: Cliente }
     | { type: 'contratto'; contratto: ContrattoCliente };
@@ -29,38 +32,20 @@
   export let jiraTasks: JiraPoolTask[] = [];
 
   type ClienteForm = { id: number | null; nome: string; indirizzo: string; telefono: string };
-  type ContrattoForm = {
-    id: number | null;
-    contract_id: string;
-    client_id: string;
-    value: string;
-    start_date: string;
-    end_date: string;
-    pool_task: string[];
-  };
 
   const emptyClienteForm = (): ClienteForm => ({ id: null, nome: '', indirizzo: '', telefono: '' });
-  const emptyContrattoForm = (): ContrattoForm => ({
-    id: null,
-    contract_id: '',
-    client_id: '',
-    value: '',
-    start_date: '',
-    end_date: '',
-    pool_task: []
-  });
 
   let clienti: Cliente[] = [];
   let contratti: ContrattoCliente[] = [];
   let contractSearch = '';
+  let clientSortDirection: ClientSortDirection = null;
   let loading = true;
   let savingCliente = false;
-  let savingContratto = false;
   let toastOpen = false;
   let toastSuccess = true;
   let toastMessage = '';
   let clienteForm = emptyClienteForm();
-  let contrattoForm = emptyContrattoForm();
+  let editingContrattoId: number | null = null;
   let poolTaskInputs: Record<number, string> = {};
   let listsOpen = false;
   let creating = false;
@@ -69,6 +54,7 @@
   let deleting = false;
 
   $: selectedContratto = contratti.find((contratto) => contratto.id === selectedContrattoId) || null;
+  $: editingContratto = contratti.find((contratto) => contratto.id === editingContrattoId) || null;
   $: normalizedContractSearch = contractSearch.trim().toLowerCase();
   $: filteredContracts = contratti.filter((contratto) => {
     if (!normalizedContractSearch) return true;
@@ -80,6 +66,14 @@
       ...(contratto.pool_task || [])
     ].some((value) => String(value).toLowerCase().includes(normalizedContractSearch));
   });
+  $: sortedContracts = clientSortDirection
+    ? [...filteredContracts].sort((first, second) => {
+        const comparison = contractClientName(first).localeCompare(contractClientName(second), 'it', {
+          sensitivity: 'base'
+        });
+        return clientSortDirection === 'asc' ? comparison : -comparison;
+      })
+    : filteredContracts;
   $: jiraTasksByKey = new Map(jiraTasks.map((task) => [task.key.trim().toUpperCase(), task]));
   $: selectedPoolTaskRows = buildPoolTaskRows(selectedContratto, jiraTasksByKey);
   $: selectedPoolTaskTotalSeconds = selectedPoolTaskRows.reduce((total, task) => total + task.seconds, 0);
@@ -94,7 +88,7 @@
       (total, taskKey) => total + Math.max(0, Number(tasksByKey.get(taskKey.trim().toUpperCase())?.seconds || 0)),
       0
     );
-    const value = Number(contratto.value || 0);
+    const value = contractDisplayValue(contratto);
 
     return contratto.pool_task.map((taskKey) => {
       const task = tasksByKey.get(taskKey.trim().toUpperCase());
@@ -119,8 +113,32 @@
     return value.toLocaleString('it-IT', { style: 'currency', currency: 'EUR' });
   }
 
+  function contractDisplayValue(contratto: ContrattoCliente): number {
+    const currentValueText = String(contratto.current_value ?? '').trim();
+    const currentValue = Number(currentValueText);
+    if (currentValueText && Number.isFinite(currentValue)) return currentValue;
+
+    return contractSignedValue(contratto);
+  }
+
+  function contractSignedValue(contratto: ContrattoCliente): number {
+    const signedValueText = String(contratto.value ?? '').trim();
+    const signedValue = Number(signedValueText);
+    return signedValueText && Number.isFinite(signedValue) ? signedValue : 0;
+  }
+
   function contractClientName(contratto: ContrattoCliente) {
     return contratto.client?.nome || 'Cliente non disponibile';
+  }
+
+  function toggleClientSort() {
+    clientSortDirection = clientSortDirection === 'asc' ? 'desc' : 'asc';
+  }
+
+  function clientSortDescription() {
+    return clientSortDirection === 'asc'
+      ? 'Ordina i clienti dalla Z alla A'
+      : 'Ordina i clienti dalla A alla Z';
   }
 
   async function loadData() {
@@ -206,7 +224,7 @@
       } else {
         const { contratto } = deleteTarget;
         await useContrattoClienteDelete(contratto.id);
-        if (contrattoForm.id === contratto.id) contrattoForm = emptyContrattoForm();
+        if (editingContrattoId === contratto.id) editingContrattoId = null;
         if (selectedContrattoId === contratto.id) selectedContrattoId = null;
         showToast('Contratto commerciale eliminato.');
       }
@@ -220,54 +238,16 @@
     }
   }
 
-  async function saveContratto() {
-    savingContratto = true;
-    try {
-      const clienteId = Number(contrattoForm.client_id);
-      if (!Number.isInteger(clienteId) || clienteId <= 0) throw new Error('Seleziona un cliente.');
-      const normalizedContractId = String(contrattoForm.contract_id ?? '').trim();
-      if (!normalizedContractId) throw new Error('L\'ID del contratto è obbligatorio.');
-      const normalizedValue = String(contrattoForm.value ?? '').trim();
-      if (!normalizedValue) throw new Error('Il valore del contratto è obbligatorio.');
-
-      if (contrattoForm.id === null) return;
-      await useContrattoClienteUpdate(contrattoForm.id, {
-        contract_id: normalizedContractId,
-        client_id: clienteId,
-        value: normalizedValue,
-        pool_task: contrattoForm.pool_task
-      });
-
-      contrattoForm = emptyContrattoForm();
-      showToast('Contratto commerciale salvato.');
-      await loadData();
-    } catch (cause: any) {
-      showToast(String(cause?.message || cause || 'Impossibile salvare il contratto.'), false);
-    } finally {
-      savingContratto = false;
-    }
+  function editContratto(contratto: ContrattoCliente) {
+    editingContrattoId = contratto.id;
   }
 
-  function editContratto(contratto: ContrattoCliente) {
-    contrattoForm = {
-      id: contratto.id,
-      contract_id: contratto.contract_id,
-      client_id: String(contratto.client_id),
-      value: String(contratto.value),
-      start_date: contratto.start_date,
-      end_date: contratto.end_date || '',
-      pool_task: [...(contratto.pool_task || [])]
-    };
+  function closeEditContratto() {
+    editingContrattoId = null;
   }
 
   function selectContratto(contratto: ContrattoCliente) {
     selectedContrattoId = contratto.id;
-  }
-
-  function selectContrattoOnKeydown(event: KeyboardEvent, contratto: ContrattoCliente) {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    selectContratto(contratto);
   }
 
   async function appendTask(contratto: ContrattoCliente) {
@@ -275,7 +255,6 @@
     try {
       const updated = await useContrattoClientePoolTaskAppend(contratto.id, task);
       contratti = contratti.map((item) => (item.id === updated.id ? updated : item));
-      if (contrattoForm.id === updated.id) contrattoForm.pool_task = [...updated.pool_task];
       poolTaskInputs = { ...poolTaskInputs, [contratto.id]: '' };
       showToast('Task aggiunta al pool.');
     } catch (cause: any) {
@@ -287,11 +266,14 @@
     try {
       const updated = await useContrattoClientePoolTaskDelete(contratto.id, task);
       contratti = contratti.map((item) => (item.id === updated.id ? updated : item));
-      if (contrattoForm.id === updated.id) contrattoForm.pool_task = [...updated.pool_task];
       showToast('Task rimossa dal pool.');
     } catch (cause: any) {
       showToast(String(cause?.message || cause || 'Impossibile rimuovere la task.'), false);
     }
+  }
+
+  function setPoolTaskInput(contractId: number, value: string) {
+    poolTaskInputs = { ...poolTaskInputs, [contractId]: value };
   }
 
   onMount(() => {
@@ -316,7 +298,7 @@
     onNotify={showToast}
   />
 
-  {#if clienteForm.id !== null || contrattoForm.id !== null}
+  {#if clienteForm.id !== null}
   <div class="editor-grid">
     {#if clienteForm.id !== null}<form class="editor-card" on:submit|preventDefault={saveCliente}>
       <h3>Modifica cliente</h3>
@@ -328,25 +310,6 @@
         <button type="button" class="secondary" on:click={() => (clienteForm = emptyClienteForm())}>Annulla</button>
       </div>
     </form>{/if}
-
-    {#if contrattoForm.id !== null}<form class="editor-card" on:submit|preventDefault={saveContratto}>
-      <h3>Modifica contratto</h3>
-      <label>
-        Cliente
-        <select bind:value={contrattoForm.client_id} required>
-          <option value="">Seleziona cliente</option>
-          {#each clienti as cliente (cliente.id)}<option value={String(cliente.id)}>{cliente.nome}</option>{/each}
-        </select>
-      </label>
-      <label>ID contratto <input bind:value={contrattoForm.contract_id} required /></label>
-      <label>Valore <input type="number" min="0" step="0.01" bind:value={contrattoForm.value} required /></label>
-      <label>Data inizio <input type="date" bind:value={contrattoForm.start_date} required readonly={contrattoForm.id !== null} /></label>
-      <label>Data fine <input type="date" bind:value={contrattoForm.end_date} required readonly={contrattoForm.id !== null} /></label>
-      <div class="form-actions">
-        <button type="submit" disabled={savingContratto || clienti.length === 0}>{savingContratto ? 'Salvo...' : 'Salva contratto'}</button>
-        <button type="button" class="secondary" on:click={() => (contrattoForm = emptyContrattoForm())}>Annulla</button>
-      </div>
-    </form>{/if}
   </div>
   {/if}
 
@@ -355,11 +318,31 @@
     Contratti esistenti ({contratti.length})
   </button>
 
-  {#if listsOpen}<div class="data-grid">
+  {#if listsOpen}
+  <div class="data-grid">
     <aside class="contracts-tools">
       <h3>Cerca contratti</h3>
       <label class="search-label" for="contracts-search">Ricerca</label>
-      <input id="contracts-search" class="contracts-search" bind:value={contractSearch} placeholder="ID, cliente, data o task Jira" />
+      <input
+        id="contracts-search"
+        class="contracts-search"
+        bind:value={contractSearch}
+        placeholder="ID, cliente, data o task Jira"
+      />
+      <div class="sort-bar">
+        <span>Ordina per</span>
+        <button
+          type="button"
+          class="sort-client-button"
+          class:sort-desc={clientSortDirection === 'desc'}
+          aria-label={clientSortDescription()}
+          aria-pressed={clientSortDirection !== null}
+          on:click={toggleClientSort}
+        >
+          Aa
+          <span class="sort-tooltip" role="tooltip">{clientSortDescription()}</span>
+        </button>
+      </div>
       <p>{filteredContracts.length} di {contratti.length} contratti</p>
     </aside>
 
@@ -368,19 +351,20 @@
       {#if loading}<p>Caricamento...</p>
       {:else if contratti.length === 0}<p>Nessun contratto commerciale presente.</p>
       {:else if filteredContracts.length === 0}<p>Nessun contratto corrisponde alla ricerca.</p>
-      {:else}<div class="contracts-list">{#each filteredContracts as contratto (contratto.id)}
-        <section
-          class="contract-row"
-          class:contract-selected={selectedContrattoId === contratto.id}
-          role="button"
-          tabindex="0"
-          on:click={() => selectContratto(contratto)}
-          on:keydown={(event) => selectContrattoOnKeydown(event, contratto)}
-        >
-          <div class="contract-heading"><div><strong>{contratto.contract_id}</strong><span>{contractClientName(contratto)}</span><span>€ {Number(contratto.value).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span><small>{contratto.start_date} → {contratto.end_date}</small></div><div class="row-actions"><button type="button" on:click={() => editContratto(contratto)}>Modifica</button><button type="button" class="danger" on:click={() => requestDeleteContratto(contratto)}>Elimina</button></div></div>
-          <div class="pool"><span>Pool task</span><div class="task-list">{#each contratto.pool_task as task (`${contratto.id}-${task}`)}<span class="task-chip">{task}<button type="button" aria-label={`Rimuovi ${task}`} on:click={() => deleteTask(contratto, task)}>×</button></span>{/each}</div><div class="add-task"><input placeholder="PROJ-123" value={poolTaskInputs[contratto.id] || ''} on:input={(event) => (poolTaskInputs = { ...poolTaskInputs, [contratto.id]: event.currentTarget.value })} /><button type="button" on:click={() => appendTask(contratto)}>Aggiungi</button></div></div>
-        </section>
-      {/each}</div>{/if}
+      {:else}
+        <div class="contracts-list">
+          {#each sortedContracts as contratto (contratto.id)}
+            <ContractListItem
+              contract={contratto}
+              clientName={contractClientName(contratto)}
+              signedValue={contractSignedValue(contratto)}
+              currentValue={contractDisplayValue(contratto)}
+              selected={selectedContrattoId === contratto.id}
+              onSelect={() => selectContratto(contratto)}
+            />
+          {/each}
+        </div>
+      {/if}
     </article>
 
     <aside class="contract-detail" aria-live="polite">
@@ -396,24 +380,40 @@
           </div>
         </div>
         <dl class="contract-data">
-          <div><dt>ID contratto</dt><dd>{selectedContratto.contract_id}</dd></div>
-          <div><dt>Cliente</dt><dd>{contractClientName(selectedContratto)}</dd></div>
-          <div><dt>Valore</dt><dd>€ {Number(selectedContratto.value).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</dd></div>
-          <div><dt>Data inizio</dt><dd>{selectedContratto.start_date}</dd></div>
-          <div><dt>Data fine</dt><dd>{selectedContratto.end_date}</dd></div>
+          <div>
+            <dt>ID contratto</dt>
+            <dd>{selectedContratto.contract_id}</dd>
+          </div>
+          <div>
+            <dt>Cliente</dt>
+            <dd>{contractClientName(selectedContratto)}</dd>
+          </div>
+          <div>
+            <dt>Valore</dt>
+            <dd>€ {contractSignedValue(selectedContratto).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</dd>
+          </div>
+          {#if selectedContratto.periodicity}
+            <div>
+              <dt>Valore maturato</dt>
+              <dd>€ {contractDisplayValue(selectedContratto).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</dd>
+            </div>
+          {/if}
+          <div>
+            <dt>Data inizio</dt>
+            <dd>{selectedContratto.start_date}</dd>
+          </div>
+          <div>
+            <dt>Data fine</dt>
+            <dd>{selectedContratto.end_date}</dd>
+          </div>
         </dl>
-        <div class="pool">
-          <span>Pool task</span>
-          <div class="task-list">
-            {#each selectedContratto.pool_task as task (`detail-${selectedContratto.id}-${task}`)}
-              <span class="task-chip">{task}<button type="button" aria-label={`Rimuovi ${task}`} on:click={() => deleteTask(selectedContratto, task)}>×</button></span>
-            {/each}
-          </div>
-          <div class="add-task">
-            <input placeholder="PROJ-123" value={poolTaskInputs[selectedContratto.id] || ''} on:input={(event) => (poolTaskInputs = { ...poolTaskInputs, [selectedContratto.id]: event.currentTarget.value })} />
-            <button type="button" on:click={() => appendTask(selectedContratto)}>Aggiungi</button>
-          </div>
-        </div>
+        <ContractTaskPool
+          contract={selectedContratto}
+          taskInput={poolTaskInputs[selectedContratto.id] || ''}
+          onTaskInput={(value) => setPoolTaskInput(selectedContratto.id, value)}
+          onAppendTask={() => appendTask(selectedContratto)}
+          onDeleteTask={(task) => deleteTask(selectedContratto, task)}
+        />
         <section class="pool-task-results">
           <div class="pool-task-results-head">
             <div>
@@ -444,38 +444,37 @@
         <p class="detail-placeholder">Seleziona un contratto dall'elenco per visualizzarne tutti i dettagli.</p>
       {/if}
     </aside>
-  </div>{/if}
+  </div>
+  {/if}
 </section>
 
 <style>
   .clienti-section { margin: 1.25rem 0; padding: 1rem; border: 1px solid #cbd5e1; border-radius: 12px; background: #fff; }
-  .section-header, .contract-heading, .row-actions, .form-actions, .add-task { display: flex; align-items: center; flex-wrap: wrap; gap: .55rem; }
+  .section-header, .row-actions, .form-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .55rem; }
   .section-header { justify-content: space-between; margin-bottom: 1rem; }
   h2, h3, p { margin-top: 0; } h2 { font-size: 1.1rem; } h3 { font-size: .92rem; } .section-header p, .list-card > p { margin-bottom: 0; color: #64748b; font-size: .82rem; }
   button { max-width: 100%; border: 0; border-radius: 7px; padding: .42rem .65rem; color: white; background: #2563eb; cursor: pointer; font: inherit; font-size: .78rem; overflow-wrap: anywhere; } button:disabled { opacity: .6; cursor: not-allowed; } button.secondary { background: #64748b; } button.danger { background: #dc2626; } .refresh-button { background: #475569; } .list-toggle { width: 100%; display: flex; align-items: center; gap: .45rem; margin-top: 1rem; background: #334155; text-align: left; } .list-toggle span { flex: 0 0 auto; font-size: 1rem; }
   .editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
-  .data-grid { display: grid; grid-template-columns: minmax(190px, .42fr) minmax(230px, .7fr) minmax(300px, 1.15fr); align-items: start; gap: .7rem; max-height: 460px; margin-top: .7rem; padding: .1rem .45rem .1rem .1rem; overflow-y: auto; overscroll-behavior: contain; } .data-grid > * { min-width: 0; }
+  .data-grid { --contracts-panel-height: 460px; display: grid; grid-template-columns: minmax(190px, .42fr) minmax(230px, .7fr) minmax(300px, 1.15fr); align-items: start; gap: .7rem; margin-top: .7rem; padding: .1rem .45rem .1rem .1rem; } .data-grid > * { min-width: 0; }
   .editor-card, .list-card, .contracts-tools { padding: .85rem; border: 1px solid #e2e8f0; border-radius: 9px; background: #f8fafc; }
   .list-card { padding: .7rem; }
+  .contracts-card { display: grid; grid-template-rows: auto minmax(0, 1fr); height: var(--contracts-panel-height); overflow: hidden; }
   .contracts-tools { align-self: start; }
   .contracts-tools h3 { margin-bottom: .7rem; }
   .search-label { margin: 0 0 .25rem; }
   .contracts-search { min-width: 0; }
   .contracts-tools p { margin: .55rem 0 0; color: #64748b; font-size: .72rem; }
-  label { display: grid; gap: .25rem; margin: .55rem 0; color: #334155; font-size: .78rem; font-weight: 600; } input, select { width: 100%; box-sizing: border-box; padding: .43rem .5rem; border: 1px solid #cbd5e1; border-radius: 6px; background: white; color: #0f172a; font: inherit; } input[readonly] { background: #e2e8f0; color: #475569; }
+  .sort-bar { display: flex; align-items: center; gap: .45rem; margin-top: .7rem; padding-top: .7rem; border-top: 1px solid #e2e8f0; color: #475569; font-size: .72rem; font-weight: 600; }
+  .sort-client-button { position: relative; min-width: 2.1rem; padding: .32rem .45rem; background: #475569; font-weight: 700; letter-spacing: -.04em; }
+  .sort-client-button.sort-desc { background: #1d4ed8; }
+  .sort-tooltip { position: absolute; z-index: 2; top: 50%; left: calc(100% + .5rem); width: max-content; max-width: 180px; padding: .35rem .45rem; border-radius: 5px; background: #0f172a; color: #fff; font-size: .68rem; font-weight: 500; letter-spacing: normal; line-height: 1.25; opacity: 0; pointer-events: none; transform: translateY(-50%); transition: opacity .15s ease; visibility: hidden; }
+  .sort-client-button:hover .sort-tooltip, .sort-client-button:focus-visible .sort-tooltip { opacity: 1; visibility: visible; }
+  label { display: grid; gap: .25rem; margin: .55rem 0; color: #334155; font-size: .78rem; font-weight: 600; } input { width: 100%; box-sizing: border-box; padding: .43rem .5rem; border: 1px solid #cbd5e1; border-radius: 6px; background: white; color: #0f172a; font: inherit; }
   .form-actions { margin-top: .8rem; }
-  .contracts-list { display: grid; gap: .45rem; margin: 0; padding: 0; }
-  .contract-row { padding: .6rem .7rem; border: 1px solid #e2e8f0; border-radius: 7px; background: #fff; }
-  small { color: #64748b; font-size: .75rem; }
-  .contract-row { cursor: pointer; transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease; }
-  .contract-row:hover, .contract-selected { border-color: #93c5fd; background: #eff6ff; }
-  .contract-selected { box-shadow: inset 3px 0 0 #2563eb; }
-  .contracts-card .pool, .contracts-card .row-actions { display: none; }
-  .contract-heading { justify-content: space-between; } .contract-heading > div:first-child { display: grid; gap: .12rem; }
-  .contract-detail { min-height: 190px; padding: .8rem; border: 1px solid #bfdbfe; border-radius: 9px; background: #eff6ff; }
+  .contracts-list { display: grid; min-height: 0; gap: .45rem; margin: 0; padding: 0 .2rem 0 0; overflow-y: auto; overscroll-behavior: contain; }
+  .contract-detail { height: var(--contracts-panel-height); box-sizing: border-box; padding: .8rem; border: 1px solid #bfdbfe; border-radius: 9px; background: #eff6ff; overflow-y: auto; overscroll-behavior: contain; }
   .detail-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: .65rem; } .detail-heading h3 { margin: .12rem 0 0; color: #0f172a; } .detail-heading span { color: #475569; font-size: .7rem; }
   .contract-data { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .45rem; margin: .75rem 0; } .contract-data div { padding: .45rem; border-radius: 7px; background: #fff; } .contract-data dt { color: #64748b; font-size: .67rem; } .contract-data dd { margin: .18rem 0 0; color: #0f172a; font-size: .75rem; font-weight: 700; }
-  .pool { margin-top: .45rem; display: grid; gap: .35rem; font-size: .74rem; color: #475569; } .task-list { display: flex; flex-wrap: wrap; gap: .3rem; } .task-chip { display: inline-flex; align-items: center; max-width: 100%; gap: .25rem; padding: .2rem .38rem; border-radius: 999px; background: #dbeafe; color: #1e3a8a; font-family: var(--font-mono); font-size: .7rem; overflow-wrap: anywhere; } .task-chip button { flex: 0 0 auto; padding: 0; color: #1e3a8a; background: transparent; font-size: 1rem; line-height: .7; } .add-task input { flex: 1 1 9rem; min-width: 0; }
   .pool-task-results { margin-top: .85rem; padding-top: .75rem; border-top: 1px solid #bfdbfe; }
   .pool-task-results-head { display: flex; align-items: start; justify-content: space-between; gap: .6rem; } .pool-task-results-head h4, .pool-task-results-head p { margin: 0; } .pool-task-results-head h4 { color: #0f172a; font-size: .82rem; } .pool-task-results-head p, .task-results-empty { color: #64748b; font-size: .7rem; } .pool-task-results-head > strong { color: #1e3a8a; font-size: .76rem; white-space: nowrap; }
   .pool-task-result-list { display: grid; gap: .35rem; margin-top: .55rem; } .pool-task-result { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: .55rem; padding: .45rem .5rem; border: 1px solid #dbeafe; border-radius: 7px; background: #fff; } .pool-task-result > div { display: grid; min-width: 0; gap: .1rem; } .pool-task-result > div > strong { color: #1e3a8a; font-family: var(--font-mono); font-size: .7rem; } .pool-task-result > div > span { overflow: hidden; color: #334155; font-size: .7rem; text-overflow: ellipsis; white-space: nowrap; } .pool-task-result > span { color: #475569; font-size: .7rem; white-space: nowrap; } .pool-task-result > strong { color: #166534; font-size: .74rem; white-space: nowrap; } .task-not-found { border-style: dashed; opacity: .72; } .task-not-found > strong { color: #92400e; }
@@ -484,8 +483,18 @@
   .delete-confirm-backdrop { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: rgb(15 23 42 / .68); cursor: default; }
   .delete-confirm-content { position: relative; z-index: 1; width: min(100%, 390px); }
   @media (max-width: 980px) { .data-grid { grid-template-columns: minmax(180px, .45fr) minmax(0, 1fr); } .contract-detail { grid-column: 1 / -1; } }
-  @media (max-width: 760px) { .editor-grid, .data-grid { grid-template-columns: 1fr; } .data-grid { max-height: 420px; } .contract-detail { grid-column: auto; } .contract-data { grid-template-columns: 1fr; } .section-header, .contract-heading, .detail-heading { align-items: flex-start; flex-direction: column; } .pool-task-result { grid-template-columns: 1fr; gap: .25rem; } .row-actions { flex-wrap: wrap; } }
+  @media (max-width: 760px) { .editor-grid, .data-grid { grid-template-columns: 1fr; } .data-grid { --contracts-panel-height: 420px; } .contract-detail { grid-column: auto; } .contract-data { grid-template-columns: 1fr; } .section-header, .detail-heading { align-items: flex-start; flex-direction: column; } .sort-tooltip { top: calc(100% + .4rem); left: 0; transform: none; } .pool-task-result { grid-template-columns: 1fr; gap: .25rem; } .row-actions { flex-wrap: wrap; } }
 </style>
+
+{#if editingContratto}
+  <EditContrattoModal
+    contratto={editingContratto}
+    {clienti}
+    onClose={closeEditContratto}
+    onSaved={loadData}
+    onNotify={showToast}
+  />
+{/if}
 
 {#if deleteTarget}
   <div class="delete-confirm-overlay" data-history-hover-exclude>

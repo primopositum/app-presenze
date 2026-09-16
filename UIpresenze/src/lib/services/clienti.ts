@@ -17,6 +17,7 @@ export type ContrattoCliente = {
   client?: Cliente;
   client_id: number;
   value: string;
+  current_value?: string;
   pool_task: string[];
   start_date: string;
   end_date: string | null;

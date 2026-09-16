@@ -86,6 +86,9 @@ docker-compose.override.yml
 
 data/
 
+# Mock locale: contiene dati fittizi e non deve finire nel repository.
+mock/
+
 # ==========================================
 # BACKUP FILES (contain sensitive data)
 # ==========================================
