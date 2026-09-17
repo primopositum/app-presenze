@@ -1,10 +1,12 @@
 from rest_framework import serializers
 import base64
-from .models import Utente, TimeEntry, Saldo, Contratto, Trasferta, Spesa, Automobile, Signature, UtilitiesBar
+
+from .models import Utente, TimeEntry, Saldo, Contratto, Cliente, ContrattoCliente, Periodicita, Trasferta, Spesa, Automobile, Signature, UtilitiesBar
 from decimal import Decimal
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q
+from .saldo_utils import decimal_to_json_number
 
 class UtenteSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False)
@@ -16,6 +18,7 @@ class UtenteSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'is_superuser',
+            'is_staff',
             'email',
             'password',
             'nome',
@@ -27,7 +30,7 @@ class UtenteSerializer(serializers.ModelSerializer):
             'saldo',
             'contratti'
         ]
-        read_only_fields = ['data_creaz', 'data_upd', 'is_superuser']
+        read_only_fields = ['data_creaz', 'data_upd', 'is_superuser', 'is_staff']
 
     def create(self, validated_data):
         password = validated_data.pop('password', None)
@@ -269,10 +272,51 @@ class TimeEntryValidationSerializer(serializers.ModelSerializer):
         model = TimeEntry
         fields = ["validation_level"]
 
+class SaldoRecordSerializer(serializers.Serializer):
+    periodo = serializers.RegexField(regex=r"^(0[1-9]|1[0-2])-\d{4}$")
+    saldo = serializers.FloatField()
+    aggiornatoIl = serializers.DateTimeField(required=False)
+    validazioni = serializers.IntegerField(min_value=1, required=False)
+
+
 class SaldoMiniSerializer(serializers.ModelSerializer):
+    utente_id = serializers.IntegerField(read_only=True)
+    saldo = SaldoRecordSerializer(many=True, required=False)
+
     class Meta:
         model = Saldo
-        fields = ("valore_saldo_validato", "valore_saldo_sospeso")
+        fields = ("utente_id", "saldo")
+
+    def validate_saldo(self, value):
+        periods = [record["periodo"] for record in value]
+        if len(periods) != len(set(periods)):
+            raise serializers.ValidationError("Ogni periodo deve comparire una sola volta.")
+        return value
+
+    def _json_records(self, records):
+        result = []
+        for record in records:
+            next_record = {
+                "periodo": record["periodo"],
+                "saldo": decimal_to_json_number(record["saldo"]),
+                "validazioni": int(record.get("validazioni") or 1),
+            }
+            aggiornato_il = record.get("aggiornatoIl")
+            if aggiornato_il is not None:
+                next_record["aggiornatoIl"] = aggiornato_il.isoformat()
+            result.append(next_record)
+        return result
+
+    def update(self, instance, validated_data):
+        if "saldo" in validated_data:
+            instance.saldo = self._json_records(validated_data["saldo"])
+        instance.save()
+        return instance
+
+
+class SaldoPatchSerializer(serializers.Serializer):
+    periodo = serializers.RegexField(regex=r"^(0[1-9]|1[0-2])-\d{4}$")
+    saldo = serializers.FloatField()
 
 class ContrattoMiniSerializer(serializers.ModelSerializer):
     class Meta:
@@ -360,7 +404,106 @@ class SignatureSerializer(serializers.ModelSerializer):
 class UtilitiesBarSerializer(serializers.ModelSerializer):
     class Meta:
         model = UtilitiesBar
-        fields = ["id", "link", "colore", "icon", "posizione"]
-        read_only_fields = ["id", "link", "colore", "icon", "posizione"]
+        fields = ["id", "nome", "link", "colore", "icon", "posizione"]
+        read_only_fields = ["id", "nome", "link", "colore", "icon", "posizione"]
 
+
+class ClienteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Cliente
+        fields = ("id", "nome", "indirizzo", "telefono")
+        read_only_fields = ("id",)
+
+
+class PeriodicitaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Periodicita
+        fields = (
+            "periodic_value",
+            "period_days",
+            "first_meeting_date",
+            "notification_days",
+        )
+
+
+class ContrattoClienteSerializer(serializers.ModelSerializer):
+    current_value = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    client_id = serializers.PrimaryKeyRelatedField(
+        source="client",
+        queryset=Cliente.objects.all(),
+    )
+    client = ClienteSerializer(read_only=True)
+    periodicity = PeriodicitaSerializer(required=False, allow_null=True)
+
+    class Meta:
+        model = ContrattoCliente
+        fields = (
+            "id",
+            "contract_id",
+            "client",
+            "client_id",
+            "value",
+            "current_value",
+            "pool_task",
+            "start_date",
+            "end_date",
+            "periodicity",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+    def validate_pool_task(self, value):
+        normalized_tasks = []
+        for raw_task in value:
+            task = raw_task.strip() if isinstance(raw_task, str) else ""
+            if not task:
+                raise serializers.ValidationError("Ogni task deve essere una stringa non vuota.")
+            if task in normalized_tasks:
+                raise serializers.ValidationError("La stessa task non puo comparire piu volte.")
+            normalized_tasks.append(task)
+        return normalized_tasks
+
+    def validate(self, attrs):
+        periodicity = attrs.get("periodicity", serializers.empty)
+        if periodicity is not serializers.empty and periodicity is not None:
+            required_fields = ("periodic_value", "period_days", "first_meeting_date", "notification_days")
+            missing_fields = [field for field in required_fields if field not in periodicity]
+            if missing_fields:
+                raise serializers.ValidationError(
+                    {"periodicity": {field: "This field is required when periodicity is supplied." for field in missing_fields}}
+                )
+
+        start_date = attrs.get("start_date", self.instance.start_date if self.instance else None)
+        end_date = attrs.get("end_date", self.instance.end_date if self.instance else None)
+        if start_date and end_date and end_date < start_date:
+            raise serializers.ValidationError({"end_date": "End date must be on or after start date."})
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        periodicity = validated_data.pop("periodicity", None)
+        contract = ContrattoCliente.objects.create(**validated_data)
+        if periodicity:
+            Periodicita.objects.create(contract=contract, **periodicity)
+        return contract
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        periodicity = validated_data.pop("periodicity", serializers.empty)
+        for key, value in validated_data.items():
+            setattr(instance, key, value)
+        instance.save()
+
+        if periodicity is not serializers.empty:
+            if periodicity is None:
+                Periodicita.objects.filter(contract=instance).delete()
+            else:
+                Periodicita.objects.update_or_create(contract=instance, defaults=periodicity)
+            # select_related("periodicity") ha già messo in cache la relazione inversa:
+            # senza svuotarla la risposta restituirebbe la periodicità precedente.
+            periodicity_rel = instance._meta.get_field("periodicity")
+            if periodicity_rel.is_cached(instance):
+                periodicity_rel.delete_cached_value(instance)
+        return instance
 

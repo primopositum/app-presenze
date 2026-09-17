@@ -16,8 +16,14 @@
     type: string;
     preview: string | null;
   }
+
+  interface UploadComplete {
+    success: boolean;
+    message: string;
+    files: number;
+  }
  
-  const dispatch = createEventDispatcher<{ upload: UploadedFile[] }>();
+  const dispatch = createEventDispatcher<{ upload: UploadedFile[]; uploadComplete: UploadComplete }>();
 
   export let mode: 'trasferta' | 'auto' = 'trasferta';
   export let userId: number | null = null;
@@ -27,8 +33,13 @@
   export let onSavedFileClick: ((filename: string) => void | Promise<void>) | null = null;
   export let onSavedFileDelete: ((filename: string) => void | Promise<void>) | null = null;
   export let disableSavedFileDelete = false;
+  export let disabled = false;
+  // Blocca solo l'upload (dropzone/input), lasciando attivi lista e download:
+  // usata per i visualizzatori in sola lettura (es. staff su trasferte altrui).
+  export let disableUpload = false;
 
   $: resolvedUserId = userId ?? $timeEntryUser.user?.id ?? 0;
+  $: uploadBlocked = disabled || disableUpload;
 
   let isDragging = false;
   let fileInput: HTMLInputElement;
@@ -41,12 +52,56 @@
   let scontriniByTrasferta: ScontrinoFile[] = [];
   let autoPdfByCurrentMonth: AutoPdfCurrentMonthItem[] = [];
   let visibleFiles: Array<ScontrinoFile | AutoPdfCurrentMonthItem> = [];
+  let selectedAutoMonth = '';
+  let selectedAutoDate = '';
+
+  function todayIsoMonth(): string {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    return `${yyyy}-${mm}`;
+  }
+
+  function meseAnnoToMonthValue(value?: string): string {
+    const safe = (value || '').trim();
+    if (!/^\d{2}_\d{4}$/.test(safe)) return '';
+    const [mm, yyyy] = safe.split('_');
+    return `${yyyy}-${mm}`;
+  }
+
+  function monthValueToIsoDate(value: string): string {
+    const safe = (value || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(safe)) return '';
+    return `${safe}-01`;
+  }
+
+  function monthValueToMeseAnno(value: string): string {
+    const safe = (value || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(safe)) return '';
+    const [yyyy, mm] = safe.split('-');
+    return `${mm}_${yyyy}`;
+  }
+
+  function monthValueToMonthLabel(value: string): string {
+    const safe = (value || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(safe)) return '';
+    const [yyyy, mm] = safe.split('-');
+    return `${mm}/${yyyy}`;
+  }
+
+  $: autoMonthDefault = meseAnnoToMonthValue(meseAnno) || todayIsoMonth();
+  $: if (mode === 'auto' && !selectedAutoMonth) {
+    selectedAutoMonth = autoMonthDefault;
+  }
+  $: selectedAutoDate = monthValueToIsoDate(selectedAutoMonth) || monthValueToIsoDate(todayIsoMonth());
+  $: selectedAutoMeseAnno = monthValueToMeseAnno(selectedAutoMonth) || monthValueToMeseAnno(todayIsoMonth());
+  $: selectedAutoMonthLabel = monthValueToMonthLabel(selectedAutoMonth) || monthValueToMonthLabel(todayIsoMonth());
 
   $: acceptedTypes = mode === 'auto' ? ['application/pdf'] : ['image/jpeg', 'image/png', 'application/pdf'];
   $: acceptAttr = mode === 'auto' ? '.pdf,application/pdf' : '.jpg,.jpeg,.png,.pdf,application/pdf';
-  $: savedTitle = mode === 'auto' ? 'PDF auto salvati (mese corrente)' : 'Scontrini salvati';
+  $: savedTitle = mode === 'auto' ? `PDF auto salvati (${selectedAutoMonthLabel})` : 'Scontrini salvati';
   $: emptyMessage = mode === 'auto'
-    ? 'Nessun PDF auto presente per il mese corrente.'
+    ? `Nessun PDF auto presente per ${selectedAutoMonthLabel}.`
     : 'Nessun file presente per questa trasferta.';
   $: loadingMessage = mode === 'auto'
     ? 'Aggiornamento lista PDF auto...'
@@ -64,8 +119,8 @@
   }
 
   $: visibleFiles = mode === 'auto' ? autoPdfByCurrentMonth : scontriniByTrasferta;
-  $: loadKey = `${mode}:${tId ?? 'null'}:${autoId ?? 'null'}`;
-  $: if (browser && loadKey !== lastLoadKey) {
+  $: loadKey = `${mode}:${tId ?? 'null'}:${autoId ?? 'null'}:${mode === 'auto' ? selectedAutoDate : '-'}`;
+  $: if (browser && !disabled && loadKey !== lastLoadKey) {
     lastLoadKey = loadKey;
     void loadFiles();
   }
@@ -84,11 +139,12 @@
   }
 
   async function loadFiles(): Promise<void> {
+    if (disabled) return;
     loadingFiles = true;
     uploadError = null;
     try {
       if (mode === 'auto') {
-        const listPdf = usePdfAutoCurrentMonthList();
+        const listPdf = usePdfAutoCurrentMonthList(selectedAutoDate);
         const result = await listPdf();
         const payload = result.payload;
         allFiles = Array.isArray(payload)
@@ -152,7 +208,7 @@
   }
 
   async function processFiles(rawFiles: FileList | null): Promise<void> {
-    if (!rawFiles) return;
+    if (uploadBlocked || !rawFiles) return;
     const filtered = Array.from(rawFiles).filter((f) =>
       acceptedTypes.includes(f.type) || (mode === 'auto' && f.name.toLowerCase().endsWith('.pdf'))
     );
@@ -180,19 +236,21 @@
     try {
       if (mode === 'auto') {
         if (autoId === null) {
-          uploadError = 'Automobile non disponibile per il caricamento.';
+          const message = 'Automobile non disponibile per il caricamento.';
+          uploadError = message;
+          dispatch('uploadComplete', { success: false, message, files: processed.length });
           return;
         }
-        const now = new Date();
-        const currentMmYyyy = `${String(now.getMonth() + 1).padStart(2, '0')}_${now.getFullYear()}`;
-        const effectiveMeseAnno = meseAnno ?? currentMmYyyy;
+        const effectiveMeseAnno = selectedAutoMeseAnno;
         const uploadPdf = useUploadPdfAuto({ auto_id: autoId });
         for (const file of processed) {
           await uploadPdf(file.file, effectiveMeseAnno);
         }
       } else {
         if (tId === null) {
-          uploadError = 'Trasferta non disponibile per il caricamento.';
+          const message = 'Trasferta non disponibile per il caricamento.';
+          uploadError = message;
+          dispatch('uploadComplete', { success: false, message, files: processed.length });
           return;
         }
         const { uploadScontrino } = useScontrini({ tId });
@@ -201,22 +259,62 @@
         }
       }
       await loadFiles();
+      dispatch('uploadComplete', {
+        success: true,
+        message: mode === 'auto' ? 'PDF auto caricati correttamente.' : 'Giustificativi caricati correttamente.',
+        files: processed.length
+      });
     } catch (e: unknown) {
-      uploadError = e instanceof Error
+      const message = e instanceof Error
         ? e.message
         : mode === 'auto'
           ? 'Errore upload PDF auto'
           : 'Errore upload scontrino';
+      uploadError = message;
+      dispatch('uploadComplete', { success: false, message, files: processed.length });
     } finally {
       uploading = false;
     }
   }
 
   function handleClick(): void {
+    if (uploadBlocked) return;
     fileInput.click();
   }
 
+  const autoMonthNames = [
+    'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
+    'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'
+  ];
+
+  function buildAutoYearOptions(): number[] {
+    const current = new Date().getFullYear();
+    const years: number[] = [];
+    for (let y = current - 5; y <= current + 1; y++) years.push(y);
+    return years;
+  }
+  const autoYearOptions = buildAutoYearOptions();
+
+  $: autoMonthParts = /^\d{4}-\d{2}$/.test(selectedAutoMonth)
+    ? selectedAutoMonth.split('-')
+    : todayIsoMonth().split('-');
+  $: selectedAutoYear = autoMonthParts[0];
+  $: selectedAutoMonthNum = autoMonthParts[1];
+
+  function handleAutoMonthChange(e: Event): void {
+    if (disabled) return;
+    const mm = (e.target as HTMLSelectElement).value;
+    selectedAutoMonth = `${selectedAutoYear}-${mm}`;
+  }
+
+  function handleAutoYearChange(e: Event): void {
+    if (disabled) return;
+    const yyyy = (e.target as HTMLSelectElement).value;
+    selectedAutoMonth = `${yyyy}-${selectedAutoMonthNum}`;
+  }
+
   function handleFileInput(e: Event): void {
+    if (uploadBlocked) return;
     const input = e.target as HTMLInputElement;
     void processFiles(input.files);
     input.value = '';
@@ -224,16 +322,19 @@
 
   function handleDrop(e: DragEvent): void {
     e.preventDefault();
+    if (uploadBlocked) return;
     isDragging = false;
     void processFiles(e.dataTransfer?.files ?? null);
   }
 
   function handleDragOver(e: DragEvent): void {
     e.preventDefault();
+    if (uploadBlocked) return;
     isDragging = true;
   }
 
   function handleDragLeave(): void {
+    if (uploadBlocked) return;
     isDragging = false;
   }
 
@@ -294,6 +395,34 @@
 </script>
 
 <div class="mx-auto flex w-full max-w-[360px] flex-col gap-2.5 font-sans">
+  {#if mode === 'auto'}
+    <div class="flex items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
+      <span class="text-xs font-medium text-gray-600">Periodo PDF auto</span>
+      <div class="flex items-center gap-1.5">
+        <select
+          class="rounded-lg border border-gray-300 bg-white py-2 pl-2.5 pr-8 text-xxs font-medium leading-normal text-gray-700 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+          on:change={handleAutoMonthChange}
+          disabled={disabled}
+          aria-label="Mese PDF auto"
+        >
+          {#each autoMonthNames as name, i}
+            {@const mm = String(i + 1).padStart(2, '0')}
+            <option value={mm} selected={mm === selectedAutoMonthNum}>{name}</option>
+          {/each}
+        </select>
+        <select
+          class="rounded-lg border border-gray-300 bg-white py-2 pl-2.5 pr-8 text-xxs font-medium leading-normal text-gray-700 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+          on:change={handleAutoYearChange}
+          disabled={disabled}
+          aria-label="Anno PDF auto"
+        >
+          {#each autoYearOptions as year}
+            <option value={String(year)} selected={String(year) === selectedAutoYear}>{year}</option>
+          {/each}
+        </select>
+      </div>
+    </div>
+  {/if}
 
   <!-- svelte-ignore a11y-click-events-have-key-events -->
   <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -303,7 +432,7 @@
     on:dragover={handleDragOver}
     on:dragleave={handleDragLeave}
     class="relative flex cursor-pointer select-none flex-col items-center justify-center gap-2.5 rounded-2xl border-2 border-dashed px-5 py-7 transition-all duration-300 ease-out
-      {isDragging ? 'border-indigo-400 bg-indigo-50 shadow-[0_0_0_3px_rgba(99,102,241,0.16)]' : 'border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100 hover:shadow-sm'}"
+      {uploadBlocked ? 'cursor-not-allowed border-orange-200 bg-orange-50 opacity-70' : isDragging ? 'border-indigo-400 bg-indigo-50 shadow-[0_0_0_3px_rgba(99,102,241,0.16)]' : 'border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100 hover:shadow-sm'}"
   >
     <input
       bind:this={fileInput}
@@ -312,6 +441,7 @@
       accept={acceptAttr}
       class="hidden"
       on:change={handleFileInput}
+      disabled={uploadBlocked}
     />
 
     <div
@@ -327,7 +457,11 @@
       </svg>
     </div>
 
-    {#if isDragging}
+    {#if uploadBlocked}
+      <p class="text-sm font-semibold text-orange-700">
+        Caricamento bloccato in modifica
+      </p>
+    {:else if isDragging}
       <p class="text-sm font-semibold text-indigo-600" in:fade={{ duration: 120 }}>
         Rilascia i file qui
       </p>

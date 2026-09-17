@@ -3,7 +3,12 @@ from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, Permis
 from django.utils import timezone
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator
+from django.conf import settings
+from django.utils.translation import gettext_lazy as _
+from cryptography.fernet import Fernet
 import uuid
+from decimal import Decimal, ROUND_HALF_UP
 
 
 # ---------------------------
@@ -16,6 +21,31 @@ def validate_ore_sett_len_5(value):
         return
     if len(value) != 5:
         raise ValidationError("ore_sett deve contenere esattamente 5 valori (lun-ven).")
+
+
+def validate_pool_task(value):
+    """Normalizza semanticamente il pool: task non vuote e senza duplicati."""
+    if value is None:
+        return
+
+    tasks = []
+    for raw_task in value:
+        task = raw_task.strip() if isinstance(raw_task, str) else ""
+        if not task:
+            raise ValidationError("Ogni pool_task deve essere una stringa non vuota.")
+        if task in tasks:
+            raise ValidationError("pool_task non puo contenere duplicati.")
+        tasks.append(task)
+
+
+class TimeStampedModel(models.Model):
+    """Base astratta con i campi di audit comuni."""
+
+    created_at = models.DateTimeField(_("created at"), auto_now_add=True)
+    updated_at = models.DateTimeField(_("updated at"), auto_now=True)
+
+    class Meta:
+        abstract = True
 
 
 # ---------------------------
@@ -109,6 +139,7 @@ class TimeEntry(models.Model):
         SCIOPERO = 12, "Sciopero"
         FESTIVITA = 13, "Festività"
         VISITEMEDICHE = 14, "Visite mediche L.106/25"
+        RICOVERO = 15, "Ricovero presso struttura ospedaliera"
 
     class ValidationLevel(models.IntegerChoices):
         AUTO = 0, "Compilato automaticamente"
@@ -168,8 +199,7 @@ class Saldo(models.Model):
         db_column="U_ID",
     )
 
-    valore_saldo_validato = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    valore_saldo_sospeso = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    saldo = models.JSONField(default=list, blank=True)
 
     data_creaz = models.DateTimeField(default=timezone.now)
     data_upd = models.DateTimeField(auto_now=True)
@@ -230,6 +260,153 @@ class Contratto(models.Model):
         if not self.ore_sett:
             return {k: None for k in labels}
         return dict(zip(labels, self.ore_sett))
+
+
+# ---------------------------
+# Clienti e contratti commerciali
+# ---------------------------
+
+class Cliente(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    nome = models.CharField(max_length=255)
+    indirizzo = models.CharField(max_length=255, blank=True, default="")
+    telefono = models.CharField(max_length=50, blank=True, default="")
+
+    class Meta:
+        db_table = "Cliente"
+        ordering = ["nome", "id"]
+
+    def __str__(self):
+        return self.nome
+
+
+class ContrattoCliente(TimeStampedModel):
+    id = models.BigAutoField(primary_key=True)
+    contract_id = models.CharField(
+        _("contract ID"),
+        max_length=100,
+        unique=True,
+        help_text=_("Human-friendly unique contract identifier."),
+    )
+    client = models.ForeignKey(
+        Cliente,
+        on_delete=models.PROTECT,
+        related_name="commercial_contracts",
+    )
+    value = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))],
+        help_text=_("Total contract value as signed."),
+    )
+    pool_task = ArrayField(
+        base_field=models.CharField(max_length=255),
+        default=list,
+        blank=True,
+        validators=[validate_pool_task],
+    )
+    start_date = models.DateField(_("start date"))
+    end_date = models.DateField(_("end date"), null=True, blank=True)
+
+    class Meta:
+        db_table = "ContrattoCliente"
+        ordering = ["-start_date", "-id"]
+        constraints = [
+            models.CheckConstraint(
+                name="commercial_contract_dates_consistent",
+                condition=models.Q(end_date__isnull=True) | models.Q(end_date__gte=models.F("start_date")),
+            ),
+            models.CheckConstraint(
+                name="commercial_contract_value_positive",
+                condition=models.Q(value__gt=0),
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["start_date"], name="commercial_contract_start_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.contract_id} — {self.client.nome}"
+
+    @property
+    def is_periodic(self) -> bool:
+        return hasattr(self, "periodicity")
+
+    def value_at(self, ref_date) -> Decimal:
+        """Restituisce il valore maturato dal contratto alla data indicata."""
+        if not self.is_periodic:
+            return self.value
+        return self.value + self.periodicity.accrued_value(ref_date, end_date=self.end_date)
+
+    @property
+    def current_value(self) -> Decimal:
+        """Valore del contratto maturato alla data locale configurata in Django."""
+        return self.value_at(timezone.localdate())
+
+
+class Periodicita(TimeStampedModel):
+    contract = models.OneToOneField(
+        ContrattoCliente,
+        on_delete=models.CASCADE,
+        related_name="periodicity",
+        primary_key=True,
+        verbose_name=_("contract"),
+    )
+    periodic_value = models.DecimalField(
+        _("periodic value"),
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+    period_days = models.PositiveIntegerField(
+        _("period days"),
+        validators=[MinValueValidator(1)],
+        help_text=_("Duration of the period in days."),
+    )
+    notification_days = models.PositiveIntegerField(
+        _("notification days"),
+        validators=[MinValueValidator(1)],
+        help_text=_("Number of notification lead days."),
+    )
+    first_meeting_date = models.DateField(_("first meeting date"))
+
+    class Meta:
+        verbose_name = _("periodicity")
+        verbose_name_plural = _("periodicities")
+        constraints = [
+            models.CheckConstraint(
+                name="periodicity_value_positive",
+                condition=models.Q(periodic_value__gt=0),
+            ),
+            models.CheckConstraint(
+                name="periodicity_period_days_positive",
+                condition=models.Q(period_days__gte=1),
+            ),
+            models.CheckConstraint(
+                name="periodicity_notification_days_positive",
+                condition=models.Q(notification_days__gte=1),
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.period_label} — {self.periodic_value} €"
+
+    @property
+    def period_label(self) -> str:
+        return str(_("every %(days)d days") % {"days": self.period_days})
+
+    def periods_elapsed(self, ref_date, end_date=None) -> int:
+        """Numero di periodi maturati, limitato alla fine del contratto se presente."""
+        if end_date is not None and ref_date > end_date:
+            ref_date = end_date
+        days = (ref_date - self.first_meeting_date).days
+        if days < 0:
+            return 0
+        return days // self.period_days
+
+    def accrued_value(self, ref_date, end_date=None) -> Decimal:
+        """Valore aggiuntivo maturato nei periodi trascorsi."""
+        return self.periods_elapsed(ref_date, end_date) * self.periodic_value
 
 
 # ---------------------------
@@ -332,8 +509,15 @@ class Trasferta(models.Model):
     def totale_spese(self):
         if not self.pk:
             return 0
-        totale = self.spese.aggregate(totale=models.Sum("importo"))["totale"]
-        return totale or 0
+        totale = Decimal("0.00")
+        for spesa in self.spese.select_related("trasferta__automobile").all():
+            value = Decimal(str(spesa.importo or Decimal("0.00")))
+            if spesa.type == Spesa.TrasfertaType.KM:
+                coeff = Decimal(str(self.automobile.coefficiente or Decimal("0.00"))) if self.automobile else Decimal("0.00")
+                totale += (value * coeff).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            else:
+                totale += value
+        return totale
 
 
 # ---------------------------
@@ -393,7 +577,7 @@ class Spesa(models.Model):
 class UtilitiesBar(models.Model):
     class IconName(models.TextChoices):
         CONFLUENCE = "faConfluence", "Confluence"
-        JIRA = "faJira", "Jira"
+        JIRA = "faJira", "Jira" 
         CIRCLE = "faCircle", "Circle"
         AMAZON = "faAmazon", "Amazon"
         AWS = "faAws", "AWS"
@@ -404,8 +588,11 @@ class UtilitiesBar(models.Model):
         MICROSOFT = "faMicrosoft", "Microsoft"
         NOTION = "faNotion", "Notion"
         UBUNTU = "faUbuntu", "Ubuntu"
+        BOOK_OPEN = "faBookOpen", "Book Open"
+        MAGNIFYING_GLASS = "faMagnifyingGlass", "Magnifying Glass"
 
     id = models.BigAutoField(primary_key=True, db_column="UB_ID")
+    nome = models.CharField(max_length=100, blank=True)
     link = models.URLField(max_length=500)
     colore = models.CharField(max_length=20, help_text="Colore hex, esempio: #ffffff")
     icon = models.CharField(
@@ -422,7 +609,7 @@ class UtilitiesBar(models.Model):
         ordering = ["posizione", "id"]
 
     def __str__(self):
-        return f"UtilitiesBar #{self.id} - pos {self.posizione}"
+        return self.nome or f"UtilitiesBar #{self.id} - pos {self.posizione}"
 
 
 # ---------------------------
@@ -487,4 +674,60 @@ class SignatureEvent(models.Model):
             models.Index(fields=["user", "-created_at"], name="SignatureEv_user_id_4c4f1c_idx"),
             models.Index(fields=["event_type", "-created_at"], name="SignatureEv_event_t_c75314_idx"),
         ]
+
+# ---------------------------
+# JiraGlobals / JiraCredentials
+# ---------------------------
+
+class JiraGlobals(models.Model):
+    domain = models.CharField(max_length=255)
+    filters = ArrayField(
+        base_field=models.CharField(max_length=255),
+        default=list,
+        blank=True,
+        help_text="Filtri globali Jira (array di stringhe)",
+    )
+    JiraControl = models.BooleanField(
+        default=True,
+        help_text="Abilita/disabilita il controllo ore Jira nella generazione PDF presenze.",
+    )
+
+    class Meta:
+        db_table = "JiraGlobals"
+
+    def __str__(self):
+        return f"JiraGlobals ({self.domain})"
+
+
+def _get_fernet():
+    return Fernet(settings.ENCRYPTION_KEY)
+
+
+def encrypt_token(token: str) -> str:
+    return _get_fernet().encrypt(token.encode()).decode()
+
+
+def decrypt_token(token_enc: str) -> str:
+    return _get_fernet().decrypt(token_enc.encode()).decode()
+
+
+class JiraCredentials(models.Model):
+    utente       = models.OneToOneField(
+                       Utente,
+                       on_delete=models.CASCADE,
+                       related_name='jira_credentials'
+                   )
+    jira_email   = models.CharField(max_length=255)
+    _jira_token  = models.TextField(db_column='jira_token')
+
+    @property
+    def jira_token(self):
+        return decrypt_token(self._jira_token)
+
+    @jira_token.setter
+    def jira_token(self, value):
+        self._jira_token = encrypt_token(value)
+
+    def __str__(self):
+        return f"Jira credentials for {self.utente.email}"
 

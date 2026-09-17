@@ -1,0 +1,168 @@
+import {
+  jiraSearch,
+  jiraCompletedHistory,
+  jiraFiltersGet,
+  jiraFiltersPost,
+  jiraIssueTime,
+  jiraWorklogsByYear,
+  jiraWorklogsByYearStream,
+  jiraStatuses,
+  jiraAddWorklog,
+  jiraUpdateState,
+  jiraUpdateWorklog,
+  jiraDeleteWorklog,
+  jiraUpdateIssueEstimate,
+  formatScopePreset,
+  parseScopePreset,
+  type JiraScopeType,
+  type JiraIssueTimeFilter,
+  type JiraCompletedHistoryResponse,
+  type JiraYearWorklogResponse,
+  type JiraYearWorklogProgress,
+  type JiraStatusesResponse,
+  type JiraUpdateStatePayload,
+  type JiraWorklogPayload,
+  type JiraIssueEstimatePayload,
+} from '$lib/services/jira';
+
+export type JiraSearchInput = {
+  scopeType?: 'project' | 'filter' | 'labels';
+  scopeValue: string;
+  assigneeFilter: string;
+  maxResults?: number;
+};
+
+export async function useJiraSearch(input: JiraSearchInput) {
+  const rawScopeType = input.scopeType;
+  const rawScopeValue = String(input.scopeValue ?? '').trim();
+  const parsedPreset = parseScopePreset(rawScopeValue);
+  const scopeType = parsedPreset?.type ?? rawScopeType ?? inferScopeType(rawScopeValue);
+  const scopeValue = parsedPreset?.value ?? rawScopeValue;
+
+  if (!scopeValue) {
+    if (scopeType === 'filter') throw new Error('Filtro Jira obbligatorio');
+    if (scopeType === 'labels') throw new Error('Label Jira obbligatoria');
+    throw new Error('Project key obbligatoria');
+  }
+
+  let baseJql = '';
+  if (scopeType === 'filter') {
+    baseJql = `filter=${/^\d+$/.test(scopeValue) ? scopeValue : `"${scopeValue.replace(/"/g, '\\"')}"`}`;
+  } else if (scopeType === 'labels') {
+    baseJql = `labels=${/^\d+$/.test(scopeValue) ? scopeValue : `"${scopeValue.replace(/"/g, '\\"')}"`}`;
+  } else {
+    baseJql = `project=${scopeValue}`;
+  }
+
+  const jql = `${baseJql}${input.assigneeFilter ? ` AND assignee=${input.assigneeFilter}` : ''} ORDER BY created DESC`;
+  const fields =
+    'summary,status,priority,assignee,created,updated,issuetype,project,comment,timetracking,timespent,aggregatetimespent,timeestimate,aggregatetimeestimate,timeoriginalestimate,aggregatetimeoriginalestimate';
+
+  return jiraSearch({
+    jql,
+    fields,
+    // 0 = fetch all pages lato backend
+    maxResults: Number(input.maxResults ?? 0)
+  });
+}
+
+function inferScopeType(scopeValue: string): 'project' | 'filter' | 'labels' {
+  const value = String(scopeValue || '').trim();
+  if (!value) return 'filter';
+  if (/^(labels|space)\s*=/i.test(value)) return 'labels';
+  if (/^filter\s*=/i.test(value)) return 'filter';
+  if (/^project\s*=/i.test(value)) return 'project';
+  if (/^\d+$/.test(value)) return 'filter';
+  // Tipico project key Jira: niente spazi, uppercase + numeri/underscore.
+  if (!/\s/.test(value) && /^[A-Z][A-Z0-9_]*$/.test(value)) return 'project';
+  return 'filter';
+}
+
+export async function useJiraFiltersGet() {
+  return jiraFiltersGet();
+}
+
+export async function useJiraFiltersPost(scopeType: JiraScopeType, scopeValue: string, append = true) {
+  const filter = formatScopePreset(scopeType, scopeValue);
+  return jiraFiltersPost(filter, append);
+}
+
+export async function useJiraIssueTime(issueKey: string, filter: JiraIssueTimeFilter = {}) {
+  return jiraIssueTime(issueKey, filter);
+}
+
+export async function useJiraWorklogsByYear(
+  year: number | string,
+  month: number | string = 'all'
+): Promise<JiraYearWorklogResponse> {
+  const parsedYear = Number(String(year ?? '').trim());
+  if (!Number.isInteger(parsedYear) || parsedYear < 1900 || parsedYear > 3000) {
+    throw new Error('Anno non valido');
+  }
+  return jiraWorklogsByYear(parsedYear, month);
+}
+
+export async function useJiraWorklogsByYearStream(
+  year: number | string,
+  month: number | string = 'all',
+  onProgress?: (progress: JiraYearWorklogProgress) => void,
+  signal?: AbortSignal
+): Promise<JiraYearWorklogResponse> {
+  const parsedYear = Number(String(year ?? '').trim());
+  if (!Number.isInteger(parsedYear) || parsedYear < 1900 || parsedYear > 3000) {
+    throw new Error('Anno non valido');
+  }
+  return jiraWorklogsByYearStream(parsedYear, month, onProgress, signal);
+}
+
+export async function useJiraCompletedHistory(
+  year: number | string = 'all',
+  month: number | string = 'all',
+  // Vedi jiraCompletedHistory: default senza filtro di stato.
+  completed = false
+): Promise<JiraCompletedHistoryResponse> {
+  const rawYear = String(year ?? 'all').trim() || 'all';
+  if (rawYear.toLowerCase() === 'all') {
+    return jiraCompletedHistory('all', month, completed);
+  }
+
+  const parsedYear = Number(rawYear);
+  if (!Number.isInteger(parsedYear) || parsedYear < 1900 || parsedYear > 3000) {
+    throw new Error('Anno non valido');
+  }
+  return jiraCompletedHistory(parsedYear, month, completed);
+}
+
+export async function useJiraStatuses(scopeType?: JiraScopeType, scopeValue = ''): Promise<JiraStatusesResponse> {
+  const rawScopeValue = String(scopeValue ?? '').trim();
+  const parsedPreset = parseScopePreset(rawScopeValue);
+  const resolvedType = parsedPreset?.type ?? scopeType ?? inferScopeType(rawScopeValue);
+  const resolvedValue = parsedPreset?.value ?? rawScopeValue;
+  return jiraStatuses(resolvedType, resolvedValue);
+}
+
+export async function useJiraAddWorklog(issueKey: string, payload: JiraWorklogPayload) {
+  return jiraAddWorklog(issueKey, payload);
+}
+
+export async function useJiraUpdateState(workKey: string, payload: JiraUpdateStatePayload) {
+  if (!String(workKey || '').trim()) {
+    throw new Error('Work key obbligatoria');
+  }
+  return jiraUpdateState(workKey, payload);
+}
+
+export async function useJiraUpdateWorklog(issueKey: string, worklogId: string | number, payload: JiraWorklogPayload) {
+  return jiraUpdateWorklog(issueKey, worklogId, payload);
+}
+
+export async function useJiraDeleteWorklog(issueKey: string, worklogId: string | number) {
+  return jiraDeleteWorklog(issueKey, worklogId);
+}
+
+export async function useJiraUpdateIssueEstimate(issueKey: string, payload: JiraIssueEstimatePayload) {
+  return jiraUpdateIssueEstimate(issueKey, payload);
+}
+
+export { parseScopePreset, formatScopePreset };
+export type { JiraScopeType };

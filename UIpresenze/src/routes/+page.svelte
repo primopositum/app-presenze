@@ -2,7 +2,9 @@
   import { goto } from '$app/navigation';
   import CardImage from '$lib/components/CardImage.svelte';
   import IconLinkBar from '$lib/components/IconLinkBar.svelte';
+  import JiraPersonalTask from '$lib/components/Jira/JiraPersonalTask.svelte';
   import { auth } from '$lib/stores/auth';
+  import { jiraControl } from '$lib/stores/jiraControl';
 
   let user: any = null;
   let isAuthed = false;
@@ -10,6 +12,11 @@
   $: isAuthed = $auth.isAuthed;
   
    const redirect = (route : string) => {
+    if (route === 'JiraBoard') {
+      if (!$jiraControl.loaded || !$jiraControl.enabled) return;
+      goto('/JiraBoard', { state: { route } });
+      return;
+    }
     if (user?.is_superuser){goto(`/preMenu`, {state : {route}});}
     else{goto(`/${route}`, {state : {route}});}
   }
@@ -30,19 +37,31 @@
   <CardImage
     caption="Accedi all'area delle trasferte"
     alt="trasferte"
-    on:click = {()=>{goto('/trasferte')}}
+    on:click = {()=>{redirect('trasferte')}}
     imageSrc="/trasferte.png"
        />
+  {#if $jiraControl.loaded && $jiraControl.enabled}
+    <CardImage
+      caption="Accedi all'area delle task"
+      alt="Task"
+      on:click = {()=>{redirect('JiraBoard')}}
+      imageSrc="/business.png"
+      />
+  {/if}
   <CardImage
     caption="Accedi all'area delle presenze"
     alt="presenze"
-    on:click = {()=>{redirect('presences')}}
+    on:click = {()=>{redirect('Presenze')}}
     imageSrc="/presence.png"
      />
+   
 </div>
 <div >
   <IconLinkBar></IconLinkBar>
 </div>
+{#if isAuthed && $jiraControl.loaded && $jiraControl.enabled}
+  <JiraPersonalTask />
+{/if}
 </main>
 
 

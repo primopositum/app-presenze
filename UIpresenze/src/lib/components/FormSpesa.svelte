@@ -94,10 +94,9 @@
         return;
       }
 
-      const parsedImporto = Number((parsedKm * parsedCoeff).toFixed(2));
       dispatch('submit', {
         type,
-        importo: parsedImporto,
+        importo: Number(parsedKm.toFixed(2)),
         kmPercorsi: parsedKm,
         coefficiente: parsedCoeff,
         coefficienteChanged: parsedCoeff !== Number(coefficienteIniziale || 0),

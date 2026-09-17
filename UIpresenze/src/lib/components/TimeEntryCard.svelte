@@ -28,6 +28,7 @@
   export let defaultType = 1;
   export let defaultValidationLevel = 0;
   export let defaultHours = 8;
+  export let forbidType3 = false;
   
   const { openForm } = useTimeEntryFormContext();
   function parseYmd(dateStr: string) {
@@ -67,6 +68,7 @@
     if (t === 12) return 'Sciopero';
     if (t === 13) return 'Festivita';
     if (t === 14) return 'Visite mediche L.106/25';
+    if (t === 15) return 'Ricovero presso struttura ospedaliera';
     return `Tipo ${t}`;
   }
 
@@ -87,13 +89,21 @@
     .sort(); // YYYY-MM-DD si ordina bene
 
   // ---------- handlers ----------
+  function getForbiddenTypesForDate(dateStr: string) {
+    if (forbidType3) return [3];
+    const entriesForDate = grouped[dateStr] || [];
+    return entriesForDate.some((te) => te.type === 5) ? [3] : [];
+  }
+
   function handleAdd(dateStr: string) {
+    const forbiddenTypes = getForbiddenTypesForDate(dateStr);
     openForm({
       mode: 'create',
       date: dateStr,
       utenteId: $timeEntryUser.user?.id ?? null,
       type: defaultType,
-      oreTot: defaultHours
+      oreTot: defaultHours,
+      forbiddenTypes
     });
   }
   function handleUpdate(te: TimeEntry) { 

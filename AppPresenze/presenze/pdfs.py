@@ -3,11 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from importlib import import_module
 from io import BytesIO
 from pathlib import Path
 from typing import Dict, List, Tuple
 from collections import defaultdict
 import calendar
+import re
+import requests
 from datetime import timedelta
 from dateutil.relativedelta import relativedelta
 
@@ -24,7 +27,7 @@ from rest_framework.response import Response
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import NameObject, BooleanObject
 
-from .models import TimeEntry, Utente
+from .models import JiraGlobals, TimeEntry, Utente
 
 
 # --- Config ---
@@ -52,6 +55,13 @@ ITALIAN_MONTHS = [
     "novembre",
     "dicembre",
 ]
+
+
+def _safe_filename_part(value) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"\s+", "_", text)
+    text = re.sub(r"[^A-Za-z0-9_.-]", "", text)
+    return text or "utente"
 
 
 @dataclass
@@ -163,6 +173,17 @@ def build_days_data(entries: List[TimeEntry], start_date, end_date) -> Tuple[Dic
     return out, internal_total
 
 
+def total_work_hours_for_jira_check(entries: List[TimeEntry]) -> Decimal:
+    work_entry_types = (
+        TimeEntry.EntryType.LAVORO_ORDINARIO,
+        TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
+    )
+    return sum(
+        (Decimal(te.ore_tot) for te in entries if te.type in work_entry_types),
+        Decimal("0.00"),
+    )
+
+
 def fill_pdf(template_path: Path, full_name: str, days_data: Dict[int, DayData]) -> BytesIO:
     if not template_path.exists():
         raise Http404(f"Template PDF non trovato: {template_path}")
@@ -225,6 +246,42 @@ def fill_pdf(template_path: Path, full_name: str, days_data: Dict[int, DayData])
     writer.write(out)
     out.seek(0)
     return out
+
+
+def _jira_http_error_payload(exc: requests.exceptions.HTTPError) -> tuple[dict, int | None]:
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+
+    try:
+        jira_detail = response.json() if response is not None else {}
+    except Exception:
+        jira_detail = {}
+
+    if not isinstance(jira_detail, dict):
+        jira_detail = {"raw": jira_detail}
+
+    error_messages = jira_detail.get("errorMessages")
+    field_errors = jira_detail.get("errors")
+    message = jira_detail.get("error") or jira_detail.get("message")
+
+    if not message and isinstance(error_messages, list) and error_messages:
+        message = "; ".join(str(item) for item in error_messages)
+    if not message and isinstance(field_errors, dict) and field_errors:
+        message = "; ".join(f"{field}: {detail}" for field, detail in field_errors.items())
+
+    fallback_messages = {
+        400: "Richiesta Jira non valida durante il controllo ore.",
+        401: "Token Jira non valido o scaduto. Aggiorna le credenziali Jira.",
+        403: "Permessi Jira insufficienti per leggere i worklog del mese.",
+    }
+    message = str(message or fallback_messages.get(status_code) or f"Errore Jira HTTP {status_code}")
+
+    return {
+        "detail": message,
+        "source": "jira",
+        "jira_status": status_code,
+        "jira_error": jira_detail,
+    }, status_code
 
 
 class PresenzeMeseScorsoPDFView(APIView):
@@ -290,17 +347,47 @@ class PresenzeMeseScorsoPDFView(APIView):
 
         # Aggrega valori
         days_data, total_hours_internal = build_days_data(entries, start_date, end_date)
+        jira_check_hours = total_work_hours_for_jira_check(entries)
 
         contratto = user.contratti.filter(is_active=True).first()
         if contratto and contratto.ore_sett:
             expected_hours = expected_hours_for_month(
-        start_date=start_date,
-        end_date=end_date,
-        ore_sett=[Decimal(x) for x in contratto.ore_sett],
-    )
+                start_date=start_date,
+                end_date=end_date,
+                ore_sett=[Decimal(x) for x in contratto.ore_sett],
+            )
             if total_hours_internal.quantize(Decimal("0.01")) != expected_hours.quantize(Decimal("0.01")):
                 raise ValidationError(
                     {"detail": f"Ore inserite ({total_hours_internal:.2f}) non coerenti con il contratto ({expected_hours:.2f})."}
+                )
+
+        jira_global = JiraGlobals.objects.order_by("id").first()
+        jira_control_enabled = True if jira_global is None else bool(getattr(jira_global, "JiraControl", True))
+
+        if jira_control_enabled:
+            try:
+                jira_views = import_module("presenze.views.jira")
+                jira_payload = jira_views._jira_user_monthly_worklog_payload(
+                    user=user,
+                    target_year=start_date.year,
+                    target_month=start_date.month,
+                )
+            except ValueError as exc:
+                raise ValidationError({"detail": f"Controllo ore Jira non disponibile: {exc}"})
+            except requests.exceptions.HTTPError as exc:
+                error_payload, jira_status = _jira_http_error_payload(exc)
+                if jira_status in (400, 401, 403):
+                    return Response(error_payload, status=jira_status)
+                raise ValidationError({"detail": error_payload["detail"]})
+            except Exception as exc:
+                raise ValidationError({"detail": f"Errore durante il controllo ore Jira: {exc}"})
+
+            jira_total_seconds = int(jira_payload.get("total_seconds") or 0)
+            jira_hours = (Decimal(jira_total_seconds) / Decimal("3600")).quantize(Decimal("0.01"))
+            user_hours = jira_check_hours.quantize(Decimal("0.01"))
+            if jira_hours < user_hours:
+                raise ValidationError(
+                    {"detail": f"Ore Jira ({jira_hours:.2f}) inferiori alle ore effettive di lavoro inserite ({user_hours:.2f})."}
                 )
 
         nome = getattr(user, "nome", "") or ""
@@ -309,5 +396,10 @@ class PresenzeMeseScorsoPDFView(APIView):
 
         pdf_io = fill_pdf(PDF_TEMPLATE_PATH, full_name, days_data)
 
-        filename = f"presenze_{user.nome}_{user.cognome}_{start_date.strftime('%Y_%m')}.pdf"
+        nome_file = _safe_filename_part(user.nome)
+        cognome_file = _safe_filename_part(user.cognome)
+        if is_super:
+            nome_file = f"{nome_file}[{user.id}]"
+            cognome_file = f"{cognome_file}[{user.id}]"
+        filename = f"presenze_{nome_file}_{cognome_file}_{start_date.strftime('%Y_%m')}.pdf"
         return FileResponse(pdf_io, as_attachment=True, filename=filename)

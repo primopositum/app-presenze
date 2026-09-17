@@ -7,10 +7,17 @@
     import { goto } from '$app/navigation';
     import LoaderOverlay from '$lib/components/loader/LoaderOverlay.svelte';
     import ErrorCard from '$lib/components/ErrorCard.svelte';
+    import ToastState from '$lib/components/ToastState.svelte';
+    import GenericButtton from '$lib/components/GenericButtton.svelte';
     import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
-    import { faDownload } from '@fortawesome/free-solid-svg-icons';
+    import { faDownload, faRotate } from '@fortawesome/free-solid-svg-icons';
     import { auth } from '$lib/stores/auth';
     import { fetchUsers, type User } from '$lib/services/users';
+    import { getAutomobili, updateAutomobileCoeff, type Automobile } from '$lib/services/automobili';
+    import {
+      getFavoriteAutomobileId,
+      sortFavoriteAutomobileFirst
+    } from '$lib/services/automobilePreference';
 
     let items: Trasferta[] = [];
     let loading: boolean = false;
@@ -24,9 +31,21 @@
     let selectedDossierUserId = '';
     let usersLoaded = false;
     let usersLoading = false;
+    let automobili: Automobile[] = [];
+    let autoOptions: Array<{ id: number; label: string }> = [];
+    let selectedAutoId = '';
+    let coefficienteInput = '';
+    let autoLoading = false;
+    let coefficienteSaving = false;
+    let autoError: string | null = null;
+    let toastOpen = false;
+    let toastSuccess = true;
+    let toastMessage = '';
+    let favoriteAutoId = '';
 
     $: isSuperuser = !!$auth.user?.is_superuser;
     $: currentUserId = $auth.user?.id ?? null;
+    $: authRoleKey = `${$auth.user?.id ?? ''}:${$auth.user?.is_staff ?? false}:${$auth.user?.is_superuser ?? false}`;
     $: if (!isSuperuser && currentUserId) {
       selectedDossierUserId = String(currentUserId);
     }
@@ -48,6 +67,90 @@
     }
     function openTrasferta(item: Trasferta) {
         goto(`/trasferte/${item.id}`, { state: { trasf: item } });
+    }
+
+    function getAutoId(auto: Automobile): number | null {
+      return auto.id ?? auto.a_id ?? auto.A_ID ?? null;
+    }
+
+    function getAutoLabel(auto: Automobile): string {
+      const parts = [auto.marca, auto.alimentazione].filter(Boolean);
+      return parts.join(' - ');
+    }
+
+    function syncCoeffFromSelectedAuto() {
+      const selected = automobili.find((auto) => String(getAutoId(auto)) === selectedAutoId);
+      coefficienteInput = selected ? String(selected.coefficiente ?? '') : '';
+    }
+
+    async function loadAutomobili() {
+      autoLoading = true;
+      autoError = null;
+      try {
+        const list = await getAutomobili({ is_active: true });
+        favoriteAutoId = getFavoriteAutomobileId();
+        const source = list.length ? list : await getAutomobili();
+        automobili = sortFavoriteAutomobileFirst(source, favoriteAutoId, getAutoId);
+        if (!selectedAutoId && automobili.length > 0) {
+          const firstId = getAutoId(automobili[0]);
+          selectedAutoId = firstId === null ? '' : String(firstId);
+        }
+        syncCoeffFromSelectedAuto();
+      } catch (e: any) {
+        autoError = e?.message || 'Errore caricamento automobili';
+        automobili = [];
+      } finally {
+        autoLoading = false;
+      }
+    }
+
+    function handleAutomobileChange(event: Event) {
+      selectedAutoId = (event.currentTarget as HTMLSelectElement).value;
+      autoError = null;
+      syncCoeffFromSelectedAuto();
+    }
+
+    function showToast(message: string, success = true) {
+      toastSuccess = success;
+      toastMessage = message;
+      toastOpen = false;
+      setTimeout(() => {
+        toastOpen = true;
+      }, 0);
+    }
+
+    async function handleCoefficienteChange(event: Event) {
+      const value = (event.currentTarget as HTMLInputElement).value.trim();
+      coefficienteInput = value;
+
+      if (!selectedAutoId) {
+        autoError = 'Seleziona prima una automobile';
+        return;
+      }
+
+      const coeff = Number(value.replace(',', '.'));
+      if (!Number.isFinite(coeff) || coeff < 0) {
+        autoError = 'Inserisci un coefficiente numerico valido';
+        return;
+      }
+
+      coefficienteSaving = true;
+      autoError = null;
+      try {
+        const updatedAuto = await updateAutomobileCoeff(selectedAutoId, coeff);
+        const updatedAutoId = getAutoId(updatedAuto);
+        if (updatedAutoId !== null) {
+          automobili = automobili.map((auto) =>
+            String(getAutoId(auto)) === String(updatedAutoId) ? updatedAuto : auto
+          );
+        }
+        coefficienteInput = String(updatedAuto.coefficiente ?? coeff);
+        showToast('Coefficiente automobile aggiornato.');
+      } catch (e: any) {
+        autoError = e?.message || 'Errore aggiornamento coefficiente automobile';
+      } finally {
+        coefficienteSaving = false;
+      }
     }
 
     function normalizeUsers(payload: unknown): User[] {
@@ -135,9 +238,19 @@
 
     onMount(() => {
         mounted = true;
+        favoriteAutoId = getFavoriteAutomobileId();
+        void loadAutomobili();
     });
 
+    $: autoOptions = automobili
+      .map((auto) => {
+        const id = getAutoId(auto);
+        return id === null ? null : { id, label: getAutoLabel(auto) };
+      })
+      .filter((option): option is { id: number; label: string } => option !== null);
+
     $: if (mounted) {
+        authRoleKey;
         $timeEntryReload;
         loadTrasferte();
     }
@@ -148,12 +261,17 @@
 
     <header class="topbar">
         <div class="actions">
-        <button class="ghost" type="button" on:click={() => (showForm = !showForm)}>
-            {showForm ? 'Creating..' : 'Nuova'}
-        </button>
-        <button class="refresh" type="button" on:click={loadTrasferte}>
-            Aggiorna
-        </button>
+        <GenericButtton
+          color="#f97316"
+          label={showForm ? 'Chiudi creazione trasferta' : 'Nuova trasferta'}
+          title={showForm ? 'Chiudi creazione trasferta' : 'Nuova trasferta'}
+          on:click={() => (showForm = !showForm)}
+        >
+          +
+        </GenericButtton>
+        <GenericButtton color="#374151" label="Aggiorna trasferte" title="Aggiorna trasferte" on:click={loadTrasferte}>
+          <FontAwesomeIcon icon={faRotate} class="text-base" />
+        </GenericButtton>
         </div>
     </header>
 
@@ -177,6 +295,31 @@
                 </select>
               </label>
             {/if}
+            <label class="field">
+              <span>Automobile</span>
+              <select
+                bind:value={selectedAutoId}
+                on:change={handleAutomobileChange}
+                disabled={autoLoading || coefficienteSaving}
+              >
+                <option value="">Seleziona automobile</option>
+                {#each autoOptions as option (option.id)}
+                  <option value={String(option.id)}>{option.label}</option>
+                {/each}
+              </select>
+            </label>
+            <label class="field coeff-field">
+              <span>Coeff.</span>
+              <input
+                type="number"
+                min="0"
+                step="0.0001"
+                bind:value={coefficienteInput}
+                on:change={handleCoefficienteChange}
+                disabled={!selectedAutoId || autoLoading || coefficienteSaving}
+                placeholder="0.0000"
+              />
+            </label>
           </div>
           <button
             class="refresh"
@@ -189,7 +332,11 @@
             <FontAwesomeIcon icon={faDownload} class="text-base" />
           </button>
         </section>
+        {#if autoError}
+          <p class="state error">{autoError}</p>
+        {/if}
         <LoaderOverlay show={loading} />
+        <LoaderOverlay show={generatingDossier} message="PDF in generazione" />
         {#if showForm}
         <CreateTrasfertaForm onCreated={loadTrasferte} onClose={() => (showForm = false)} />
         {/if}
@@ -217,6 +364,8 @@
         </div>
       </div>
     {/if}
+
+    <ToastState bind:open={toastOpen} success={toastSuccess} message={toastMessage} />
 
     <style>
     .page {
@@ -260,17 +409,6 @@
         gap: 8px;
     }
 
-    .ghost {
-        appearance: none;
-        border: 1px solid #374151;
-        background: transparent;
-        color: #000000;
-        border-radius: 10px;
-        padding: 8px 12px;
-        font-size: 0.9rem;
-        cursor: pointer;
-    }
-
     .content {
         padding: 16px;
         display: grid;
@@ -300,6 +438,10 @@
         display: grid;
         gap: 4px;
         min-width: 200px;
+    }
+
+    .coeff-field {
+        min-width: 120px;
     }
 
     .field span {

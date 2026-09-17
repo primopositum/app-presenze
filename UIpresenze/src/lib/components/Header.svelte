@@ -5,34 +5,37 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
-  import { faHouse, faKey, faHammer, faUsers } from '@fortawesome/free-solid-svg-icons';
-  import HourBalance from './HourBalance.svelte';
-  import { timeEntryUser } from '$lib/stores/timeEntryUser';
-  import { hourBalanceExtra } from '$lib/stores/hourBalanceExtra';
+  import { faHouse, faKey, faHammer, faUsers, faQuestion } from '@fortawesome/free-solid-svg-icons';
   import ChangePasswordCard from '$lib/components/ChangePasswordCard.svelte';
+  import GuideModal from '$lib/components/GuideModal.svelte';
 
-  $: saldoValidato = $auth.user?.saldo?.valore_saldo_validato ?? null;
-  $: saldoTimeEntryUser = $timeEntryUser.user?.saldo?.valore_saldo_validato ?? null;
-  $: isHomeRoute = $page.url.pathname === '/';
-  $: isPresencesRoute = $page.url.pathname.startsWith('/presences');
+  const GUIDE_ROUTES = new Map([
+    ['Automobili', 'Automobili'],
+    ['JiraBoard', 'JiraBoard'],
+    ['Presenze', 'Presenze'],
+    ['trasferte', 'Trasferte']
+  ]);
+
   $: isProfileRoute = $page.url.pathname === '/profilo';
   $: showAllProfiles = $page.url.searchParams.get('show_all_users') === '1';
   $: canToggleAllProfiles = isProfileRoute && !!$auth.user?.is_superuser;
-  $: canShowHourBalanceRoute = isHomeRoute || isPresencesRoute;
+  $: currentRouteName = $page.url.pathname.split('/').filter(Boolean)[0] || '';
+  $: guideName = GUIDE_ROUTES.get(currentRouteName) ?? '';
+  $: guidePdfUrl = guideName
+    ? `/docs/tutorialGrafici/${encodeURIComponent(guideName)}.pdf`
+    : '';
 
-  $: extra = $hourBalanceExtra ?? null;
-  $: canShowExtra = !!extra && extra.saldo !== undefined && extra.saldo !== null;
-  let mode: 'persistente' | 'extra' = 'extra';
   let open = false;
   let successMessage: string | null = null;
   let successTimer: ReturnType<typeof setTimeout> | null = null;
-  const toNumber = (v: unknown) => {
-    const n = typeof v === 'string' ? Number(v) : (v as number);
-    return Number.isFinite(n) ? n : 0;
-  };
-  $: saldoToShow =
-    $auth.user?.is_superuser && isPresencesRoute ? saldoTimeEntryUser : saldoValidato;
-  $: showSaldo = $auth.isAuthed && canShowHourBalanceRoute && saldoToShow !== null;
+  let guideRotation = 0;
+  let guideOpen = false;
+  let lastGuidePdfUrl = '';
+
+  $: if (guidePdfUrl !== lastGuidePdfUrl) {
+    guideOpen = false;
+    lastGuidePdfUrl = guidePdfUrl;
+  }
   
   async function handleLogout() {
     stopAutoRefresh();
@@ -47,6 +50,10 @@
   function goToProfile() {
     goto('/profilo');
   }
+  function handleGuideClick() {
+    guideRotation += 360;
+    guideOpen = true;
+  }
   function toggleAllProfiles() {
     const params = new URLSearchParams($page.url.searchParams);
     if (showAllProfiles) {
@@ -59,25 +66,12 @@
     goto(target, { replaceState: true, noScroll: true, keepFocus: true });
   }
     // $: showProfileButton = page.url.pathname !== '/profilo';
-  function toggle() {
-    if (!canShowExtra) return;
-    mode = mode === 'persistente' ? 'extra' : 'persistente';
-  }
-
   function handlePasswordChanged(message: string) {
     open = false;
     successMessage = message;
     if (successTimer) clearTimeout(successTimer);
     successTimer = setTimeout(() => (successMessage = null), 3000);
   }
-
-  $: hbTitle =
-    mode === 'extra' && extra?.title ? extra.title : 'saldo persistente';
-  $: hbSaldo =
-    mode === 'extra' && extra?.saldo !== undefined && extra?.saldo !== null
-      ? toNumber(extra.saldo) + toNumber(saldoToShow)
-      : saldoToShow;
-  $: hbColor = mode === 'extra' && extra?.color ? extra.color : undefined;
 </script>
 
 <nav class="flex items-center justify-between px-8 py-4 bg-white-200">
@@ -130,6 +124,18 @@
     </div>
  
     <div class="flex-1 flex justify-end items-center gap-2">
+      {#if guidePdfUrl}
+        <button
+          type="button"
+          class="guide-button"
+          style={`--guide-rotation: ${guideRotation}deg;`}
+          title="Guida"
+          aria-label={`Apri la guida di ${currentRouteName}`}
+          on:click={handleGuideClick}
+        >
+          <FontAwesomeIcon icon={faQuestion} class="text-[150%]" />
+        </button>
+      {/if}
       <ButtonGradient
         onClick={handleLogout}
         title="Logout"
@@ -154,15 +160,6 @@
       {/if}
       </div>
   {/if}
-
-
-
-
-  {#if showSaldo}
-    <div class={`hide-mobile-saldo ${canShowExtra ? 'cursor-pointer' : 'cursor-default'}`} on:click={toggle}>
-      <HourBalance title={hbTitle} saldo={hbSaldo} color={hbColor}/>
-    </div>
-  {/if}
 </nav>
 
 {#if successMessage}
@@ -171,9 +168,45 @@
   </div>
 {/if}
 
+{#if guidePdfUrl}
+  {#key guidePdfUrl}
+    <GuideModal
+      isOpen={guideOpen}
+      onClose={() => (guideOpen = false)}
+      pdfUrl={guidePdfUrl}
+      title={`Guida ${currentRouteName}`}
+    />
+  {/key}
+{/if}
+
 
 
 <style>
+  .guide-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #374151;
+    border-radius: 9999px;
+    background: #374151;
+    color: #fff;
+    width: 3.15rem;
+    height: 3.15rem;
+    flex: 0 0 3.15rem;
+    padding: 0;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transform: rotateX(var(--guide-rotation, 0deg));
+    transform-style: preserve-3d;
+    transition: transform 0.55s ease-in-out, background-color 0.2s ease, border-color 0.2s ease;
+  }
+
+  .guide-button:hover {
+    border-color: #4b5563;
+    background: #4b5563;
+  }
+
   .modal-backdrop {
     position: fixed;
     inset: 0;
@@ -257,10 +290,6 @@
   }
 
   @media (max-width: 640px) {
-    .hide-mobile-saldo {
-      display: none;
-    }
-
     .profile-controls {
       display: flex;
       flex-wrap: wrap;

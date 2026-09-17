@@ -1,0 +1,423 @@
+<script lang="ts">
+  type JiraIssue = {
+    key: string;
+    fields?: {
+      summary?: string;
+      status?: { name?: string };
+      assignee?: { displayName?: string } | null;
+      issuetype?: { name?: string; subtask?: boolean } | null;
+      parent?: { key?: string; fields?: { summary?: string } } | null;
+      subtasks?: JiraIssue[];
+      subtasks_enriched?: JiraIssue[];
+      project?: { key?: string; name?: string };
+      timespent?: number | null;
+      aggregatetimespent?: number | null;
+      timeestimate?: number | null;
+      aggregatetimeestimate?: number | null;
+      timeoriginalestimate?: number | null;
+      aggregatetimeoriginalestimate?: number | null;
+      timetracking?: {
+        timeSpentSeconds?: number;
+        originalEstimateSeconds?: number;
+      } | null;
+      worklog_authors?: { displayName?: string; timeSpentSeconds?: number }[];
+      created?: string;
+      updated?: string;
+      resolutiondate?: string | null;
+    };
+  };
+
+  type ProjectSummary = {
+    key: string;
+    name: string;
+    seconds: number;
+    issueCount: number;
+  };
+
+  export let issuesData: JiraIssue[] = [];
+  export let selectedProjectKeys: string[] = [];
+  export let loading = false;
+  export let error = '';
+
+  let searchQuery = '';
+
+  function clearSelection() {
+    selectedProjectKeys = [];
+  }
+
+  function taskTotalSeconds(fields?: JiraIssue['fields']) {
+    if (!fields) return 0;
+    return (fields.worklog_authors || []).reduce(
+      (total, author) => total + Math.max(0, Number(author?.timeSpentSeconds || 0)),
+      0
+    );
+  }
+
+  function fmtHours(seconds: number) {
+    const hours = seconds / 3600;
+    const rounded = Math.round(hours * 10) / 10;
+    return Number.isInteger(rounded)
+      ? `${rounded.toFixed(0)}h`
+      : `${rounded.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}h`;
+  }
+
+  function toggleProject(key: string) {
+    if (!key) return;
+    selectedProjectKeys = selectedProjectKeys.includes(key) && selectedProjectKeys.length === 1 ? [] : [key];
+  }
+
+  function flattenIssues(issues: JiraIssue[]): JiraIssue[] {
+    return (issues || []).flatMap((issue) => [
+      issue,
+      ...flattenIssues(issue.fields?.subtasks_enriched || [])
+    ]);
+  }
+
+  $: normalizedSearch = searchQuery.trim().toLowerCase();
+  $: flattenedIssues = flattenIssues(issuesData);
+  $: projects = Object.values(
+    flattenedIssues.reduce<Record<string, ProjectSummary>>((acc, issue) => {
+      const projectKey = issue.fields?.project?.key || 'N/D';
+      const projectName = issue.fields?.project?.name || 'Progetto non disponibile';
+      if (!acc[projectKey]) {
+        acc[projectKey] = {
+          key: projectKey,
+          name: projectName,
+          seconds: 0,
+          issueCount: 0
+        };
+      }
+      acc[projectKey].seconds += Math.max(0, Number(taskTotalSeconds(issue.fields) || 0));
+      acc[projectKey].issueCount += 1;
+      return acc;
+    }, {})
+  ).sort((a, b) => b.seconds - a.seconds);
+
+  $: filteredProjects = projects.filter((project) => {
+    if (!normalizedSearch) return true;
+    return (
+      project.key.toLowerCase().includes(normalizedSearch) ||
+      project.name.toLowerCase().includes(normalizedSearch)
+    );
+  });
+
+  $: selectedCount = selectedProjectKeys.length;
+  $: totalCount = filteredProjects.length;
+  $: totalHours = filteredProjects.reduce((acc, p) => acc + p.seconds, 0);
+  $: selectedHours = filteredProjects
+    .filter((p) => selectedProjectKeys.includes(p.key))
+    .reduce((acc, p) => acc + p.seconds, 0);
+  $: if (!loading && selectedProjectKeys.length > 0) {
+    const available = new Set(projects.map((p) => p.key));
+    const nextSelected = selectedProjectKeys.filter((key) => available.has(key)).slice(0, 1);
+    if (
+      nextSelected.length !== selectedProjectKeys.length ||
+      nextSelected.some((key, index) => key !== selectedProjectKeys[index])
+    ) {
+      selectedProjectKeys = nextSelected;
+    }
+  }
+
+</script>
+
+<section class="worklog-bar" data-history-hover-exclude>
+  <div class="head">
+    <div>
+      <h2>Progetti con ore loggate</h2>
+      <p class="subhead">{selectedCount} selezionati su {totalCount}</p>
+      <p class="subhead hours">
+        Ore: {fmtHours(selectedCount > 0 ? selectedHours : totalHours)}
+      </p>
+      <p class="subhead note">
+        Ore calcolate esclusivamente dai worklog registrati nel periodo selezionato.
+      </p>
+    </div>
+    <div class="head-actions">
+      <button type="button" class="ghost" data-history-hover-exclude on:click={clearSelection} disabled={loading || selectedCount === 0}>
+        Pulisci
+      </button>
+    </div>
+  </div>
+
+  <input
+    type="text"
+    class="search-input"
+    bind:value={searchQuery}
+    placeholder="Cerca progetto (chiave o nome)..."
+  />
+
+  {#if loading}
+    <div class="progress-shell" data-history-hover-exclude aria-live="polite">
+      <div class="progress-meta">
+        <span>Caricamento issue con ore loggate</span>
+        <strong>...</strong>
+      </div>
+      <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+        <div class="progress-fill"></div>
+      </div>
+    </div>
+  {/if}
+
+  {#if error}
+    <div class="state error">{error}</div>
+  {:else if loading && issuesData.length === 0}
+    <div class="state">Caricamento...</div>
+  {:else if filteredProjects.length === 0}
+    <div class="state">Nessun progetto con ore loggate trovato</div>
+  {:else}
+    <div class="cards-scroll">
+      <div class="cards">
+        {#each filteredProjects as project (project.key)}
+          <div
+            class="project-card"
+            data-history-hover
+            data-history-hover-exclude={selectedProjectKeys.includes(project.key) || undefined}
+            class:selected={selectedProjectKeys.includes(project.key)}
+            role="button"
+            tabindex="0"
+            on:click={() => toggleProject(project.key)}
+            on:keydown={(e) => (e.key === 'Enter' || e.key === ' ' ? toggleProject(project.key) : undefined)}
+          >
+            <div class="row-top">
+              <span class="project-key" data-history-hover-exclude>{project.key}</span>
+              <span class="issues-pill" data-history-hover-exclude>{project.issueCount} issue</span>
+            </div>
+            <h3>{project.name}</h3>
+            <p class="hours-pill">Ore totali: {fmtHours(project.seconds)}</p>
+          </div>
+        {/each}
+      </div>
+    </div>
+  {/if}
+</section>
+
+<style>
+  .worklog-bar {
+    border: 1px solid #bbf7d0;
+    border-radius: 14px;
+    background: linear-gradient(180deg, #f0fdf4, #ffffff 35%);
+    padding: 0.9rem;
+    min-width: 0;
+    /* Altezza imposta dal contenitore: solo la lista dei progetti scorre. */
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.8rem;
+    margin-bottom: 0.65rem;
+  }
+
+  .head h2 {
+    margin: 0;
+    font-size: 0.95rem;
+    color: #14532d;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    font-family: var(--font-mono);
+  }
+
+  .subhead {
+    margin: 0.12rem 0 0;
+    color: #166534;
+    font-size: 0.72rem;
+    font-family: var(--font-mono);
+  }
+  .subhead.hours {
+    font-weight: 700;
+  }
+  .subhead.note {
+    margin-top: 0.3rem;
+    max-width: 52ch;
+    color: #4d7c5a;
+    font-size: 0.66rem;
+    line-height: 1.35;
+  }
+
+  .head-actions {
+    display: flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .head button {
+    border: 1px solid #86efac;
+    background: #ffffff;
+    color: #166534;
+    border-radius: 8px;
+    font-size: 0.72rem;
+    padding: 4px 8px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+  }
+
+  .head .ghost {
+    background: #f8fff9;
+    color: #14532d;
+  }
+
+  .head button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .search-input {
+    width: 100%;
+    border: 1px solid #86efac;
+    border-radius: 8px;
+    background: #fff;
+    color: #14532d;
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    padding: 0.5rem 0.65rem;
+    margin-bottom: 0.65rem;
+    outline: none;
+  }
+  .search-input:focus {
+    border-color: #22c55e;
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.16);
+  }
+
+  .state {
+    font-size: 0.82rem;
+    color: #166534;
+    padding: 0.4rem 0;
+    font-family: var(--font-mono);
+  }
+
+  .state.error {
+    color: #b91c1c;
+  }
+  .progress-shell {
+    margin: 0 0 0.65rem;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid #bbf7d0;
+    border-radius: 9px;
+    background: #f8fff9;
+  }
+  .progress-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.3rem;
+    font-size: 0.7rem;
+    color: #166534;
+    font-family: var(--font-mono);
+  }
+  .progress-meta strong {
+    color: #14532d;
+    font-weight: 700;
+  }
+  .progress-track {
+    height: 9px;
+    border-radius: 999px;
+    background: #dcfce7;
+    overflow: hidden;
+    border: 1px solid #bbf7d0;
+  }
+  .progress-fill {
+    height: 100%;
+    width: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #22c55e, #16a34a 60%, #4ade80);
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.35);
+    transition: width 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+    position: relative;
+  }
+  .progress-fill::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.55) 50%, transparent 80%);
+    animation: progressShine 1.4s linear infinite;
+  }
+  @keyframes progressShine {
+    from {
+      transform: translateX(-120%);
+    }
+    to {
+      transform: translateX(120%);
+    }
+  }
+
+  .cards-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin-top: 0.25rem;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
+  .cards {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .project-card {
+    position: relative;
+    border-radius: 12px;
+    cursor: pointer;
+    border: 1px solid #bbf7d0;
+    background: #ffffff;
+    padding: 0.7rem 0.75rem;
+    transition: box-shadow 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+  }
+  .project-card:hover {
+    transform: translateY(-1px);
+    border-color: #86efac;
+    box-shadow: 0 6px 14px rgba(22, 163, 74, 0.14);
+  }
+  .project-card.selected {
+    border-color: #22c55e;
+    box-shadow: 0 0 0 2px #22c55e, 0 6px 14px rgba(22, 163, 74, 0.2);
+    background: #f0fdf4;
+  }
+  .row-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 0.42rem;
+  }
+  .project-key {
+    font-size: 11px;
+    color: #14532d;
+    background: #ecfdf5;
+    border: 1px solid #86efac;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-family: var(--font-mono);
+  }
+  .issues-pill {
+    font-size: 10px;
+    color: #14532d;
+    font-family: var(--font-mono);
+    background: #ffffff;
+    border: 1px solid #bbf7d0;
+    border-radius: 999px;
+    padding: 2px 7px;
+  }
+  h3 {
+    margin: 0 0 0.4rem;
+    font-size: 0.86rem;
+    color: #14532d;
+    line-height: 1.2;
+    font-family: var(--font-infinity);
+    letter-spacing: 0.01em;
+  }
+  .hours-pill {
+    margin: 0;
+    font-size: 0.74rem;
+    color: #166534;
+    font-family: var(--font-mono);
+  }
+</style>

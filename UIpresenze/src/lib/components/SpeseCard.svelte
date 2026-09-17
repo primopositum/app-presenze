@@ -9,7 +9,7 @@
   export let readonly = false;
   let loading = false;
 
-  const dispatch = createEventDispatcher<{ delete: Spesa }>();
+  const dispatch = createEventDispatcher<{ delete: Spesa; deleteError: string }>();
   const types: Record<number, string> = {
     1: 'Pedaggi',
     2: 'Rimborso km',
@@ -33,6 +33,8 @@
     }
     if (!error) {
       dispatch('delete', spesa);
+    } else {
+      dispatch('deleteError', error);
     }
   }
 
@@ -41,12 +43,17 @@
     Number(spesa.type) === 2 && Array.isArray(spesa.tragitto) && spesa.tragitto.length > 0
       ? spesa.tragitto.join(' / ')
       : null;
+  $: isKmSpesa = Number(spesa.type) === 2;
 </script>
 
 <article class="flex items-center justify-between gap-2 rounded-lg border border-gray-100 px-3 py-2 text-sm">
   <div class="flex flex-wrap gap-2">
     <span>Spesa per {typeLabel}</span>
-    <span>importo: {spesa.importo} &euro;</span>
+    {#if isKmSpesa}
+      <span>km: {spesa.importo}</span>
+    {:else}
+      <span>importo: {spesa.importo} &euro;</span>
+    {/if}
     {#if tragittoLabel}
       <span>tragitto: {tragittoLabel}</span>
     {/if}

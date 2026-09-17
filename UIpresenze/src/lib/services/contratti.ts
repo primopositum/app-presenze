@@ -1,7 +1,7 @@
 import { apiBase, authFetch } from '$lib/api';
 import { get } from 'svelte/store';
 import { auth } from '$lib/stores/auth';
-// import { Contratto } from './users';
+
 const BASE = apiBase();
 
 type Opts = RequestInit & { json?: any };
@@ -21,7 +21,7 @@ async function request(path: string, opts: Opts = {}) {
 /**
  * Regola sessione:
  * - superuser -> NON forza u_id
- * - non superuser -> u_id = $auth.user.id (ma attenzione: i contratti sono SOLO superuser lato backend)
+ * - non superuser -> u_id = $auth.user.id
  */
 export function resolveUId(explicitUId?: number) {
   if (explicitUId !== undefined && explicitUId !== null) return explicitUId;
@@ -46,24 +46,24 @@ export type ContrattoUpdateOre = {
 };
 
 export function updateContrattoOre(u_id: number, ore_sett: Array<number | string>) {
-//   const uId = resolveUId(params.u_id);
-//   if (uId === undefined) {
-//     // In pratica: se sei superuser devi passare u_id esplicitamente.
-//     throw new Error('u_id è obbligatorio per aggiornare un contratto');
-//   }
-//   const payload: ContrattoUpdateOre = { ore_sett: params.ore_sett };
-  const payload: ContrattoUpdateOre = { ore_sett };
-  return request(`/contratti/${u_id}/ore/`, { method: 'PATCH', json: payload });
+  const payload = {
+    id: u_id,
+    user_id: u_id,
+    contratti: [{ ore_sett }]
+  };
+  // Backend reale: aggiornamento contratto via profilo.
+  return request(`/profile/?id=${u_id}`, { method: 'PUT', json: payload });
 }
 
 /**
- * POST crea NUOVO contratto per utente (u_id nel path).
- * Backend: disattiva eventuale contratto attivo e crea nuovo is_active=true
- * Solo superuser.
- *
- * Endpoint atteso: POST /contratti/<u_id>/
- * Body: { data_ass, data_fine?, tipologia, ore_sett }
+ * Crea/aggiorna contratto utente usando l'endpoint profilo.
+ * Lato backend: se esiste un contratto attivo viene aggiornato, altrimenti viene creato.
  */
-export function createContratto(u_id: number, contratto: ContrattoCreate ) {
-  return request(`/contratti/${u_id}/`, { method: 'POST', json: contratto });
+export function createContratto(u_id: number, contratto: ContrattoCreate) {
+  const payload = {
+    id: u_id,
+    user_id: u_id,
+    contratti: [contratto]
+  };
+  return request(`/profile/?id=${u_id}`, { method: 'PUT', json: payload });
 }

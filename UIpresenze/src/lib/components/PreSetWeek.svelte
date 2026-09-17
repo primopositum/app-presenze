@@ -4,11 +4,15 @@
   import { useUpdateContrattoOre } from '$lib/hooks/useContratto';
   import LoaderOverlay from '$lib/components/loader/LoaderOverlay.svelte';
   import ButtonGradient from '$lib/components/ButtonGradient.svelte';
+  import ErrorCard from '$lib/components/ErrorCard.svelte';
+
+  export let onSaved: ((message: string) => void) | null = null;
 
   let superadmin = false;
   let saving = false;
   let error: string | null = null;
   let updateContratto = useUpdateContrattoOre({ u_id: undefined });
+  let profileUser: any = null;
 
   const emptyPreSet = {
     lun: 0,
@@ -36,21 +40,23 @@
   let preSet = emptyPreSet;
 
   $: superadmin = !!$auth.user?.is_superuser;
-  $: if ($timeEntryUser.user) {
-    preSet = buildPreSet(($timeEntryUser.user as any)?.contratti?.[0]?.ore_sett) ?? emptyPreSet;
+  $: profileUser = ($timeEntryUser.user as any) ?? ($auth.user as any) ?? null;
+  $: if (profileUser) {
+    preSet = buildPreSet(profileUser?.contratti?.[0]?.ore_sett) ?? emptyPreSet;
   } else {
     preSet = emptyPreSet;
   }
 
-  $: updateContratto = useUpdateContrattoOre({ u_id: $timeEntryUser.user?.id });
+  $: updateContratto = useUpdateContrattoOre({ u_id: profileUser?.id });
 
   async function handleUpdateContratto() {
-    if (!superadmin || !$timeEntryUser.user?.id) return;
+    if (!superadmin || !profileUser?.id) return;
     saving = true;
     error = null;
     try {
       const ore_sett = [preSet.lun, preSet.mar, preSet.mer, preSet.gio, preSet.ven];
       await updateContratto(ore_sett);
+      onSaved?.('Contratto utente aggiornato correttamente.');
     } catch (e: any) {
       error = e?.message || 'Errore aggiornamento contratto';
     } finally {
@@ -102,7 +108,7 @@
 </script>
 
 
-    <div class="mt-10 p-2 border-3 border-blue-300 rounded-2xl">
+    <div class="mt-10 mx-auto p-2 border-3 w-fit bg-blue-100 border-blue-300 rounded-2xl">
     <div class="text-center font-infinity tracking-[3px] mb-4">Pattern settimanale</div>
         <div class="flex flex-wrap items-center justify-center gap-3 sm:gap-4">
         {#each Object.keys(preSet) as key}
@@ -135,10 +141,10 @@
             title="Aggiorna contratto utente"
             buttonText={saving ? 'Salvataggio...' : 'Aggiorna contratto utente'}
             onClick={handleUpdateContratto}
-            disabled={saving || !$timeEntryUser.user?.id}
+            disabled={saving || !profileUser?.id}
           />
           {#if error}
-            <div class="text-red-600 text-sm">{error}</div>
+            <ErrorCard message={error} onClose={() => (error = null)} />
           {/if}
         </div>
       {/if}

@@ -42,11 +42,10 @@ src/
 │   │   └── users.ts        # Users service
 │   └── stores/             # Svelte stores
 │       ├── auth.ts         # Authentication state
-│       ├── hourBalanceExtra.ts
 │       ├── timeEntryReload.ts
 │       └── timeEntryUser.ts
 ├── routes/
-│   ├── auto/               # Vehicles module
+│   ├── Automobili/         # Vehicles module
 │   ├── login/              # Login page
 │   ├── preMenu/            # Pre-menu module
 │   ├── presences/          # Presences/attendance module

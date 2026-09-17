@@ -1,5 +1,6 @@
 from .auth import api_login, get_token, api_logout, api_refresh
 from .account import change_password, user_profile, users_list, delete_account, create_account
+from .saldo import saldo_detail
 from .timeentries import (
     time_entries_from_month_to_previous,
     timeentry_create, timeentry_detail,
@@ -11,7 +12,7 @@ from .timeentries import (
 from .trasferte import (
     trasferta_create, trasferta_update,
     trasferte_validation_level, trasferta_list, trasferta_delete,
-    trasferte_mese_scorso_pdf, trasferta_dossier,
+    trasferte_mese_scorso_pdf, trasferta_singola_pdf, trasferta_dossier,
 )
 from .spese import spesa_list_by_trasferta, spesa_manage
 
@@ -28,3 +29,25 @@ from .scontrini import (
 from .automobili import (AutomobileListCreateView, AutomobileDetailView, AutomobileDeleteView, AutomobilePatchView)
 from .signatures import signature_create, signature_latest
 from .utilitiesbar import UtilitiesBarListView
+from .clienti import (
+    ClienteListCreateView,
+    ClienteDetailView,
+    ContrattoClienteListCreateView,
+    ContrattoClienteDetailView,
+    ContrattoClientePoolTaskView,
+)
+from .jira import (
+    JiraProxyView,
+    JiraStatusesView,
+    JiraWorklogsTodayView,
+    JiraWorklogsMonthView,
+    JiraUserMonthlyWorklogView,
+    JiraWorklogView,
+    JiraWorklogStreamView,
+    JiraIssueTimeView,
+    JiraIssueWorklogView,
+    JiraUpdateState,
+    JiraCredentialsView,
+    JiraCredentialsTokenView,
+    UpdateJiraFiltersView,
+)

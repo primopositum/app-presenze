@@ -3,7 +3,10 @@
   import { page } from '$app/stores';
   import { auth } from '$lib/stores/auth';
   import ProfileCard from '$lib/components/ProfileCard.svelte';
+  import PreSetWeek from '$lib/components/PreSetWeek.svelte';
   import LoaderOverlay from '$lib/components/loader/LoaderOverlay.svelte';
+  import ToastState from '$lib/components/ToastState.svelte';
+  import ErrorCard from '$lib/components/ErrorCard.svelte';
   import type { User } from '$lib/services/users';
   import type { CreateAccountPayload, UpdateAccountPayload } from '$lib/services/users';
   import { useCreateAccountApi, useDeleteAccountApi, useUpdateAccountApi, useUsersApi } from '$lib/hooks/useUserApi';
@@ -21,8 +24,13 @@
   let createIsActive = true;
   let createIsSuperuser = false;
   let createTipologiaContratto = '';
+  let toastOpen = false;
+  let toastSuccess = true;
+  let toastMessage = '';
 
   $: isSuperuser = !!$auth.user?.is_superuser;
+  $: isStaff = !!$auth.user?.is_staff;
+  $: showOwnPresetWeek = !!$auth.user && !isSuperuser && !isStaff;
   $: showAllUsers = $page.url.searchParams.get('show_all_users') === '1';
   $: visibleUsers = showAllUsers
     ? users
@@ -50,33 +58,66 @@
 
   async function saveAccount(payload: UpdateAccountPayload) {
     saving = true;
-    const res = await useUpdateAccountApi(payload);
-    if (res.error) {
-      error = res.error;
-      saving = false;
-      throw new Error(res.error);
-    } else {
+    try {
+      const res = await useUpdateAccountApi(payload);
+      if (res.error) {
+        throw new Error(res.error);
+      }
+
       error = null;
       if (res.user?.id) {
         users = users.map((u) => (u.id === res.user!.id ? res.user! : u));
       }
+    } finally {
+      saving = false;
     }
-    saving = false;
+  }
+
+  function showToast(message: string, success = true) {
+    toastSuccess = success;
+    toastMessage = message;
+    toastOpen = false;
+    setTimeout(() => {
+      toastOpen = true;
+    }, 0);
+  }
+
+  function handleBackendUpdated(message: string) {
+    showToast(message);
+  }
+
+  function closeError() {
+    error = null;
+  }
+
+  function closeErrorFromBackdrop(event: MouseEvent) {
+    if (event.target === event.currentTarget) {
+      closeError();
+    }
+  }
+
+  function closeErrorFromKeyboard(event: KeyboardEvent) {
+    if (event.key === 'Escape' || event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      closeError();
+    }
   }
 
   async function deleteAccount(userId: number) {
     saving = true;
-    const res = await useDeleteAccountApi(userId);
-    if (res.error) {
-      error = res.error;
+    try {
+      const res = await useDeleteAccountApi(userId);
+      if (res.error) {
+        throw new Error(res.error);
+      }
+      error = null;
+      if (res.deletedUserId) {
+        users = users.filter((u) => u.id !== res.deletedUserId);
+      }
+      showToast('Account eliminato correttamente.');
+    } finally {
       saving = false;
-      throw new Error(res.error);
     }
-    error = null;
-    if (res.deletedUserId) {
-      users = users.filter((u) => u.id !== res.deletedUserId);
-    }
-    saving = false;
   }
 
   function openCreateModal() {
@@ -131,6 +172,7 @@
     creating = false;
     resetCreateForm();
     showCreateModal = false;
+    showToast('Account creato correttamente.');
   }
 </script>
 
@@ -141,10 +183,7 @@
 
 
 
-  {#if error}
-    <p class="text-red-600">{error}</p>
-
-  {:else if !$auth.user} 
+  {#if !$auth.user} 
     <div></div>
 
   {:else if isSuperuser}
@@ -154,7 +193,13 @@
      <div class="profiles-grid grid gap-6 [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))]">
   {#each visibleUsers as u}
     <div class="w-full profile-grid-item">
-      <ProfileCard user={u} currentUser={$auth.user ?? {}} onSave={saveAccount} onDelete={deleteAccount} />
+      <ProfileCard
+        user={u}
+        currentUser={$auth.user ?? {}}
+        onSave={saveAccount}
+        onDelete={deleteAccount}
+        onSaved={handleBackendUpdated}
+      />
     </div>
   {/each}
   <div class="w-full profile-grid-item">
@@ -174,7 +219,17 @@
     {/if}
 
   {:else}
-    <ProfileCard user={$auth.user} currentUser={$auth.user} onSave={saveAccount} />
+    <div class="space-y-6">
+      <ProfileCard
+        user={$auth.user}
+        currentUser={$auth.user}
+        onSave={saveAccount}
+        onSaved={handleBackendUpdated}
+      />
+      {#if showOwnPresetWeek}
+        <PreSetWeek onSaved={handleBackendUpdated} />
+      {/if}
+    </div>
   {/if}
 </main>
 
@@ -224,7 +279,32 @@
   </div>
 {/if}
 
+<ToastState bind:open={toastOpen} success={toastSuccess} message={toastMessage} />
+
+{#if error}
+  <div
+    class="error-backdrop"
+    role="button"
+    tabindex="0"
+    aria-label="Chiudi errore"
+    on:click={closeErrorFromBackdrop}
+    on:keydown={closeErrorFromKeyboard}
+  >
+    <ErrorCard message={error} onClose={closeError} />
+  </div>
+{/if}
+
 <style>
+  .error-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 3400;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 16px;
+  }
   .profile-grid-item {
     display: flex;
     align-items: stretch;

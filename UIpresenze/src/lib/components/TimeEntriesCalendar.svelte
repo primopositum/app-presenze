@@ -23,10 +23,12 @@
   export let year: number;
   export let month: number; // 1-12
   export let dayHours: DayHours[] = [];
+  export let selectedDate: string | null = null;
+  export let incompleteWorklogDates: string[] = [];
   export let maxVisibleEntries: number = 2; // Numero massimo di entries da mostrare
 
   const dispatch = createEventDispatcher<{
-    selectDay: { date: string; locked: boolean };
+    selectDay: { date: string; locked: boolean; forbidType3: boolean };
   }>();
 
   $: first = new Date(year, month - 1, 1);
@@ -56,6 +58,8 @@
     return acc;
   }, {});
 
+  $: incompleteWorklogDateSet = new Set(incompleteWorklogDates);
+
   function iso(y: number, m: number, d: number) {
     const mm = String(m).padStart(2, '0');
     const dd = String(d).padStart(2, '0');
@@ -76,10 +80,15 @@
     return byValidation[dateStr] === 2;
   }
 
+  function hasType5Entry(dateStr: string) {
+    const entries = byEntries[dateStr] || [];
+    return entries.some((entry) => entry.type === 5);
+  }
+
   function validationBg(level: number | undefined) {
-    if (level === 0) return 'bg-red-100';
-    if (level === 1) return 'bg-yellow-100';
-    if (level === 2) return 'bg-green-100';
+    if (level === 0) return 'bg-[#fecaca]';
+    if (level === 1) return 'bg-[#fef08a]';
+    if (level === 2) return 'bg-[#bbf7d0]';
     return '';
   }
 
@@ -99,6 +108,7 @@
       11: 'bg-violet-500 text-white',        // Congedo mat/pat
       12: 'bg-gray-600 text-white',          // Sciopero
       14: 'bg-cyan-600 text-white',          // Visite mediche L.106/25
+      15: 'bg-rose-700 text-white',          // Ricovero presso struttura ospedaliera
       13: 'bg-emerald-500 text-white',       // Festività
     };
     return colors[type] || 'bg-gray-400 text-white';
@@ -120,6 +130,7 @@
       11: 'MAT',
       12: 'SCI',
       14: 'VMD',
+      15: 'RIC',
       13: 'FES',
     };
     return labels[type] || 'N/A';
@@ -128,8 +139,9 @@
   function handleDay(day: number) {
     const isoDate = iso(year, month, day);
     const locked = isLockedByValidation(isoDate);
+    const forbidType3 = hasType5Entry(isoDate);
 
-    dispatch('selectDay', { date: isoDate, locked });
+    dispatch('selectDay', { date: isoDate, locked, forbidType3 });
   }
 </script>
 
@@ -150,6 +162,8 @@
     {#each Array(daysInMonth) as _, idx}
       {@const day = idx + 1}
       {@const dstr = iso(year, month, day)}
+      {@const isSelected = selectedDate === dstr}
+      {@const hasIncompleteWorklog = incompleteWorklogDateSet.has(dstr)}
       {@const today = new Date()}
       {@const isToday = today.getFullYear() === year && today.getMonth() + 1 === month && today.getDate() === day}
       {@const hours = byDate[dstr]}
@@ -171,8 +185,9 @@
         class={`flex flex-col items-center border-2 gap-0.5 sm:gap-1 h-20 sm:h-24 overflow-hidden rounded-md p-1 sm:p-1.5
           relative
           transition-colors
-          ${isDisabled ? `${vBg || 'bg-gray-50'} opacity-60` : `cursor-pointer ${vBg || (weekendEmpty ? 'bg-blue-100' : weekend ? 'bg-gray-50' : 'bg-gray-100')} hover:opacity-90`}
-          ${isToday ? 'outline outline-2 outline-green-500 border-none' : 'border-gray-400'}
+          ${isDisabled ? `${vBg || 'bg-[#e5e7eb]'} text-gray-700` : `cursor-pointer ${vBg || (weekendEmpty ? 'bg-[#dbeafe]' : weekend ? 'bg-[#e5e7eb]' : 'bg-[#d1d5db]')} hover:brightness-95`}
+          ${isSelected ? '!bg-orange-200 !border-orange-400 ring-2 ring-orange-300' : ''}
+          ${isToday ? 'outline outline-3 outline-green-500 border-none' : 'border-gray-400'}
         `}
         on:click={() => handleDay(day)}
         on:keydown={(e) => {
@@ -186,6 +201,14 @@
             title="Presente almeno una nota in questo giorno"
             aria-label="Giorno con nota"
           ></span>
+        {/if}
+
+        {#if hasIncompleteWorklog}
+          <span
+            class="absolute bottom-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[11px] font-bold leading-none text-white shadow-sm"
+            title="Worklog Jira incompleto per le ore registrate"
+            aria-label="Worklog Jira incompleto"
+          >!</span>
         {/if}
 
         <!-- Numero giorno -->

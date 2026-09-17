@@ -11,6 +11,7 @@ from django.db.models import Q
 from ..models import TimeEntry, Utente, Saldo, Contratto
 from ..serializer import TimeEntrySerializer, TimeEntryValidationSerializer
 from ..pdfs import PresenzeMeseScorsoPDFView
+from ..saldo_utils import apply_saldo_delta, periodo_from_date
 
 def _is_staff_or_super(user):
     return user.is_staff or user.is_superuser
@@ -525,8 +526,8 @@ def timeentry_update_validation_level(request, te_id: int):
             saldo = Saldo.objects.select_for_update().get(utente=te.utente)
             ore = Decimal(str(te.ore_tot))
             delta = ore if te.type == TimeEntry.EntryType.VERSAMENTO_BANCA_ORE else -ore
-            saldo.valore_saldo_validato += delta
-            saldo.save(update_fields=["valore_saldo_validato", "data_upd"])
+            apply_saldo_delta(saldo, periodo_from_date(te.data), delta)
+            saldo.save(update_fields=["saldo", "data_upd"])
 
     return Response(TimeEntrySerializer(te).data, status=status.HTTP_200_OK)
 
@@ -541,7 +542,7 @@ def timeentry_bulk_validate_month(request):
       Body: { "utente_id": 5, "data": "2026-01-15" }
       - Aggiorna validation_level da 1 a 2 (VALIDATO_UTENTE -> VALIDATO_ADMIN)
         per tutte le TimeEntry dell'utente nel mese indicato con validation_level=1
-      - Aggiorna SOLO saldo validato (valore_saldo_validato) per type 3/4
+      - Aggiorna SOLO saldo validato per type 3/4
 
     Caso 2 - Utente normale:
       Body: { "data": "2026-01-15" }
@@ -602,9 +603,11 @@ def timeentry_bulk_validate_month(request):
             )
 
         with transaction.atomic():
-            # 2a. Lock delle TimeEntry candidate (in ordine di id per evitare
-            #     deadlock con altre query che bloccano più righe)
-            locked_entries = list(
+            # 2a. TimeEntry candidate ordinate per id (ordine stabile).
+            # Su alcuni DB select_for_update puo essere no-op: per evitare
+            # doppi conteggi in chiamate concorrenti, il delta viene applicato
+            # solo sulle righe che questa transazione porta davvero da 1 a 2.
+            candidate_entries = list(
                 TimeEntry.objects
                 .select_for_update()
                 .filter(
@@ -617,31 +620,35 @@ def timeentry_bulk_validate_month(request):
                 .values("id", "type", "ore_tot")
             )
 
-            count_updated = len(locked_entries)
-
-            # 2b. Calcolo delta sulle stesse righe lockate
+            count_updated = 0
             total_delta = Decimal("0.00")
-            ids_to_update = []
-            for row in locked_entries:
-                ids_to_update.append(row["id"])
+            now_ts = timezone.now()
+
+            # 2b. Update condizionale riga per riga: se non e piu a livello 1,
+            # la riga viene saltata e non contribuisce al delta.
+            for row in candidate_entries:
+                updated = TimeEntry.objects.filter(
+                    id=row["id"],
+                    validation_level=TimeEntry.ValidationLevel.VALIDATO_UTENTE,
+                ).update(
+                    validation_level=TimeEntry.ValidationLevel.VALIDATO_ADMIN,
+                    data_upd=now_ts,
+                )
+
+                if updated != 1:
+                    continue
+
+                count_updated += 1
                 if row["type"] == TimeEntry.EntryType.VERSAMENTO_BANCA_ORE:
                     total_delta += Decimal(str(row["ore_tot"]))
                 elif row["type"] == TimeEntry.EntryType.PRELIEVO_BANCA_ORE:
                     total_delta -= Decimal(str(row["ore_tot"]))
 
-            # 2c. Update sulle stesse righe lockate (per id, non per filtro)
-            if ids_to_update:
-                TimeEntry.objects.filter(id__in=ids_to_update).update(
-                    validation_level=TimeEntry.ValidationLevel.VALIDATO_ADMIN,
-                    data_upd=timezone.now(),
-                )
-
-            # 2d. Lock e aggiornamento saldo (sempre dopo le TimeEntry)
+            # 2c. Lock e aggiornamento saldo (solo delta realmente applicato)
             if total_delta != Decimal("0.00"):
                 saldo = Saldo.objects.select_for_update().get(utente_id=utente_id)
-                saldo.valore_saldo_validato += total_delta
-                saldo.save(update_fields=["valore_saldo_validato", "data_upd"])
-
+                apply_saldo_delta(saldo, periodo_from_date(data_date), total_delta)
+                saldo.save(update_fields=["saldo", "data_upd"])
         return Response({
             "message": f"Aggiornate {count_updated} TimeEntry da validation_level 1 a 2.",
             "utente_id": utente_id,

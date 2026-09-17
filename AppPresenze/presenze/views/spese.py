@@ -5,6 +5,11 @@ from rest_framework.response import Response
 from ..models import Trasferta, Spesa
 from ..serializer import SpesaSerializer
 
+
+def _is_staff_or_super(user):
+    return user.is_staff or user.is_superuser
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def spesa_list_by_trasferta(request, t_id: int):
@@ -19,10 +24,10 @@ def spesa_list_by_trasferta(request, t_id: int):
             {"errors": "Trasferta non trovata."}, 
             status=status.HTTP_404_NOT_FOUND
         )
-    is_super = request.user.is_superuser
+    is_admin = _is_staff_or_super(request.user)
     is_owner = (trasferta.utente_id == request.user.id)
 
-    if not (is_super or is_owner):
+    if not (is_admin or is_owner):
         return Response(
             {"errors": "Non hai i permessi per visualizzare le spese di questa trasferta."}, 
             status=status.HTTP_403_FORBIDDEN

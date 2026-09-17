@@ -3,7 +3,13 @@ import { get } from 'svelte/store';
 import { auth } from '$lib/stores/auth';
 
 const DEFAULT_API_BASE = '/presenze';
-const BASE = `${(PUBLIC_API_BASE || DEFAULT_API_BASE).replace(/\/$/, '')}/api`;
+function normalizeApiBase(value: string) {
+  const base = (value || DEFAULT_API_BASE).trim().replace(/\/$/, '');
+  if (base.startsWith('http') || base.startsWith('/')) return base;
+  return `/${base}`;
+}
+
+const BASE = `${normalizeApiBase(PUBLIC_API_BASE)}/api`;
 const AUTO_REFRESH_MS = 14 * 60 * 1000;
 
 export function getAuthToken() {

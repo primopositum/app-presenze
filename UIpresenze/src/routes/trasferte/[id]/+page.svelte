@@ -2,25 +2,31 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
-  import { faArrowLeft, faRotate, faCheck, faBroom, faFlag, faCalculator, faCar, faLocationDot } from '@fortawesome/free-solid-svg-icons';
+  import { faArrowLeft, faRotate, faCheck, faBroom, faFlag, faCalculator, faCar, faLocationDot, faFilePdf } from '@fortawesome/free-solid-svg-icons';
   import { onMount } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import palette from '../../../theme/palette.js';
   import {
     getSpeseByTrasferta,
     getTrasferte,
+    getTrasfertaOwnerId,
     updateTrasferta,
     type Spesa,
     type SpesaCreate,
     type Trasferta
   } from '$lib/services/trasferte';
   import { getAutomobili, updateAutomobileCoeff, type Automobile } from '$lib/services/automobili';
-  import { useCreateSpese, useScontrini, useValidateTrasferta } from '$lib/hooks/useTrasferte';
+  import {
+    getFavoriteAutomobileId,
+    sortFavoriteAutomobileFirst
+  } from '$lib/services/automobilePreference';
+  import { useCreateSpese, useScontrini, useValidateTrasferta, useTrasfertaSinglePdf } from '$lib/hooks/useTrasferte';
   import type { User } from '$lib/services/users';
   import LoaderOverlay from '$lib/components/loader/LoaderOverlay.svelte';
   import SpeseCard from '$lib/components/SpeseCard.svelte';
   import FormSpesa from '$lib/components/FormSpesa.svelte';
   import ErrorCard from '$lib/components/ErrorCard.svelte';
+  import ToastState from '$lib/components/ToastState.svelte';
   import MapsPlugin from '$lib/components/MapsPlugin.svelte';
   import LoadReceipts from '$lib/components/LoadReceipts.svelte';
   import { timeEntryUser } from '$lib/stores/timeEntryUser';
@@ -35,7 +41,8 @@
   let mapRef: {
     calcolaDistanza: (a1?: string, a2?: string) => Promise<number | null>;
     hasError: () => boolean;
-    getErrorMessage: () => string;
+    getErrorMessage: () => string; 
+    getRouteTragitto: () => string[];
   } | null = null;
   let distanzaKm: number | null = null;
   let distanzaKmInput = '';
@@ -56,18 +63,33 @@
   let autoOptions: Array<{ id: number; label: string }> = [];
   let selectedAutoId = '';
   let isLocked = false;
+  let canEdit = false;
+  let isReadOnly = false;
   let isSuperuser = false;
+  let isOwner = false;
+  let ownerId: number | null = null;
+  let currentUserId: number | null = null;
   let refreshKey = 0;
+  let generatingPdf = false;
   let isKmBandieraRossa = false;
+  let toastOpen = false;
+  let toastSuccess = true;
+  let toastMessage = '';
+  let favoriteAutoId = '';
   type SpesaFormSubmit = SpesaCreate & {
     kmPercorsi?: number;
     coefficiente?: number;
     coefficienteChanged?: boolean;
     tragittoSegments?: string[];
   };
+  type UploadCompleteEvent = {
+    success: boolean;
+    message: string;
+  };
 
   $: isAuthed = $auth.isAuthed;
   $: isSuperuser = !!$auth.user?.is_superuser;
+  $: currentUserId = $auth.user?.id ?? null;
 
   function getAutoId(auto: Automobile): number | null {
     return auto.id ?? auto.a_id ?? auto.A_ID ?? null;
@@ -121,6 +143,19 @@
     return Number.isFinite(coeff) ? coeff : null;
   }
 
+  function showToast(message: string, success = true) {
+    toastSuccess = success;
+    toastMessage = message;
+    toastOpen = false;
+    setTimeout(() => {
+      toastOpen = true;
+    }, 0);
+  }
+
+  function handleReceiptUploadComplete(event: CustomEvent<UploadCompleteEvent>) {
+    showToast(event.detail.message, event.detail.success);
+  }
+
   function removeTragittoSegmentsOnce(source: string[], segments: string[]): string[] {
     const next = [...source];
     for (const raw of segments) {
@@ -154,7 +189,7 @@
   }
 
   async function handleCoefficienteChange(event: Event) {
-    if (!item || isLocked) return;
+    if (!item || isReadOnly) return;
 
     const value = (event.currentTarget as HTMLInputElement).value.trim();
     costoKmInput = value;
@@ -186,6 +221,7 @@
         );
       }
       costoKmInput = String(updatedAuto.coefficiente ?? coeff);
+      showToast('Coefficiente automobile aggiornato.');
     } catch (e: any) {
       kmError = e?.message || 'Errore aggiornamento coefficiente automobile';
     } finally {
@@ -198,7 +234,9 @@
     autoError = null;
     try {
       const list = await getAutomobili({ is_active: true });
-      automobili = list.length ? list : await getAutomobili();
+      favoriteAutoId = getFavoriteAutomobileId();
+      const source = list.length ? list : await getAutomobili();
+      automobili = sortFavoriteAutomobileFirst(source, favoriteAutoId, getAutoId);
     } catch (e: any) {
       autoError = e?.message || 'Errore caricamento automobili';
       automobili = [];
@@ -208,7 +246,7 @@
   }
 
   async function handleAutomobileChange(event: Event) {
-    if (!item || isLocked) return;
+    if (!item || isReadOnly) return;
 
     const nextAutoId = (event.currentTarget as HTMLSelectElement).value;
     const previousAutoId = selectedAutoId;
@@ -264,11 +302,38 @@
       const validate = useValidateTrasferta({ tId: item.id });
       const res = await validate();
       item = res.payload;
-      await loadDetail();
+      // Forza refresh completo pagina: ricalcola stato e nasconde il bottone.
+      window.location.reload();
     } catch (e: any) {
       error = e?.message || 'Errore validazione trasferta';
     } finally {
       loading = false;
+    }
+  }
+
+  async function handleGeneratePdf() {
+    if (!item?.id || generatingPdf) return;
+
+    generatingPdf = true;
+    error = null;
+    try {
+      const { generatePdf } = useTrasfertaSinglePdf({ tId: item.id });
+      const res = await generatePdf();
+      const url = URL.createObjectURL(res.payload);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `trasferta_${item.utente_nome}_${item.utente_cognome}_${item.data}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      showToast('PDF trasferta generato correttamente.');
+    } catch (e: any) {
+      const message = e?.message || 'Errore generazione PDF trasferta';
+      error = message;
+      showToast(message, false);
+    } finally {
+      generatingPdf = false;
     }
   }
 
@@ -291,13 +356,16 @@
   }
 
   async function handleScontrinoDelete(filename: string) {
-    if (!item?.id || isLocked) return;
+    if (!item?.id || isReadOnly) return;
     try {
       const { deleteScontrino } = useScontrini({ tId: item.id });
       await deleteScontrino(filename);
       refreshKey += 1;
+      showToast('Giustificativo eliminato correttamente.');
     } catch (e: any) {
-      error = e?.message || 'Errore eliminazione scontrino';
+      const message = e?.message || 'Errore eliminazione giustificativo';
+      error = message;
+      showToast(message, false);
     }
   }
 
@@ -308,6 +376,9 @@
       const routeId = Number($page.params.id);
       const stateTrasf = ($page.state as any)?.trasf as Trasferta | undefined;
       item = stateTrasf?.id === routeId ? stateTrasf : null;
+
+      const freshList = await getTrasferte({ tId: routeId });
+      item = freshList.find((t) => Number(t.id) === routeId) ?? null;
 
       if (!item) {
         const list = await getTrasferte();
@@ -330,7 +401,7 @@
   }
 
   async function handleCreateSpesa(payload: SpesaFormSubmit) {
-    if (!item || creatingSpesa || isLocked) return;
+    if (!item || creatingSpesa || isReadOnly) return;
 
     const spesaType = Number(payload.type);
     if (!Number.isFinite(spesaType) || spesaType <= 0) {
@@ -364,6 +435,7 @@
             );
           }
           costoKmInput = String(updatedAuto.coefficiente ?? coeff);
+          showToast('Coefficiente automobile aggiornato.');
         }
       }
 
@@ -381,15 +453,18 @@
       }
       spese = [created.payload, ...spese];
       showSpesaForm = false;
+      showToast('Spesa aggiunta correttamente.');
     } catch (e: any) {
-      createSpesaError = e?.message || 'Errore creazione spesa';
+      const message = e?.message || 'Errore creazione spesa';
+      createSpesaError = message;
+      showToast(message, false);
     } finally {
       creatingSpesa = false;
     }
   }
 
   async function handleDeleteSpesa(spesaToDelete: Spesa) {
-    if (!item || isLocked) return;
+    if (!item || isReadOnly) return;
 
     try {
       const segments = (spesaToDelete.tragitto ?? []).map((v) => String(v).trim()).filter(Boolean);
@@ -401,13 +476,20 @@
         }
       }
       spese = spese.filter((s) => s.id !== spesaToDelete.id);
+      showToast('Spesa eliminata correttamente.');
     } catch (e: any) {
-      error = e?.message || 'Errore aggiornamento tragitto trasferta dopo eliminazione spesa';
+      const message = e?.message || 'Errore aggiornamento tragitto trasferta dopo eliminazione spesa';
+      error = message;
+      showToast(message, false);
     }
   }
 
+  function handleDeleteSpesaError(event: CustomEvent<string>) {
+    showToast(event.detail || 'Errore eliminazione spesa', false);
+  }
+
   async function handleCalcolaDistanza() {
-    if (isLocked) return;
+    if (isReadOnly) return;
     if (!hasMapsApiKey) {
       mapUnavailable = true;
       kmError = 'Chiave Google Maps mancante: imposta VITE_GOOGLE_MAPS_API_KEY nel file .env';
@@ -431,15 +513,19 @@
   }
 
   async function handleCreateKmSpesa() {
-    if (!item || creatingSpesa || isLocked) return;
+    if (!item || creatingSpesa || isReadOnly) return;
 
     if (mapUnavailable) {
       const manualKm = Number(String(distanzaKmInput).replace(',', '.'));
       distanzaKm = Number.isFinite(manualKm) && manualKm >= 0 ? manualKm : null;
     }
 
-    const costoKm = Number(costoKmInput);
-    if (distanzaKm === null || Number.isNaN(costoKm) || costoKm <= 0) {
+    if (!selectedAutoId) {
+      kmError = 'Seleziona prima una automobile per la spesa Rimborso km.';
+      return;
+    }
+
+    if (distanzaKm === null) {
       kmError = 'dati chilometrici mancanti';
       return;
     }
@@ -454,34 +540,40 @@
     creatingSpesa = true;
     kmError = null;
     try {
-      const baseImporto = Number((distanzaKm * costoKm).toFixed(2));
-      const importo = isKmBandieraRossa ? Number((baseImporto * 2).toFixed(2)) : baseImporto;
+      const kmPercorsi = isKmBandieraRossa ? Number((distanzaKm * 2).toFixed(2)) : Number(distanzaKm.toFixed(2));
+      const routeTragitto = mapRef?.getRouteTragitto() ?? [];
+      const normalizedPartenza = routeTragitto[0] ?? partenzaClean;
+      const normalizedArrivo = routeTragitto[1] ?? arrivoClean;
       const tragitto = isKmBandieraRossa
-        ? [partenzaClean, arrivoClean, arrivoClean, partenzaClean]
-        : [partenzaClean, arrivoClean];
+        ? [normalizedPartenza, normalizedArrivo, normalizedArrivo, normalizedPartenza]
+        : [normalizedPartenza, normalizedArrivo];
       const { addSpesa } = useCreateSpese({ tId: item.id });
-      const created = await addSpesa({ type: 2, importo, tragitto });
+      const created = await addSpesa({ type: 2, importo: kmPercorsi, tragitto });
       await appendTragittoSegments(tragitto);
       spese = [created.payload, ...spese];
+      showToast('Spesa aggiunta correttamente.');
     } catch (e: any) {
-      kmError = e?.message || 'Errore creazione spesa chilometrica';
+      const message = e?.message || 'Errore creazione spesa chilometrica';
+      kmError = message;
+      showToast(message, false);
     } finally {
       creatingSpesa = false;
     }
   }
 
   function handleClearRouteInputs() {
-    if (isLocked) return;
+    if (isReadOnly) return;
     partenza = DEFAULT_PARTENZA;
     arrivo = '';
   }
 
   onMount(() => {
     partenza = DEFAULT_PARTENZA;
+    favoriteAutoId = getFavoriteAutomobileId();
   });
 
-  $: if (item?.utente_id) {
-    timeEntryUser.setUser({ id: item.utente_id } as User);
+  $: if (ownerId !== null) {
+    timeEntryUser.setUser({ id: ownerId } as User);
   }
 
   $: if (isAuthed) {
@@ -497,7 +589,18 @@
   }
 
   $: isLocked = item?.validation_level === 2;
-  $: if (isLocked && showSpesaForm) {
+  $: ownerId = getTrasfertaOwnerId(item);
+  $: isOwner = currentUserId !== null && ownerId !== null && Number(currentUserId) === ownerId;
+  // Scrittura (spese, scontrini, automobile, tragitto): solo superuser o proprietario,
+  // come tutti gli endpoint di mutazione del backend. Lo staff ha solo accesso in lettura.
+  $: canEdit = !!item && (isSuperuser || isOwner);
+  $: isReadOnly = isLocked || !canEdit;
+  // Validazione: solo superuser (1→2) oppure proprietario (0→1), come lato backend.
+  $: canShowValidateButton = !!item && (
+    (isSuperuser && item.validation_level === 1) ||
+    (!isSuperuser && isOwner && item.validation_level === 0)
+  );
+  $: if (isReadOnly && showSpesaForm) {
     showSpesaForm = false;
   }
 
@@ -511,6 +614,7 @@
 
 <div class=" p-4 grid gap-3">
   <LoaderOverlay show={loading} />
+  <LoaderOverlay show={generatingPdf} message="PDF in generazione" />
   {#key refreshKey}
 
   <div>
@@ -541,7 +645,7 @@
         />
       </button>
 
-      {#if isSuperuser}
+      {#if canShowValidateButton}
         <button type="button" on:click={handleValidateAction} aria-label="Valida mese corrente">
           <FontAwesomeIcon
             icon={faCheck}
@@ -551,24 +655,42 @@
         </button>
       {/if}
 
+      {#if canEdit}
+      <button
+        type="button"
+        on:click={handleGeneratePdf}
+        disabled={generatingPdf || !item}
+        aria-label="Crea PDF trasferta"
+        title="Crea PDF trasferta"
+      >
+        <FontAwesomeIcon
+          icon={faFilePdf}
+          class="text-[150%]"
+          style={`color: ${palette.secondary.main};`}
+        />
+      </button>
+      {/if}
+
     </div>
     
     <div
-      class="relative mt-[14px] mx-auto grid w-full max-w-[1200px] grid-cols-1 gap-[14px] rounded-2xl border border-[#4f4f50] bg-[#e7e3e3] p-2.5 shadow-[0_10px_25px_-5px_rgba(0,0,0,0.05),0_8px_10px_-6px_rgba(0,0,0,0.05)] md:grid-cols-[minmax(320px,1fr)_minmax(420px,1.1fr)]"
+      class="relative mt-[14px] mx-auto grid w-full max-w-[1200px] grid-cols-1 gap-[14px] rounded-2xl border border-[#4f4f50] bg-[#e7e3e3] p-2.5 shadow-[0_10px_25px_-5px_rgba(0,0,0,0.05),0_8px_10px_-6px_rgba(0,0,0,0.05)] md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]"
       class:locked-block={isLocked}
       class:validated-surface={isLocked}
     >
-      <div class="min-h-[320px] rounded-xl bg-white p-3" class:locked-block={isLocked}>
+      <div class="min-h-[320px] min-w-0 rounded-xl bg-white p-3" class:locked-block={isLocked}>
         <LoadReceipts
           userId={$timeEntryUser.user?.id ?? null}
           tId={item?.id ?? null}
           onSavedFileClick={handleScontrinoGet}
           onSavedFileDelete={handleScontrinoDelete}
-          disableSavedFileDelete={isLocked}
+          disableSavedFileDelete={isReadOnly}
+          disableUpload={isReadOnly}
+          on:uploadComplete={handleReceiptUploadComplete}
         />
       </div>
-      <div class="grid gap-2.5">
-        <div class="map-corner relative z-0 mx-auto h-[320px] w-full overflow-hidden rounded-xl bg-white shadow-[0_14px_36px_rgba(0,0,0,0.22)] max-sm:h-[220px]">
+      <div class="grid min-w-0 gap-2.5">
+        <div class="map-corner relative z-0 mx-auto h-[320px] w-full min-w-0 max-w-full overflow-hidden rounded-xl bg-white shadow-[0_14px_36px_rgba(0,0,0,0.22)] max-sm:h-[220px]">
           {#if hasMapsApiKey}
             <MapsPlugin bind:this={mapRef} />
           {:else}
@@ -582,7 +704,7 @@
             <button
               class="cursor-pointer rounded-[10px] border border-gray-300 bg-white px-3 py-2 text-[0.9rem] font-semibold transition hover:bg-gray-50"
               on:click={handleCalcolaDistanza}
-              disabled={isLocked || !hasMapsApiKey}
+              disabled={isReadOnly || !hasMapsApiKey}
             >
               Calcola
             </button>
@@ -597,7 +719,7 @@
                   step="0.1"
                   bind:value={distanzaKmInput}
                   placeholder="0.0"
-                  disabled={isLocked}
+                  disabled={isReadOnly}
                 />
               </div>
             {:else}
@@ -642,32 +764,25 @@
                 class:border-red-600={isKmBandieraRossa}
                 class:bg-red-500={isKmBandieraRossa}
                 class:text-white={isKmBandieraRossa}
-                aria-label="Raddoppia importo chilometrico"
+                aria-label="Andata e ritorno"
                 aria-pressed={isKmBandieraRossa}
                 title="Andata e Ritorno"
                 on:click={() => (isKmBandieraRossa = !isKmBandieraRossa)}
-                disabled={creatingSpesa || isLocked}
+                disabled={creatingSpesa || isReadOnly}
               >
                 <FontAwesomeIcon icon={faFlag} />
               </button>
             </div>
-            <div class="ml-auto inline-grid min-w-[180px] grid-cols-[minmax(110px,1fr)_auto] items-center gap-2 max-sm:ml-0 max-sm:min-w-full max-sm:grid-cols-[1fr_auto]">
-              <input
-                class="w-[160px] max-sm:w-full rounded-[10px] border border-gray-300 bg-white px-2 py-2 text-[0.8rem] outline-none focus:border-gray-400 focus:shadow-[0_0_0_2px_rgba(156,163,175,0.18)]"
-                type="text"
-                placeholder="Coeff. auto selezionata"
-                value={costoKmInput}
-                on:change={handleCoefficienteChange}
-                disabled={creatingSpesa || isLocked}
-              />
+            <div class="ml-auto inline-flex items-center justify-end gap-2 max-sm:ml-0 max-sm:w-full max-sm:justify-start">
               <button
-                class="min-w-[44px] cursor-pointer rounded-[10px] border border-gray-300 bg-white px-3 py-2 text-[1rem] font-bold transition hover:bg-gray-50"
+                class="inline-flex min-h-[42px] cursor-pointer items-center gap-2 rounded-[10px] border border-gray-300 bg-white px-3 py-2 text-[0.9rem] font-bold transition hover:bg-gray-50"
                 type="button"
                 on:click={handleCreateKmSpesa}
-                disabled={creatingSpesa || coefficienteSaving || isLocked}
+                disabled={creatingSpesa || coefficienteSaving || isReadOnly}
                 aria-label="Crea spesa chilometrica"
               >
                 <FontAwesomeIcon icon={faCalculator} />
+                <span>Aggiungi a spesa</span>
               </button>
             </div>
           </div>
@@ -679,7 +794,7 @@
                 placeholder="Inserisci partenza"
                 bind:value={partenza}
                 on:keydown={handleRouteInputsEnter}
-                disabled={creatingSpesa || isLocked}
+                disabled={creatingSpesa || isReadOnly}
               />
               <input
                 class="w-full rounded-[10px] border border-gray-300 bg-white px-3 py-2.5 text-[0.9rem] outline-none focus:border-gray-400 focus:shadow-[0_0_0_2px_rgba(156,163,175,0.18)]"
@@ -687,13 +802,13 @@
                 placeholder="Inserisci arrivo"
                 bind:value={arrivo}
                 on:keydown={handleRouteInputsEnter}
-                disabled={creatingSpesa || isLocked}
+                disabled={creatingSpesa || isReadOnly}
               />
               <button
                 class="inline-flex h-[42px] w-[42px] cursor-pointer items-center justify-center rounded-[10px] border border-gray-300 bg-white transition hover:bg-gray-50"
                 type="button"
                 on:click={handleClearRouteInputs}
-                disabled={creatingSpesa || isLocked}
+	                disabled={creatingSpesa || isReadOnly}
                 aria-label="Pulisci partenza e arrivo"
                 title="Pulisci campi"
               >
@@ -714,7 +829,7 @@
 	                class="w-full rounded-[10px] border border-gray-300 bg-white px-3 py-2.5 text-[0.95rem] outline-none focus:border-gray-400 focus:shadow-[0_0_0_2px_rgba(156,163,175,0.18)]"
 	                bind:value={selectedAutoId}
 	                on:change={handleAutomobileChange}
-	                disabled={creatingSpesa || autoLoading || isLocked}
+	                disabled={creatingSpesa || autoLoading || isReadOnly}
 	              >
 	                <option value="">Nessuna automobile</option>
 	                {#each autoOptions as option (option.id)}
@@ -766,7 +881,7 @@
           class="h-8 w-8 rounded-full border border-gray-300 bg-white text-lg leading-none transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
           type="button"
           on:click={() => (showSpesaForm = !showSpesaForm)}
-          disabled={creatingSpesa || isLocked}
+          disabled={creatingSpesa || isReadOnly}
           aria-label="Aggiungi spesa"
         >
           +
@@ -792,7 +907,12 @@
       {:else}
         <div class="grid gap-2">
           {#each spese as s (s.id)}
-            <SpeseCard spesa={s} readonly={isLocked} on:delete={(e) => handleDeleteSpesa(e.detail)} />
+            <SpeseCard
+              spesa={s}
+              readonly={isReadOnly}
+              on:delete={(e) => handleDeleteSpesa(e.detail)}
+              on:deleteError={handleDeleteSpesaError}
+            />
           {/each}
         </div>
       {/if}
@@ -806,6 +926,8 @@
   {/if}
   {/key}
 </div>
+
+<ToastState bind:open={toastOpen} success={toastSuccess} message={toastMessage} />
 
 <style>
   .validated-surface {
@@ -849,6 +971,9 @@
     display: block;
     width: 100% !important;
     height: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
   }
 
   .map-corner :global(.panel) {
@@ -857,7 +982,11 @@
 
   .map-corner :global(.map-wrap),
   .map-corner :global(.map) {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
     height: 100% !important;
+    overflow: hidden !important;
   }
 </style>
 

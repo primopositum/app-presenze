@@ -3,6 +3,8 @@
   import { createEventDispatcher } from 'svelte';
   import type { UpdateAccountPayload, User } from '$lib/services/users';
   import { useCreateSignatureApi, useLatestSignatureApi } from '$lib/hooks/useSignatureApi';
+  import { getJiraTokenStatus, overwriteJiraToken } from '$lib/services/jiraCredentials';
+  import { jiraControl } from '$lib/stores/jiraControl';
   import ErrorCard from '$lib/components/ErrorCard.svelte';
 
   export let user: User;
@@ -19,6 +21,7 @@
 
   export let onSave: ((payload: UpdateAccountPayload) => void | Promise<void>) | null = null;
   export let onDelete: ((userId: number) => void | Promise<void>) | null = null;
+  export let onSaved: ((message: string) => void) | null = null;
 
   const dispatch = createEventDispatcher<{ save: UpdateAccountPayload }>();
 
@@ -31,6 +34,7 @@
   $: canEdit = isAdmin || isOwnProfile;
   $: canDelete = isAdmin && !isSuperProfile && Number(currentUser?.id) !== Number(user.id);
   $: canManageSignature = isAdmin || isOwnProfile;
+  $: jiraFeaturesEnabled = $jiraControl.loaded && $jiraControl.enabled;
 
   // ── computed view ─────────────────────────────────────────────────────
 
@@ -40,6 +44,10 @@
   $: activeContract = user.contratti?.find((c) => c.is_active);
   $: roleLabel      = activeContract?.tipologia ?? 'Dipendente';
   $: isSuperProfile = user?.is_superuser === true;
+  $: contractOreSett = activeContract?.ore_sett ?? user.contratti?.[0]?.ore_sett ?? [];
+  $: contractWeeklyHours = (contractOreSett ?? []).reduce((sum, value) => sum + toHours(value), 0);
+  $: latestSaldoRecord = user.saldo?.saldo?.[user.saldo.saldo.length - 1] ?? null;
+  $: latestSaldoValue = latestSaldoRecord?.saldo ?? null;
 
   // ── edit state ────────────────────────────────────────────────────────
 
@@ -61,9 +69,15 @@
   let editNome      = '';
   let editCognome   = '';
   let editEmail     = '';
-  let editSaldo     = 0;
   let editIsActive  = false;
   let editTipologia = '';
+  let jiraTokenLoading = false;
+  let jiraTokenDraft = '';
+  let jiraTokenMask = '';
+  let jiraTokenError = '';
+  let jiraTokenHasToken = false;
+  let jiraTokenIsValid: boolean | null = null;
+  let lastJiraTokenLoadedForUserId: number | null = null;
   const TARGET_WIDTH_CM = 5;
   const TARGET_HEIGHT_CM = 2.5;
   const TARGET_DPI = 300;
@@ -129,7 +143,6 @@
     editNome      = user.nome      ?? '';
     editCognome   = user.cognome   ?? '';
     editEmail     = user.email     ?? '';
-    editSaldo     = Number(user.saldo?.valore_saldo_validato) || 0;
     editIsActive  = activeContract?.is_active ?? false;
     editTipologia = activeContract?.tipologia ?? '';
   }
@@ -145,6 +158,23 @@
     editing  = false;
     saving   = false;
     saveError = '';
+  }
+
+  function closeSaveError() {
+    saveError = '';
+  }
+
+  function closeSaveErrorFromBackdrop(event: MouseEvent) {
+    if (event.target === event.currentTarget) {
+      closeSaveError();
+    }
+  }
+
+  function closeSaveErrorFromKeyboard(event: KeyboardEvent) {
+    if (event.key === 'Escape' || event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      closeSaveError();
+    }
   }
 
   function openSignaturePicker() {
@@ -171,6 +201,7 @@
       if (result.error) throw new Error(result.error);
       signaturePreviewUrl = result.signature?.preview_data_url ?? '';
       showSignatureModal = true;
+      onSaved?.('Firma caricata correttamente.');
     } catch (e) {
       signatureUploadError = e instanceof Error ? e.message : 'Errore caricamento firma';
     } finally {
@@ -239,15 +270,6 @@
     }
 
     if (isAdmin) {
-      if (user.saldo) {
-        const saldoOriginale = Number(user.saldo.valore_saldo_validato) || 0;
-        if (editSaldo !== saldoOriginale) {
-          payload.saldo = {
-            valore_saldo_validato: String(editSaldo),
-            valore_saldo_sospeso: String(Number(user.saldo?.valore_saldo_sospeso) || 0)
-          };
-        }
-      }
       if (activeContract) {
         if (editTipologia !== (activeContract.tipologia ?? '') || editIsActive !== activeContract.is_active) {
           payload.contratti = [{
@@ -258,21 +280,83 @@
       }
     }
 
+    const nextJiraToken = jiraTokenDraft.trim();
+    const shouldOverwriteJiraToken = jiraFeaturesEnabled && isOwnProfile && nextJiraToken.length > 0;
+    const hasProfileChanges = Object.keys(payload).some((key) => key !== 'id' && key !== 'user_id');
+    if (!hasProfileChanges && !shouldOverwriteJiraToken) {
+      editing = false;
+      return;
+    }
+
     saving    = true;
     saveError = '';
 
     try {
-      if (onSave) {
-        await onSave(payload);
-      } else {
-        dispatch('save', payload);
+      if (hasProfileChanges) {
+        if (onSave) {
+          await onSave(payload);
+        } else {
+          dispatch('save', payload);
+        }
       }
+      if (shouldOverwriteJiraToken) {
+        await overwriteJiraToken(nextJiraToken);
+        await loadJiraTokenStatus();
+      }
+
+      onSaved?.(
+        shouldOverwriteJiraToken && !hasProfileChanges
+          ? 'Token Jira salvato correttamente.'
+          : 'Modifiche profilo salvate correttamente.'
+      );
       editing = false;
     } catch (e) {
       saveError = e instanceof Error ? e.message : 'Errore durante il salvataggio';
     } finally {
       saving = false;
     }
+  }
+
+  async function loadJiraTokenStatus() {
+    if (!jiraFeaturesEnabled) {
+      jiraTokenLoading = false;
+      jiraTokenMask = '';
+      jiraTokenError = '';
+      jiraTokenHasToken = false;
+      jiraTokenIsValid = null;
+      return;
+    }
+
+    if (!isOwnProfile) {
+      jiraTokenLoading = false;
+      jiraTokenMask = '';
+      jiraTokenError = '';
+      jiraTokenHasToken = false;
+      jiraTokenIsValid = null;
+      return;
+    }
+
+    jiraTokenLoading = true;
+    jiraTokenError = '';
+    try {
+      const data = await getJiraTokenStatus();
+      jiraTokenHasToken = !!data.token_present;
+      jiraTokenIsValid = data.token_valid;
+      jiraTokenMask = data.token_valid ? (data.masked_token || '*****') : '';
+      jiraTokenError = data.token_present && data.token_valid === false ? (data.error || 'Token Jira non valido') : '';
+    } catch (e) {
+      jiraTokenHasToken = false;
+      jiraTokenIsValid = null;
+      jiraTokenMask = '';
+      jiraTokenError = e instanceof Error ? e.message : 'Errore verifica token Jira';
+    } finally {
+      jiraTokenLoading = false;
+    }
+  }
+
+  $: if (jiraFeaturesEnabled && isOwnProfile && user?.id && lastJiraTokenLoadedForUserId !== Number(user.id)) {
+    lastJiraTokenLoadedForUserId = Number(user.id);
+    void loadJiraTokenStatus();
   }
 
   // ── 3-D tilt ─────────────────────────────────────────────────────────
@@ -286,8 +370,8 @@
     const r  = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const dx = (e.clientX - r.left) / r.width;
     const dy = (e.clientY - r.top)  / r.height;
-    rotateY  =  (dx - 0.5) * 12;
-    rotateX  = -(dy - 0.5) * 12;
+    rotateY  =  (dx - 0.5) * 6;
+    rotateX  = -(dy - 0.5) * 6;
     glowX    = dx * 100;
     glowY    = dy * 100;
   }
@@ -304,11 +388,18 @@
       maximumFractionDigits: 2,
     }).format(Number(n) || 0)} h`;
 
-  function openMail() {
-    const email = user?.email?.trim();
-    if (!email || editing) return;
-    window.location.href = `mailto:${email}`;
+  const fmtHours = (n: unknown) =>
+    `${new Intl.NumberFormat('it-IT', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(Number(n) || 0)} h`;
+
+  function toHours(value: unknown): number {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    const parsed = Number(String(value ?? '').replace(',', '.'));
+    return Number.isFinite(parsed) ? parsed : 0;
   }
+
 </script>
 
 <input
@@ -319,7 +410,7 @@
   on:change={onSignatureFileSelected}
 />
 
-<div style="perspective: 900px;" class="w-full">
+<div style="perspective: 900px;" class="mx-auto w-full max-w-[420px]">
   <Motion
     initial={{ opacity: 0, y: 32, scale: 0.94 }}
     animate={{ opacity: 1, y: 0,  scale: 1    }}
@@ -330,7 +421,7 @@
       use:motion
       style="
         transform: rotateX({rotateX}deg) rotateY({rotateY}deg);
-        transition: transform {isHover ? '0.07s' : '0.5s'} cubic-bezier(0.22,1,0.36,1);
+        transition: transform {isHover ? '0.14s' : '0.5s'} cubic-bezier(0.22,1,0.36,1);
         transform-style: preserve-3d;
         will-change: transform;
       "
@@ -348,7 +439,7 @@
 
         <div
           class="absolute inset-0 pointer-events-none z-10 rounded-2xl overflow-hidden"
-          style="background: radial-gradient(circle at {glowX}% {glowY}%, rgba(251,146,60,.07) 0%, transparent 65%);"
+          style="background: radial-gradient(circle at {glowX}% {glowY}%, rgba(251,146,60,.035) 0%, transparent 65%);"
         ></div>
 
         <!-- ── BANNER ──────────────────────────────────────── -->
@@ -483,15 +574,7 @@
             {/if}
           </div>
 
-          <div class="mt-0.5 mb-4">
-            {#if editing}
-              <input bind:value={editEmail} type="email" class="edit-input w-full text-[0.72rem]" placeholder="Email" />
-            {:else}
-              <p class="text-[0.72rem] text-zinc-400 font-medium tracking-wide truncate">{user.email}</p>
-            {/if}
-          </div>
-
-          <div class="h-px bg-gradient-to-r {isSuperProfile ? 'from-fuchsia-200 via-fuchsia-100' : 'from-orange-200 via-orange-100'} to-transparent mb-4"></div>
+          <div class="h-px bg-gradient-to-r {isSuperProfile ? 'from-fuchsia-200 via-fuchsia-100' : 'from-orange-200 via-orange-100'} to-transparent mt-3 mb-4"></div>
 
           <!-- ── INFO ROWS ─────────────────────────────────── -->
 
@@ -518,42 +601,65 @@
                 </div>
                 <span class="text-xs text-zinc-500 font-semibold tracking-wide">Saldo ore</span>
               </div>
-              {#if editing && isAdmin}
-                <input
-                  bind:value={editSaldo}
-                  type="number"
-                  step="0.5"
-                  class="edit-input w-24 text-right font-mono text-sm"
-                  placeholder="0"
-                />
-              {:else}
-                <span class="text-sm font-black {isSuperProfile ? 'text-fuchsia-600' : 'text-orange-600'} font-mono tabular-nums">
-                  {fmtSaldo(editing ? editSaldo : user.saldo?.valore_saldo_validato)}
-                </span>
-              {/if}
-            </div>
-
-            <!-- email row -->
-            <div
-              class="flex items-center justify-between px-3.5 py-3 rounded-xl bg-zinc-50 border border-zinc-100 transition-all duration-200 {editing ? '' : 'hover:bg-zinc-100 hover:border-zinc-200 cursor-pointer'}"
-              role="button"
-              tabindex="0"
-              on:click={openMail}
-              on:keydown={(e) => !editing && (e.key === 'Enter' || e.key === ' ') && openMail()}
-            >
-              <div class="flex items-center gap-2.5">
-                <div class="w-7 h-7 rounded-lg bg-zinc-100 flex items-center justify-center shrink-0">
-                  <svg viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5 text-zinc-400">
-                    <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/>
-                    <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/>
-                  </svg>
-                </div>
-                <span class="text-xs text-zinc-500 font-semibold tracking-wide">Email</span>
-              </div>
-              <span class="text-xs font-semibold text-zinc-700 truncate max-w-[150px]">
-                {editing ? editEmail || '—' : user.email}
+              <span class="text-sm font-black {isSuperProfile ? 'text-fuchsia-600' : 'text-orange-600'} font-mono tabular-nums">
+                {fmtSaldo(latestSaldoValue)}
               </span>
             </div>
+
+            <div class="flex items-center justify-between px-3.5 py-3 rounded-xl bg-zinc-50 border border-zinc-100">
+              <div class="flex items-center gap-2.5">
+                <div class="w-7 h-7 rounded-lg bg-zinc-100 flex items-center justify-center shrink-0">
+                  <svg viewBox="0 0 20 20" fill="none" class="w-3.5 h-3.5 text-zinc-400">
+                    <path d="M4 5.8h12M4 10h12M4 14.2h12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                  </svg>
+                </div>
+                <span class="text-xs text-zinc-500 font-semibold tracking-wide">Contratto</span>
+              </div>
+              <span class="text-sm font-black text-zinc-700 font-mono tabular-nums">
+                {fmtHours(contractWeeklyHours)}
+              </span>
+            </div>
+            {#if jiraFeaturesEnabled}
+              <!-- jira token row -->
+              <div class="flex items-center justify-between px-3.5 py-3 rounded-xl bg-zinc-50 border border-zinc-100">
+                <div class="flex items-center gap-2.5">
+                  <div class="w-7 h-7 rounded-lg bg-zinc-100 flex items-center justify-center shrink-0">
+                    <svg viewBox="0 0 20 20" fill="none" class="w-3.5 h-3.5 text-zinc-400">
+                      <rect x="4.5" y="9" width="11" height="7.5" rx="1.6" stroke="currentColor" stroke-width="1.6" />
+                      <path d="M7.5 9V7.6a2.5 2.5 0 015 0V9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+                    </svg>
+                  </div>
+                  <span class="text-xs text-zinc-500 font-semibold tracking-wide">Token Jira</span>
+                </div>
+                {#if isOwnProfile && editing}
+                  <div class="flex items-center gap-1.5">
+                    <input
+                      bind:value={jiraTokenDraft}
+                      type="password"
+                      class="edit-input w-36 text-right font-mono text-xs"
+                      placeholder="Sovrascrivi token"
+                      autocomplete="new-password"
+                      disabled={saving}
+                    />
+                  </div>
+                {:else}
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs font-semibold text-zinc-700 truncate max-w-[110px]">
+                      {#if jiraTokenLoading}
+                        Verifica...
+                      {:else if jiraTokenHasToken && jiraTokenIsValid === true}
+                        {jiraTokenMask || '*****'}
+                      {:else}
+                        {' '}
+                      {/if}
+                    </span>
+                  </div>
+                {/if}
+              </div>
+              {#if !editing && isOwnProfile && jiraTokenHasToken && jiraTokenIsValid === false && jiraTokenError}
+                <p class="text-[0.72rem] text-red-500 font-medium px-1">{jiraTokenError}</p>
+              {/if}
+            {/if}
 
             <!-- contratto attivo toggle — solo admin in edit -->
             {#if editing && isAdmin}
@@ -586,10 +692,7 @@
             <p class="mt-2 text-[0.72rem] text-red-500 font-medium">{signatureError}</p>
           {/if}
 
-          {#if editing}
-            {#if saveError}
-              <p class="mt-3 text-[0.72rem] text-red-500 font-medium">{saveError}</p>
-            {/if}
+         {#if editing}
             <div class="mt-4 pt-3.5 border-t {isSuperProfile ? 'border-fuchsia-50' : 'border-orange-50'} flex items-center gap-2">
               <button
                 type="button"
@@ -667,6 +770,19 @@
     {:else}
       <p class="text-sm text-zinc-500">Nessuna firma disponibile.</p>
     {/if}
+  </div>
+{/if}
+
+{#if saveError}
+  <div
+    class="error-card-backdrop"
+    role="button"
+    tabindex="0"
+    aria-label="Chiudi errore"
+    on:click={closeSaveErrorFromBackdrop}
+    on:keydown={closeSaveErrorFromKeyboard}
+  >
+    <ErrorCard message={saveError} onClose={closeSaveError} />
   </div>
 {/if}
 
@@ -751,8 +867,8 @@
     border: 1px solid rgba(255,255,255,.35); color: #fff;
     cursor: pointer; transition: background .18s, transform .12s;
   }
-  .pencil-btn:hover { background: rgba(255,255,255,.38); transform: scale(1.08); }
-  .pencil-btn:active { transform: scale(.95); }
+  .pencil-btn:hover { background: rgba(255,255,255,.3); transform: scale(1.03); }
+  .pencil-btn:active { transform: scale(.98); }
   .pencil-btn--active { background: rgba(255,255,255,.15); cursor: default; opacity: .55; }
   .pen-btn, .view-sign-btn {
     display: flex; align-items: center; justify-content: center;
@@ -761,8 +877,8 @@
     border: 1px solid rgba(255,255,255,.35); color: #fff;
     cursor: pointer; transition: background .18s, transform .12s;
   }
-  .pen-btn:hover, .view-sign-btn:hover { background: rgba(255,255,255,.38); transform: scale(1.08); }
-  .pen-btn:active, .view-sign-btn:active { transform: scale(.95); }
+  .pen-btn:hover, .view-sign-btn:hover { background: rgba(255,255,255,.3); transform: scale(1.03); }
+  .pen-btn:active, .view-sign-btn:active { transform: scale(.98); }
   .view-sign-btn--active { opacity: .7; cursor: default; }
   .trash-btn {
     display: flex; align-items: center; justify-content: center;
@@ -771,8 +887,8 @@
     border: 1px solid rgba(255,255,255,.35); color: #fff;
     cursor: pointer; transition: background .18s, transform .12s;
   }
-  .trash-btn:hover { background: rgba(248,113,113,.45); transform: scale(1.08); }
-  .trash-btn:active { transform: scale(.95); }
+  .trash-btn:hover { background: rgba(248,113,113,.35); transform: scale(1.03); }
+  .trash-btn:active { transform: scale(.98); }
   .trash-btn--active { background: rgba(248,113,113,.25); cursor: default; opacity: .65; }
 
   .action-buttons {
@@ -848,6 +964,16 @@
     inset: 0;
     z-index: 3200;
     background: rgba(0, 0, 0, 0.45);
+  }
+  .error-card-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 3400;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 16px;
   }
   .confirm-modal {
     position: fixed;

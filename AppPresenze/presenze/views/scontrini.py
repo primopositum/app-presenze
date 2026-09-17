@@ -2,6 +2,7 @@ import os
 import re
 import uuid
 import mimetypes
+from datetime import date
 from pathlib import Path
     
 
@@ -25,6 +26,10 @@ def _folder_name(trasferta: Trasferta) -> str:
     """Restituisce il nome cartella nel formato {data}_{t_id}."""
     data = trasferta.data.strftime("%Y-%m-%d")
     return f"{data}_{trasferta.pk}"
+
+
+def _is_staff_or_super(user):
+    return user.is_staff or user.is_superuser
 
 
 def _scontrino_upload_logic(request, t_id: int):
@@ -119,10 +124,10 @@ def _scontrini_list_logic(request, t_id: int):
             status=status.HTTP_404_NOT_FOUND,
         )
 
-    is_super = request.user.is_superuser
+    is_admin = _is_staff_or_super(request.user)
     is_owner = trasferta.utente_id == request.user.id
 
-    if not (is_super or is_owner):
+    if not (is_admin or is_owner):
         return Response(
             {"errors": "Non hai i permessi per visualizzare gli scontrini di questa trasferta."},
             status=status.HTTP_403_FORBIDDEN,
@@ -164,9 +169,9 @@ def _scontrino_get_or_delete_logic(request, t_id: int, filename: str, delete: bo
             status=status.HTTP_404_NOT_FOUND,
         )
 
-    is_super = request.user.is_superuser
+    is_admin = _is_staff_or_super(request.user)
     is_owner = trasferta.utente_id == request.user.id
-    if not (is_super or is_owner):
+    if not (is_admin or is_owner):
         return Response(
             {"errors": "Non hai i permessi per accedere agli scontrini di questa trasferta."},
             status=status.HTTP_403_FORBIDDEN,
@@ -174,6 +179,12 @@ def _scontrino_get_or_delete_logic(request, t_id: int, filename: str, delete: bo
     if delete and trasferta.validation_level == Trasferta.ValidationLevel.VALIDATO_ADMIN:
         return Response(
             {"errors": "Non è possibile eliminare scontrini di una trasferta validata dall'admin."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if delete and not (request.user.is_superuser or is_owner):
+        return Response(
+            {"errors": "Non hai i permessi per eliminare scontrini di questa trasferta."},
             status=status.HTTP_403_FORBIDDEN,
         )
 
@@ -357,13 +368,31 @@ def pdf_auto_delete(request, auto_id: int):
 @permission_classes([IsAuthenticated])
 def pdf_auto_current_month_list(request):
     """
-    GET /presenze/api/automobili/PDFauto/mese-corrente/
-    Ritorna i PDF presenti nella cartella del mese corrente:
+    GET /presenze/api/automobili/PDFauto/by-date/?data=YYYY-MM-DD
+    Ritorna i PDF presenti nella cartella del mese ricavato dalla data:
     TPDF_ROOT/<MM_YYYY>/
 
-    Tutti gli utenti autenticati vedono tutti i PDF del mese.
+    Parametro opzionale:
+    - data: formato YYYY-MM-DD oppure YYYY-MM (default: data odierna)
+
+    Tutti gli utenti autenticati vedono tutti i PDF del mese selezionato.
     """
-    mese_anno = timezone.localdate().strftime("%m_%Y")
+    data_param = (request.query_params.get("data") or "").strip()
+    if not data_param:
+        reference_date = timezone.localdate()
+    else:
+        normalized = data_param
+        if re.fullmatch(r"\d{4}-\d{2}", normalized):
+            normalized = f"{normalized}-01"
+        try:
+            reference_date = date.fromisoformat(normalized)
+        except ValueError:
+            return Response(
+                {"errors": "Formato data non valido. Usa YYYY-MM-DD o YYYY-MM (es. 2026-04-01)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    mese_anno = reference_date.strftime("%m_%Y")
     month_dir = TPDF_ROOT / mese_anno
 
     if not month_dir.exists():

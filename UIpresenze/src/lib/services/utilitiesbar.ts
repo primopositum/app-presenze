@@ -24,6 +24,7 @@ async function request(path: string, opts: Opts = {}) {
 
 export type UtilitiesBarItem = {
   id: number;
+  nome: string;
   link: string;
   colore: string;
   icon: string;

@@ -1,11 +1,12 @@
 ﻿from decimal import Decimal
 from datetime import date
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from presenze.models import (
     Utente, TimeEntry, Saldo, Trasferta, Spesa,
+    UtilitiesBar,
 )
 from .helpers import (
     make_utente, make_saldo, make_contratto, make_timeentry,
@@ -25,6 +26,7 @@ URL_PROFILE          = f"{BASE}/profile/"
 URL_CHANGE_PASSWORD  = f"{BASE}/change-password/"
 URL_CREATE_ACCOUNT   = f"{BASE}/create-account/"
 URL_DELETE_ACCOUNT   = f"{BASE}/delete-account/"
+URL_SALDO            = lambda u_id: f"{BASE}/saldo/{u_id}/"
 
 URL_TE_CREATE        = f"{BASE}/time-entries/"
 URL_TE_DETAIL        = lambda te_id: f"{BASE}/time-entries/{te_id}/"
@@ -33,15 +35,61 @@ URL_TE_RANGE_OVERRIDE = f"{BASE}/time-entries/range-override/"
 URL_TE_BULK_VALIDATE  = f"{BASE}/time-entries/bulk-validate-month/"
 
 URL_TRASFERTA_CREATE = f"{BASE}/trasferte/create/"
+URL_TRASFERTA_LIST   = f"{BASE}/trasferte/"
 URL_TRASFERTA_UPDATE = lambda t_id: f"{BASE}/trasferte/{t_id}/"
 URL_TRASFERTA_VALID  = lambda tr_id: f"{BASE}/trasferte/{tr_id}/validation/"
 URL_TRASFERTA_DELETE = lambda t_id: f"{BASE}/trasferte/{t_id}/delete/"
 
+URL_SPESA_LIST       = lambda t_id: f"{BASE}/trasferte/{t_id}/spese/"
 URL_SPESA_CREATE     = lambda t_id: f"{BASE}/trasferte/{t_id}/spese/create/"
 URL_SPESA_MANAGE     = lambda s_id: f"{BASE}/spese/{s_id}/"
 
 URL_SCONTRINI_LIST   = lambda t_id: f"{BASE}/trasferte/{t_id}/scontrini/"
 URL_SCONTRINO_DELETE = lambda t_id, filename: f"{BASE}/trasferte/{t_id}/scontrini/{filename}/delete/"
+URL_UTILITIESBAR     = f"{BASE}/utilitiesbar/"
+
+
+class TestSaldoEndpoint(TestCase):
+    def setUp(self):
+        self.utente = make_utente()
+        self.admin = make_utente(email="admin@test.com", is_superuser=True, is_staff=True)
+        make_saldo(self.utente)
+
+    def test_owner_legge_saldo(self):
+        res = auth_client(self.utente).get(URL_SALDO(self.utente.id))
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["utente_id"], self.utente.id)
+        self.assertEqual(res.data["saldo"], [])
+
+    def test_utente_non_modifica_saldo(self):
+        res = auth_client(self.utente).patch(
+            URL_SALDO(self.utente.id),
+            {"periodo": "05-2026", "saldo": 12},
+            format="json",
+        )
+
+        self.assertEqual(res.status_code, 403)
+
+    def test_admin_upsert_saldo_stesso_periodo(self):
+        client = auth_client(self.admin)
+
+        res1 = client.patch(
+            URL_SALDO(self.utente.id),
+            {"periodo": "05-2026", "saldo": 12},
+            format="json",
+        )
+        res2 = client.patch(
+            URL_SALDO(self.utente.id),
+            {"periodo": "05-2026", "saldo": 15},
+            format="json",
+        )
+
+        self.assertEqual(res1.status_code, 200)
+        self.assertEqual(res2.status_code, 200)
+        self.assertEqual(len(res2.data["saldo"]), 1)
+        self.assertEqual(res2.data["saldo"][0]["saldo"], 15.0)
+        self.assertEqual(res2.data["saldo"][0]["validazioni"], 2)
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +318,53 @@ class TestUsersList(TestCase):
     def test_non_autenticato_restituisce_401(self):
         res = APIClient().get(f"{BASE}/users/")
         self.assertEqual(res.status_code, 401)
+
+
+class TestUtilitiesBarList(TestCase):
+
+    def setUp(self):
+        self.utente = make_utente()
+
+    @override_settings(ALLOWED_HOSTS=["testserver", "100.50.2.1"])
+    def test_link_localhost_usa_host_richiesta_e_mantiene_porta(self):
+        utilities_bar = UtilitiesBar.objects.create(
+            nome="Dashboard locale",
+            link="http://localhost:6000/dashboard?view=main",
+            colore="#ffffff",
+            icon=UtilitiesBar.IconName.CIRCLE,
+            posizione=1,
+        )
+
+        res = auth_client(self.utente).get(
+            URL_UTILITIESBAR,
+            HTTP_HOST="100.50.2.1:7999",
+        )
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data[0]["nome"], "Dashboard locale")
+        self.assertEqual(
+            res.data[0]["link"],
+            "http://100.50.2.1:6000/dashboard?view=main",
+        )
+        utilities_bar.refresh_from_db()
+        self.assertEqual(utilities_bar.link, "http://localhost:6000/dashboard?view=main")
+
+    @override_settings(ALLOWED_HOSTS=["testserver", "100.50.2.1"])
+    def test_link_non_localhost_non_viene_modificato(self):
+        UtilitiesBar.objects.create(
+            link="https://example.com/app",
+            colore="#ffffff",
+            icon=UtilitiesBar.IconName.CIRCLE,
+            posizione=1,
+        )
+
+        res = auth_client(self.utente).get(
+            URL_UTILITIESBAR,
+            HTTP_HOST="100.50.2.1:7999",
+        )
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data[0]["link"], "https://example.com/app")
     
 
 # ---------------------------------------------------------------------------
@@ -460,11 +555,12 @@ class TestTimeEntryValidation(TestCase):
             format="json"
         )
         saldo = Saldo.objects.get(utente=self.utente)
-        self.assertEqual(saldo.valore_saldo_validato, Decimal("4.00"))
-    def test_validazione_admin_sposta_da_sospeso_a_validato(self):
+        self.assertEqual(saldo.saldo[-1]["saldo"], 4)
+        self.assertEqual(saldo.saldo[-1]["validazioni"], 1)
+
+    def test_validazione_admin_upsert_saldo_mensile(self):
         saldo = Saldo.objects.get(utente=self.utente)
-        saldo.valore_saldo_sospeso = Decimal("4.00")
-        saldo.valore_saldo_validato = Decimal("0.00")
+        saldo.saldo = []
         saldo.save()
 
         te = make_timeentry(
@@ -482,9 +578,8 @@ class TestTimeEntryValidation(TestCase):
         self.assertEqual(res.status_code, 200)
 
         saldo.refresh_from_db()
-        self.assertEqual(saldo.valore_saldo_sospeso, Decimal("0.00"))
-        self.assertEqual(saldo.valore_saldo_validato, Decimal("4.00"))
-
+        self.assertEqual(saldo.saldo[-1]["saldo"], 4)
+        self.assertEqual(saldo.saldo[-1]["validazioni"], 1)
 
 # ---------------------------------------------------------------------------
 # Trasferta views
@@ -685,6 +780,21 @@ class TestTrasfertaDelete(TestCase):
         self.assertEqual(res.status_code, 403)
 
 
+class TestTrasfertaStaffAccess(TestCase):
+
+    def setUp(self):
+        self.utente = make_utente()
+        self.staff = make_utente(email="staff@test.com", is_staff=True)
+        self.trasferta = make_trasferta(self.utente)
+
+    def test_staff_vede_trasferte_altrui_in_lista(self):
+        res = auth_client(self.staff).get(URL_TRASFERTA_LIST)
+
+        self.assertEqual(res.status_code, 200)
+        ids = {item["id"] for item in res.data}
+        self.assertIn(self.trasferta.id, ids)
+
+
 # ---------------------------------------------------------------------------
 # Spesa views
 # ---------------------------------------------------------------------------
@@ -791,12 +901,38 @@ class TestSpesaUpdateDelete(TestCase):
         self.assertEqual(res.status_code, 403)
 
 
+class TestSpesaStaffAccess(TestCase):
+
+    def setUp(self):
+        self.utente = make_utente()
+        self.staff = make_utente(email="staff@test.com", is_staff=True)
+        self.trasferta = make_trasferta(self.utente)
+        self.spesa = make_spesa(self.trasferta)
+
+    def test_staff_vede_spese_di_trasferta_altrui(self):
+        res = auth_client(self.staff).get(URL_SPESA_LIST(self.trasferta.id))
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.data), 1)
+        self.assertEqual(res.data[0]["id"], self.spesa.id)
+
+    def test_staff_non_modifica_spesa_altrui(self):
+        res = auth_client(self.staff).put(
+            URL_SPESA_MANAGE(self.spesa.id),
+            {"importo": "50.00"},
+            format="json",
+        )
+
+        self.assertEqual(res.status_code, 403)
+
+
 class TestScontrinoDelete(TestCase):
 
     def setUp(self):
         self.utente = make_utente()
         self.altro = make_utente(email="altro@test.com")
         self.admin = make_utente(email="admin@test.com", is_superuser=True, is_staff=True)
+        self.staff = make_utente(email="staff@test.com", is_staff=True)
         self.trasferta = make_trasferta(self.utente)
 
         folder = Path(settings.SCONTRINI_ROOT) / f"{self.trasferta.data.strftime('%Y-%m-%d')}_{self.trasferta.id}"
@@ -827,6 +963,21 @@ class TestScontrinoDelete(TestCase):
         res = auth_client(self.altro).delete(
             URL_SCONTRINO_DELETE(self.trasferta.id, self.filename)
         )
+        self.assertEqual(res.status_code, 403)
+        self.assertTrue(self.file_path.exists())
+
+    def test_staff_puo_vedere_scontrini_di_trasferta_altrui(self):
+        res = auth_client(self.staff).get(URL_SCONTRINI_LIST(self.trasferta.id))
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.data), 1)
+        self.assertEqual(res.data[0]["filename"], self.filename)
+
+    def test_staff_non_puo_eliminare_scontrino_altrui(self):
+        res = auth_client(self.staff).delete(
+            URL_SCONTRINO_DELETE(self.trasferta.id, self.filename)
+        )
+
         self.assertEqual(res.status_code, 403)
         self.assertTrue(self.file_path.exists())
 
@@ -1402,9 +1553,36 @@ class TestTimeEntryBulkValidateMonth(TestCase):
         self.assertEqual(res.status_code, 200)
  
         saldo = Saldo.objects.get(utente=self.utente)
-        self.assertEqual(saldo.valore_saldo_validato, Decimal("5.00"))
+        self.assertEqual(saldo.saldo[-1]["periodo"], "01-2025")
+        self.assertEqual(saldo.saldo[-1]["saldo"], 5)
         self.assertEqual(res.data["delta_saldo_validato"], "5.00")
- 
+
+    def test_superuser_seconda_chiamata_non_riapplica_delta(self):
+        make_timeentry(
+            self.utente,
+            data=date(2025, 1, 6),
+            type=TimeEntry.EntryType.VERSAMENTO_BANCA_ORE,
+            ore_tot=Decimal("5.00"),
+            validation_level=TimeEntry.ValidationLevel.VALIDATO_UTENTE,
+        )
+        body = {
+            "data": "2025-01-15",
+            "utente_id": self.utente.id,
+        }
+
+        res1 = auth_client(self.admin).patch(URL_TE_BULK_VALIDATE, body, format="json")
+        res2 = auth_client(self.admin).patch(URL_TE_BULK_VALIDATE, body, format="json")
+
+        self.assertEqual(res1.status_code, 200)
+        self.assertEqual(res2.status_code, 200)
+        self.assertEqual(res1.data["count_updated"], 1)
+        self.assertEqual(res2.data["count_updated"], 0)
+        self.assertEqual(res1.data["delta_saldo_validato"], "5.00")
+        self.assertEqual(res2.data["delta_saldo_validato"], "0.00")
+
+        saldo = Saldo.objects.get(utente=self.utente)
+        self.assertEqual(saldo.saldo[-1]["saldo"], 5)
+
     def test_superuser_aggiorna_saldo_per_prelievo_negativo(self):
         make_timeentry(
             self.utente,
@@ -1420,7 +1598,7 @@ class TestTimeEntryBulkValidateMonth(TestCase):
         self.assertEqual(res.status_code, 200)
  
         saldo = Saldo.objects.get(utente=self.utente)
-        self.assertEqual(saldo.valore_saldo_validato, Decimal("-3.00"))
+        self.assertEqual(saldo.saldo[-1]["saldo"], -3)
  
     def test_superuser_saldo_netto_versamento_e_prelievo(self):
         # 5h versamento + 2h prelievo = +3h netto
@@ -1444,7 +1622,7 @@ class TestTimeEntryBulkValidateMonth(TestCase):
         }, format="json")
  
         saldo = Saldo.objects.get(utente=self.utente)
-        self.assertEqual(saldo.valore_saldo_validato, Decimal("3.00"))
+        self.assertEqual(saldo.saldo[-1]["saldo"], 3)
  
     def test_superuser_non_tocca_entry_a_livello_0(self):
         make_timeentry(
@@ -1461,6 +1639,8 @@ class TestTimeEntryBulkValidateMonth(TestCase):
  
         te = TimeEntry.objects.get(utente=self.utente)
         self.assertEqual(te.validation_level, TimeEntry.ValidationLevel.AUTO)
+        saldo = Saldo.objects.get(utente=self.utente)
+        self.assertEqual(saldo.saldo, [])
  
     # --- Validazione input ---
  

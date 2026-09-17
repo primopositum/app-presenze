@@ -19,6 +19,7 @@ from ..models import Utente, Trasferta, Signature, SignatureEvent
 from ..serializer import TrasfertaSerializer
 from ..TrasfertePDF import (
     TrasfertePDFView,
+    TrasfertaSingolaPDFView,
     build_trasferte_pdf_bytes,
     _get_client_ip,
     _signature_to_temp_file,
@@ -321,6 +322,11 @@ def trasferte_mese_scorso_pdf(request):
     return TrasfertePDFView.as_view()(request)
 
 
+@permission_classes([IsAuthenticated])
+def trasferta_singola_pdf(request):
+    return TrasfertaSingolaPDFView.as_view()(request)
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def trasferta_dossier(request, u_id: int, data: str):
@@ -362,7 +368,7 @@ def trasferta_dossier(request, u_id: int, data: str):
         monthrange(reference_date.year, reference_date.month)[1],
     )
 
-    trasferte_mese = list(
+    trasferte_mese = list( 
         Trasferta.objects.filter(
             utente_id=u_id,
             data__range=(month_start, month_end),

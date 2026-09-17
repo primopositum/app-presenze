@@ -1,14 +1,19 @@
 
 <script lang="ts">
-    import type { Trasferta } from '$lib/services/trasferte';
+    import { getTrasfertaOwnerId, type Trasferta } from '$lib/services/trasferte';
     import { useDeleteTrasferta } from '$lib/hooks/useTrasferte';
     import { timeEntryReload } from '$lib/stores/timeEntryReload';
     import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
     import { faTrash } from '@fortawesome/free-solid-svg-icons';
+    import { auth } from '$lib/stores/auth';
 
     export let trasf: Trasferta | null = null;
     export let onClick: ((trasf: Trasferta) => void) | undefined;
     let deleting = false;
+    $: ownerId = getTrasfertaOwnerId(trasf);
+    $: canDelete = !!trasf
+        && trasf.validation_level !== 2
+        && (!!$auth.user?.is_superuser || (ownerId !== null && Number($auth.user?.id) === ownerId));
 
     function handleClick() {
         if (!trasf) return;
@@ -48,7 +53,7 @@
 
     <div class="head ${validationBg(trasf?.validation_level)}">
         <div class="title">{trasf?.azienda || `Trasferta #${trasf?.id ?? ''}`}</div>
-        {#if trasf?.validation_level !== 2}
+        {#if canDelete}
             <button
                 type="button"
                 class="trash"

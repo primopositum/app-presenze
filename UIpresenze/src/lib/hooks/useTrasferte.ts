@@ -13,7 +13,8 @@ import {
   type ScontrinoUploadResponse,
   uploadScontrinoByTrasferta,
   deleteScontrinoByTrasferta,
-  validateTrasferta
+  validateTrasferta,
+  getTrasfertaSinglePdf
 } from '$lib/services/trasferte';
 import { getPDFautoCurrentMonthList, uploadPDFauto, type AutoPdfCurrentMonthItem } from '$lib/services/automobili';
 import { refreshProfileUser } from '$lib/services/users';
@@ -87,9 +88,9 @@ export function useUploadPdfAuto(params: { auto_id: string | number }) {
   };
 }
 
-export function usePdfAutoCurrentMonthList() {
+export function usePdfAutoCurrentMonthList(data?: string) {
   return async (): Promise<{ ok: true; payload: AutoPdfCurrentMonthItem[] }> => {
-    const list = await getPDFautoCurrentMonthList();
+    const list = await getPDFautoCurrentMonthList(data);
     return { ok: true, payload: list };
   };
 }
@@ -97,5 +98,14 @@ export function useValidateTrasferta(params: { tId: string | number }) {
   return async (): Promise<{ ok: true; payload: Trasferta }> => {
     const validated = await validateTrasferta(params.tId);
     return { ok: true, payload: validated };
+  };
+}
+
+export function useTrasfertaSinglePdf(params: { tId: string | number }) {
+  return {
+    generatePdf: async (): Promise<{ ok: true; payload: Blob }> => {
+      const pdf = await getTrasfertaSinglePdf(params.tId);
+      return { ok: true, payload: pdf };
+    }
   };
 }

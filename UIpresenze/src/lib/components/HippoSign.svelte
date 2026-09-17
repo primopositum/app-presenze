@@ -5,6 +5,7 @@
   export let phrase1 = '';
   export let phrase2 = '';
   export let phrase3 = '';
+  export let phrase4 = '';
   export let alwaysOpen = false;
   export let inlinePanel = false;
 
@@ -110,7 +111,7 @@
     style="transition: opacity 250ms ease, transform 250ms ease"
   >
     {#if isOpen}
-      <Notification {phrase1} {phrase2} {phrase3} />
+      <Notification {phrase1} {phrase2} {phrase3} {phrase4} />
     {/if}
   </div>
 </div>

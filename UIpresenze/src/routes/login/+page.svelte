@@ -44,7 +44,7 @@
 
 <main class="flex min-h-screen flex-col items-center justify-center px-4">
   <LoaderOverlay show={loading} />
-  <img src="/logo2.png" alt="logo1" class="mb-4 w-full max-w-[240px] sm:max-w-[320px]">
+  <img src="/logo2.png" alt="logo1" class="mb-4 w-[168px] sm:w-[524px]">
 
   <div class="py-6 w-full max-w-md">
     <div class="border border-slate-300 rounded-lg p-6 shadow-[0_2px_22px_-4px_rgba(93,96,127,0.2)]">

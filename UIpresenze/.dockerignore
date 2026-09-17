@@ -9,8 +9,8 @@ dist/
 .svelte-kit/
 
 # Environment
-.env
 .env.*
+!.env
 
 # Logs
 *.log

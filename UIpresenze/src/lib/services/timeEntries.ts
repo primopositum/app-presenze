@@ -12,8 +12,10 @@ async function request(path: string, opts: Opts = {}) {
   const isJson = res.headers.get('content-type')?.includes('application/json');
   const data = isJson ? await res.json() : await res.text();
   if (!res.ok) {
-    const message = (isJson && (data?.error || data?.detail)) || res.statusText;
-    throw new Error(message || 'Request failed');
+    const message = (isJson && (data?.error || data?.detail || data?.errors)) || res.statusText;
+    const error = new Error(message || 'Request failed') as Error & { status?: number };
+    error.status = res.status;
+    throw error;
   } 
   return data as any;
 }
@@ -106,6 +108,31 @@ export function createTimeEntryRangeOverride(entry: TimeEntryRangeOverrideCreate
 }
 
 
+function filenameFromContentDisposition(header: string | null) {
+  if (!header) return null;
+  const utf8Match = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) return decodeURIComponent(utf8Match[1].replace(/"/g, ''));
+  const filenameMatch = header.match(/filename="?([^";]+)"?/i);
+  return filenameMatch?.[1] ?? null;
+}
+
+function apiErrorMessage(data: any, fallback: string) {
+  if (!data) return fallback;
+  if (typeof data === 'string') return data || fallback;
+  if (typeof data.detail === 'string') return data.detail;
+  if (typeof data.errors === 'string') return data.errors;
+  if (typeof data.error === 'string') return data.error;
+  if (Array.isArray(data.errorMessages) && data.errorMessages.length > 0) {
+    return data.errorMessages.join('; ');
+  }
+  if (data.errors && typeof data.errors === 'object') {
+    return Object.entries(data.errors)
+      .map(([field, value]) => `${field}: ${Array.isArray(value) ? value.join(', ') : value}`)
+      .join('; ');
+  }
+  return fallback;
+}
+
 export async function getMeseScorsoPdf(params: { u_id?: number; date?: string; note?: string } = {}) {
   const qs = new URLSearchParams();
   if (params.u_id !== undefined) qs.set('u_id', String(params.u_id));
@@ -114,10 +141,15 @@ export async function getMeseScorsoPdf(params: { u_id?: number; date?: string; n
   const url = `${BASE}/pdf/${qs.toString() ? `?${qs.toString()}` : ''}`;
   const res = await authFetch(url, { method: 'GET' });
   if (!res.ok) {
-    const message = res.statusText || 'Request failed';
+    const isJson = res.headers.get('content-type')?.includes('application/json');
+    const data = isJson ? await res.json().catch(() => null) : await res.text().catch(() => '');
+    const message = apiErrorMessage(data, res.statusText || 'Request failed');
     throw new Error(message);
   }
-  return res.blob(); 
+  return {
+    blob: await res.blob(),
+    filename: filenameFromContentDisposition(res.headers.get('Content-Disposition'))
+  };
 }
 
 

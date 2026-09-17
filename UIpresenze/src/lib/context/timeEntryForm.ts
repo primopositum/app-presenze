@@ -11,6 +11,7 @@ export type TimeEntryFormOpenArgs = {
   type: number;            
   oreTot: number;
   note?: string;
+  forbiddenTypes?: number[];
 };
 
 export type TimeEntryFormState = {

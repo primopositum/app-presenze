@@ -12,6 +12,7 @@
     userId: number;
   }
   import HippoSign from '$lib/components/HippoSign.svelte';
+  import HourBalance from '$lib/components/HourBalance.svelte';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import TimeEntriesCalendar from '$lib/components/TimeEntriesCalendar.svelte';
@@ -33,26 +34,61 @@
 	import PreSetWeek from '$lib/components/PreSetWeek.svelte';
   import TimeEntryFormProvider from '$lib/components/ctx/TimeEntryFormProvider.svelte';
   import ErrorCard from '$lib/components/ErrorCard.svelte';
-  import { hourBalanceExtra } from '$lib/stores/hourBalanceExtra';
+  import Useractivity from '$lib/components/Jira/JiraUserActivity.svelte';
+  import { jiraControl } from '$lib/stores/jiraControl';
   import { useOneUserApi } from '$lib/hooks/useUserApi.js';
+  import { useSaldoApi } from '$lib/hooks/useSaldoApi';
+  import type { SaldoRecord } from '$lib/services/saldo';
+  import {
+    getJiraActivitiesForDay,
+    useJiraTimesheetMonthCache
+  } from '$lib/hooks/useJiraTimesheetMonth';
+  import type { JiraTimesheetActivity } from '$lib/services/jira';
   let loading = false;
   let error: string | null = null;
 
+  function formatLocalYmd(date: Date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  function parseJiraTimeToSeconds(value?: string) {
+    if (!value) return 0;
+    const text = value.toLowerCase();
+    const hours = text.match(/(\d+)\s*h/);
+    const minutes = text.match(/(\d+)\s*m/);
+    const seconds = text.match(/(\d+)\s*s/);
+    return (Number(hours?.[1]) || 0) * 3600 + (Number(minutes?.[1]) || 0) * 60 + (Number(seconds?.[1]) || 0);
+  }
+
+  function jiraActivitySeconds(activity: JiraTimesheetActivity) {
+    const seconds = Number(activity.time_spent_seconds);
+    return Number.isFinite(seconds) && seconds > 0
+      ? seconds
+      : parseJiraTimeToSeconds(activity.time_spent);
+  }
+
   const today = new Date(); 
+  const todayYmd = formatLocalYmd(today);
   let year = today.getFullYear();
   let month = today.getMonth() + 1; // 1-12 
   let userId: number | null = null;
   let user: User | null = null;
   let entries: TimeEntry[] = [];
   let dayHours: DayHours[] = [];
-  let selectedDate: string | null = null;
+  let selectedDate: string | null = todayYmd;
   let selectedEntries: TimeEntry[] = [];
+  let selectedDayWorkedHours = 0;
+  let selectedDayForbidType3 = false;
   let updatingValidation = false;
   let confirmValidateOpen = false;
   let updateValidationLevel = useUpdateValidationLevel({ date: '' });
   let generatePdf = useGeneratePDF({ date: '' });
   let generatingPdf = false;
   let totalMonthHours = 0;
+  let actualWorkedMonthHours = 0;
   let expectedMonthHours = 0;
   let noteDraft = '';
   let noteInitial = '';
@@ -66,9 +102,15 @@
   let currentNoteEntry: TimeEntry | null = null;
   let saldoVisuale = 0;
   let saldoValidatoVisuale = 0;
-  let saldoValidatoOrig: number | string | null = null;
-  let saldoTimeEntryVisuale: number | string | null = null;
-  let saldoPersistenteVisuale: number | string | null = null;
+  let saldoRecords: SaldoRecord[] = [];
+  let hourBalancePeriodo = '';
+  let selectedJiraEmail: string | null = null;
+  let selectedJiraActivities: JiraTimesheetActivity[] = [];
+  let jiraMonthLoadKey = '';
+  const jiraTimesheetMonth = useJiraTimesheetMonthCache();
+  const jiraTimesheetMonthData = jiraTimesheetMonth.data;
+  const jiraTimesheetMonthLoading = jiraTimesheetMonth.loading;
+  const jiraTimesheetMonthError = jiraTimesheetMonth.error;
 
   function splitYmd(dateStr: string) {
     const [y, m, d] = dateStr.split('-').map(Number);
@@ -95,7 +137,12 @@
     if (t === 12) return 'Sciopero';
     if (t === 13) return 'Festivita';
     if (t === 14) return 'Visite mediche L.106/25';
+    if (t === 15) return 'Ricovero presso struttura ospedaliera';
     return `Tipo ${t}`;
+  }
+
+  function latestSaldoValue(records: SaldoRecord[]) {
+    return records[records.length - 1]?.saldo ?? 0;
   }
 
   function getActiveOreSett(contratti?: Array<any>) {
@@ -117,7 +164,28 @@
     return total;
   }
 
+  function readMonthQuery() {
+    const qYear = Number($page.url.searchParams.get('year'));
+    const qMonth = Number($page.url.searchParams.get('month'));
+    if (Number.isInteger(qYear) && qYear > 0 && Number.isInteger(qMonth) && qMonth >= 1 && qMonth <= 12) {
+      year = qYear;
+      month = qMonth;
+    }
+  }
+
+  function syncMonthQuery() {
+    const params = new URLSearchParams($page.url.searchParams);
+    params.set('year', String(year));
+    params.set('month', String(month));
+    goto(`${$page.url.pathname}?${params.toString()}`, {
+      replaceState: true,
+      noScroll: true,
+      keepFocus: true
+    });
+  }
+
   onMount(() => {
+    readMonthQuery();
     timeEntryUser.init();
   });
 
@@ -188,7 +256,13 @@ export const loadData = async () => {
         }))
       }));
       await refreshProfileUser();
-      await useOneUserApi($timeEntryUser.user?.id)
+      await useOneUserApi($timeEntryUser.user?.id);
+      if (userId) {
+        const saldoResult = await useSaldoApi(userId);
+        saldoRecords = saldoResult.records;
+      } else {
+        saldoRecords = [];
+      }
     } catch (e: any) {
       error = e?.message || 'Errore caricamento';
     } finally {
@@ -199,13 +273,15 @@ export const loadData = async () => {
   function prevMonth() {
     if (month === 1) { month = 12; year -= 1; } else { month -= 1; }
     selectedDate = null;
-    loadData();
+    selectedDayForbidType3 = false;
+    syncMonthQuery();
   }
 
   function nextMonth() {
     if (month === 12) { month = 1; year += 1; } else { month += 1; }
     selectedDate = null;
-    loadData();
+    selectedDayForbidType3 = false;
+    syncMonthQuery();
   }
 
   async function handleValidateMonth() {
@@ -215,6 +291,7 @@ export const loadData = async () => {
     try {
       await updateValidationLevel();
       await loadData();
+      timeEntryReload.bump();
     } catch (e: any) {
       error = e?.message || 'Errore validazione';
     } finally {
@@ -243,10 +320,10 @@ export const loadData = async () => {
     error = null;
     try {
       const { payload } = await generatePdf();
-      const url = URL.createObjectURL(payload);
+      const url = URL.createObjectURL(payload.blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `presenze-${year}-${String(month).padStart(2, '0')}.pdf`;
+      link.download = payload.filename ?? `presenze-${year}-${String(month).padStart(2, '0')}.pdf`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -328,16 +405,99 @@ export const loadData = async () => {
     noteError = null;
   }
 
+  async function loadJiraMonth(force = false) {
+    if (!userId || !$jiraControl.loaded || !$jiraControl.enabled) return;
+    if ($auth.user?.is_superuser && !selectedJiraEmail) return;
+    await jiraTimesheetMonth.loadMonth({
+      year,
+      month,
+      email: selectedJiraEmail,
+      force
+    });
+  }
+
+  async function refreshAllData() {
+    await Promise.allSettled([
+      loadData(),
+      loadJiraMonth(true)
+    ]);
+  }
+
+  function injectJiraWorklog(day: string, activity: JiraTimesheetActivity) {
+    return jiraTimesheetMonth.injectWorklogIntoCache(day, activity, selectedJiraEmail);
+  }
+
+  function removeJiraWorklog(day: string, worklogId: string) {
+    return jiraTimesheetMonth.removeWorklogFromCache(day, worklogId, selectedJiraEmail);
+  }
+
   $: if (userId) {
     $timeEntryReload;
+    year;
+    month;
     loadData();
   }
+
+  $: selectedJiraEmail = $auth.user?.is_superuser ? (user?.email ?? null) : null;
+
+  $: {
+    const nextJiraMonthLoadKey = `${year}-${month}|${selectedJiraEmail ?? ''}|${userId ?? ''}|${$jiraControl.loaded ? 1 : 0}|${$jiraControl.enabled ? 1 : 0}`;
+    if (
+      userId &&
+      $jiraControl.loaded &&
+      $jiraControl.enabled &&
+      (!$auth.user?.is_superuser || selectedJiraEmail) &&
+      nextJiraMonthLoadKey !== jiraMonthLoadKey
+    ) {
+      jiraMonthLoadKey = nextJiraMonthLoadKey;
+      void loadJiraMonth(false);
+    }
+  }
+
+  $: selectedJiraActivities = getJiraActivitiesForDay(
+    $jiraTimesheetMonthData,
+    selectedDate,
+    selectedJiraEmail
+  );
+
+  $: incompleteJiraWorklogDates = (() => {
+    if (
+      !$jiraControl.enabled ||
+      !$jiraTimesheetMonthData ||
+      $jiraTimesheetMonthData.year !== year ||
+      $jiraTimesheetMonthData.month !== month
+    ) return [];
+
+    return dayHours.flatMap((day) => {
+      if (day.date >= todayYmd) return [];
+
+      const expectedSeconds = (day.entries || []).reduce((total, entry) => {
+        if (entry.type !== 1 && entry.type !== 3) return total;
+        return total + Math.max(0, Number(entry.ore_tot) || 0) * 3600;
+      }, 0);
+      if (expectedSeconds <= 0) return [];
+
+      const loggedSeconds = getJiraActivitiesForDay(
+        $jiraTimesheetMonthData,
+        day.date,
+        selectedJiraEmail
+      ).reduce((total, activity) => total + jiraActivitySeconds(activity), 0);
+
+      return loggedSeconds < expectedSeconds ? [day.date] : [];
+    });
+  })();
 
   $: if (selectedDate) {
     selectedEntries = entries.filter((entry) => entry.data === selectedDate);
   } else {
     selectedEntries = [];
   }
+  $: selectedDayWorkedHours = selectedEntries.reduce((acc, entry) => {
+    const hours = Number(entry.ore_tot) || 0;
+    if (entry.type === 1) return acc + hours;
+    if (entry.type === 3) return acc + hours;
+    return acc;
+  }, 0);
 
   $: editableNoteEntries = selectedEntries.filter((entry) => entry.validation_level !== 2);
   $: canEditSelectedNotes = editableNoteEntries.length > 0;
@@ -365,32 +525,29 @@ export const loadData = async () => {
   }
 
   let saldoPeriodo = 0;
+  $: hourBalancePeriodo = `${String(month).padStart(2, '0')}-${year}`;
   $: saldoPeriodo = entries.reduce((acc, entry) => {
     const { y, m } = splitYmd(entry.data);
     if (y !== year || m !== month) return acc;
     const hours = Number(entry.ore_tot) || 0;
-    if(entry.validation_level !== 2){
-      if (entry.type === 3) return acc + hours;
-      if (entry.type === 4) return acc - hours;
-    }
+    if (entry.type === 3) return acc + hours;
+    if (entry.type === 4) return acc - hours;
     return acc;
   }, 0);
 
-  $: hourBalanceExtra.set({
-    title: 'saldo mese',
-    saldo: saldoPeriodo,
-    color: ['#EAFF3B', '#88FF78']
-  });
-  $: saldoValidatoOrig = $auth.user?.saldo?.valore_saldo_validato ?? null;
-  $: saldoTimeEntryVisuale = $timeEntryUser.user?.saldo?.valore_saldo_validato ?? null;
-  $: saldoPersistenteVisuale = $auth.user?.is_superuser ? saldoTimeEntryVisuale : saldoValidatoOrig;
-  $: saldoValidatoVisuale = toNumber(saldoPersistenteVisuale);
-  $: saldoVisuale = toNumber(saldoPersistenteVisuale) + toNumber(saldoPeriodo);
+  $: saldoValidatoVisuale = toNumber(latestSaldoValue(saldoRecords));
+  $: saldoVisuale = toNumber(saldoPeriodo);
 
   $: totalMonthHours = entries.reduce((acc, entry) => {
     const { y, m } = splitYmd(entry.data);
     if (y !== year || m !== month) return acc;
     if (entry.type === 3) return acc;
+    return acc + (Number(entry.ore_tot) || 0);
+  }, 0);
+  $: actualWorkedMonthHours = entries.reduce((acc, entry) => {
+    const { y, m } = splitYmd(entry.data);
+    if (y !== year || m !== month) return acc;
+    if (entry.type !== 1 && entry.type !== 3) return acc;
     return acc + (Number(entry.ore_tot) || 0);
   }, 0);
   $: activeOreSett = getActiveOreSett(($timeEntryUser.user as any)?.contratti);
@@ -399,27 +556,42 @@ export const loadData = async () => {
 
 
 <TimeEntryFormProvider>
+  <div class="hidden sm:block">
+    <HourBalance
+      saldoRecords={saldoRecords}
+      periodo={hourBalancePeriodo}
+      saldoMese={saldoPeriodo}
+    />
+  </div>
   {#key $timeEntryReload}
   <div class="w-full max-w-7xl mx-auto px-3 sm:px-4 relative">
     <div class="pointer-events-auto absolute left-3 top-2 z-30 max-sm:hidden">
       <HippoSign
-        phrase1={`Ore svolte nel mese corrente: ${totalMonthHours} h`}
+        phrase1={`Ore compilate nel mese corrente: ${totalMonthHours} h`}
         phrase2={`Ore da dare questo mese: ${expectedMonthHours} h`}
         phrase3={`Ore rimanenti da fare: ${expectedMonthHours - totalMonthHours} h`}
+        phrase4={`Ore effettive lavorate: ${actualWorkedMonthHours} h`}
       />
     </div>
 
   <div class="w-full flex justify-center my-2">
-    <div class="flex w-full max-w-4xl flex-wrap items-center justify-center gap-3 px-2 max-sm:flex-nowrap max-sm:justify-start max-sm:overflow-x-auto">
-      {#if $auth.user?.is_superuser}
-        <div class="flex items-center justify-center gap-2">
-          <div class="text-sm font-infinity tracking-[3px]">
+    <div class="flex w-full max-w-4xl flex-col items-center justify-center gap-2 px-2">
+      <div class="flex min-w-0 items-center justify-center gap-3">
+        {#if $auth.user?.is_superuser}
+          <span class="whitespace-nowrap text-sm font-infinity tracking-[3px]">
             {user?.nome} {user?.cognome}
-          </div>
+          </span>
+        {/if}
+        <h1 class="m-0 whitespace-nowrap text-center font-infinity tracking-[3px] text-sm font-bold text-slate-800">
+          {selectedDate ?? todayYmd}
+        </h1>
+      </div>
 
+      <div class="flex items-center justify-center gap-3">
+        {#if $auth.user?.is_superuser}
           <button
             type="button"
-            on:click={() => goto('/preMenu', { state: { route: 'presences' } })}
+            on:click={() => goto('/preMenu', { state: { route: '/Presenze' } })}
             aria-label="Torna al pre-menu presenze"
           >
             <FontAwesomeIcon
@@ -428,46 +600,47 @@ export const loadData = async () => {
               style={`color: ${palette.secondary.main};`}
             />
           </button>
-        </div>
-      {/if}
+        {/if}
 
-      {#if !loading}
-        <button type="button" on:click={loadData} disabled={loading} aria-label="Ricarica dati">
+        {#if !loading && !$jiraTimesheetMonthLoading}
+          <button type="button" on:click={refreshAllData} aria-label="Ricarica tutti i dati">
+            <FontAwesomeIcon
+              icon={faRotate}
+              class="text-[150%]"
+              style={`color: ${palette.secondary.main};`}
+            />
+          </button>
+        {/if}
+
+        <button
+          type="button"
+          on:click={openValidateConfirm}
+          disabled={loading || updatingValidation || !entries.length}
+          aria-label="Valida mese corrente"
+        >
           <FontAwesomeIcon
-            icon={faRotate}
+            icon={faCheck}
             class="text-[150%]"
             style={`color: ${palette.secondary.main};`}
           />
         </button>
-      {/if}
 
-      <button
-        type="button"
-        on:click={openValidateConfirm}
-        disabled={loading || updatingValidation || !entries.length}
-        aria-label="Valida mese corrente"
-      >
-        <FontAwesomeIcon
-          icon={faCheck}
-          class="text-[150%]"
-          style={`color: ${palette.secondary.main};`}
-        />
-      </button>
-
-      <button
-        type="button"
-        on:click={handleGeneratePdf}
-        disabled={loading || generatingPdf || !userId}
-        aria-label="Scarica PDF mese corrente"
-      >
-        <FontAwesomeIcon
-          icon={faFilePdf}
-          class="text-[150%]"
-          style={`color: ${palette.secondary.main};`}
-        />
-      </button>
+        <button
+          type="button"
+          on:click={handleGeneratePdf}
+          disabled={loading || generatingPdf || !userId}
+          aria-label="Scarica PDF mese corrente"
+        >
+          <FontAwesomeIcon
+            icon={faFilePdf}
+            class="text-[150%]"
+            style={`color: ${palette.secondary.main};`}
+          />
+        </button>
+      </div>
 
       <LoaderOverlay show={loading} />
+      <LoaderOverlay show={generatingPdf} message="PDF in generazione" />
     </div>
   </div>
   <div class="my-2 rounded-xl border border-orange-100 bg-white/95 p-2 shadow-sm sm:hidden">
@@ -480,9 +653,10 @@ export const loadData = async () => {
     <HippoSign
       alwaysOpen={true}
       inlinePanel={true}
-      phrase1={`Ore svolte nel mese corrente: ${totalMonthHours} h`}
+      phrase1={`Ore compilate nel mese corrente: ${totalMonthHours} h`}
       phrase2={`Ore da dare questo mese: ${expectedMonthHours} h`}
       phrase3={`Ore rimanenti da fare: ${expectedMonthHours - totalMonthHours} h`}
+      phrase4={`Ore effettive lavorate: ${actualWorkedMonthHours} h`}
     />
   </div>
 
@@ -512,15 +686,22 @@ export const loadData = async () => {
         {year}
         {month}
         {dayHours}
+        {selectedDate}
+        incompleteWorklogDates={incompleteJiraWorklogDates}
         maxVisibleEntries={2}
         on:selectDay={(e) => {
           selectedDate = e.detail.date;
+          selectedDayForbidType3 = !!e.detail.forbidType3;
         }}
       />
     </div>
     <div class="w-full lg:w-[320px] lg:flex-shrink-0">
       {#if selectedDate}
-        <TimeEntryCard timeEntries={selectedEntries} dateParam={selectedDate} />
+        <TimeEntryCard
+          timeEntries={selectedEntries}
+          dateParam={selectedDate}
+          forbidType3={selectedDayForbidType3}
+        />
         {#if selectedEntries.length > 0}
           <div class="mt-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition-all duration-200">
           <div class="mb-1 flex items-center justify-between gap-2">
@@ -609,7 +790,20 @@ export const loadData = async () => {
     </div>
   </div>
   </div>
-    <div><PreSetWeek/>   </div>
+    {#if $auth.user?.is_superuser}
+      <div><PreSetWeek/></div>
+    {/if}
+    {#if $jiraControl.loaded && $jiraControl.enabled}
+      <Useractivity
+        day={selectedDate}
+        ore={selectedDayWorkedHours}
+        activities={selectedJiraActivities}
+        loading={$jiraTimesheetMonthLoading}
+        error={$jiraTimesheetMonthError}
+        onInjectWorklog={injectJiraWorklog}
+        onRemoveWorklog={removeJiraWorklog}
+      />
+    {/if}
   {/key}
 </TimeEntryFormProvider>
 

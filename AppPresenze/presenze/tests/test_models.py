@@ -172,8 +172,7 @@ class TestSaldoModel(TestCase):
 
     def test_creazione_saldo(self):
         saldo = Saldo.objects.create(utente=self.utente)
-        self.assertEqual(saldo.valore_saldo_validato, 0)
-        self.assertEqual(saldo.valore_saldo_sospeso, 0)
+        self.assertEqual(saldo.saldo, [])
 
     def test_saldo_one_to_one_non_permette_duplicati(self):
         Saldo.objects.create(utente=self.utente)
@@ -206,6 +205,15 @@ class TestTrasfertaModel(TestCase):
         make_spesa(trasferta, type=Spesa.TrasfertaType.PEDAGGI,
                    importo=Decimal("10.50"))
         self.assertEqual(trasferta.totale_spese, Decimal("35.50"))
+
+    def test_totale_spese_rimborso_km_usa_coefficiente_auto(self):
+        auto = make_automobile(coefficiente=Decimal("0.5000"))
+        trasferta = make_trasferta(self.utente, automobile=auto)
+        make_spesa(trasferta, type=Spesa.TrasfertaType.KM,
+                   importo=Decimal("120.00"))
+        make_spesa(trasferta, type=Spesa.TrasfertaType.PEDAGGI,
+                   importo=Decimal("10.50"))
+        self.assertEqual(trasferta.totale_spese, Decimal("70.50"))
 
     def test_totale_spese_trasferta_non_salvata(self):
         trasferta = Trasferta(utente=self.utente, data=timezone.localdate(),

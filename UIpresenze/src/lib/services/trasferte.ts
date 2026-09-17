@@ -26,11 +26,12 @@ async function request(path: string, opts: Opts = {}) {
 }
 
 
-export type ValidationLevel = 1 | 2;
+export type ValidationLevel = 0 | 1 | 2;
 
 export type Trasferta = {
   id: number;
-  utente_id: number;
+  utente?: number;      // id proprietario: chiave effettiva restituita dal backend (FK)
+  utente_id?: number;   // alias legacy, non sempre presente nel payload
   utente_nome: string;
   utente_cognome: string;
   automobile?: number | string | null;
@@ -42,6 +43,18 @@ export type Trasferta = {
   note: string | null;
   validation_level: ValidationLevel;
 };
+
+/**
+ * Ritorna l'id del proprietario della trasferta.
+ * Il backend serializza la FK come `utente`; `utente_id` è un alias legacy
+ * che nella risposta reale non è sempre presente.
+ */
+export function getTrasfertaOwnerId(t: Trasferta | null | undefined): number | null {
+  if (!t) return null;
+  const raw = t.utente ?? t.utente_id;
+  const id = Number(raw);
+  return Number.isFinite(id) ? id : null;
+}
 
 export type TrasfertaCreate = {
   utente_email?: string;
@@ -86,16 +99,16 @@ export type ScontrinoUploadResponse = {
 
 /**
  * Regola sessione:
- * - superuser -> NON passa uId
- * - non superuser -> passa uId = $auth.user.id
+ * - staff/superuser -> NON passa uId
+ * - non staff/superuser -> passa uId = $auth.user.id
  * - se params.uId è passato esplicitamente, lo rispetta (utile per superuser che filtra)
  */
 function resolveUId(explicitUId?: number) {
   if (explicitUId !== undefined && explicitUId !== null) return explicitUId;
 
   const a = get(auth);
-  const isSuperuser = !!a?.user?.is_superuser;
-  if (isSuperuser) return undefined;
+  const isPrivileged = !!(a?.user?.is_staff || a?.user?.is_superuser);
+  if (isPrivileged) return undefined;
 
   const id = a?.user?.id;
   return id ?? undefined;
@@ -104,8 +117,9 @@ function resolveUId(explicitUId?: number) {
 export type TrasferteListParams = {
   limit?: number;
   date?: string; // YYYY-MM-DD
+  tId?: number | string;
   uId?: number;
-  validation?: number; // 1 | 2
+  validation?: ValidationLevel;
   azienda?: string;
 };
 
@@ -113,6 +127,7 @@ export function getTrasferte(params: TrasferteListParams = {}) {
   const qs = new URLSearchParams();
 
   if (params.limit !== undefined) qs.set('limit', String(params.limit));
+  if (params.tId !== undefined && params.tId !== null) qs.set('tId', String(params.tId));
   if (params.date) qs.set('date', params.date);
   if (params.validation !== undefined) qs.set('validation', String(params.validation));
   if (params.azienda) qs.set('azienda', params.azienda);
@@ -164,6 +179,29 @@ export async function fetchTrasfertaDossier(uId: number | string, data: string):
 
 export async function getTrasfertaDossier(uId: number | string, data: string) {
   const res = await fetchTrasfertaDossier(uId, data);
+  return res.blob();
+}
+
+export async function fetchTrasfertaSinglePdf(tId: number | string): Promise<Response> {
+  const url = `${BASE}/trasferte/Singlepdf/?t_id=${encodeURIComponent(String(tId))}`;
+  const res = await authFetch(url, { method: 'GET' });
+  if (!res.ok) {
+    let message = res.statusText || 'Request failed';
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const data = await res.json().catch(() => null);
+      message = data?.errors || data?.error || data?.detail || message;
+    } else {
+      const text = await res.text().catch(() => '');
+      if (text) message = text;
+    }
+    throw new Error(message);
+  }
+  return res;
+}
+
+export async function getTrasfertaSinglePdf(tId: number | string) {
+  const res = await fetchTrasfertaSinglePdf(tId);
   return res.blob();
 }
 
