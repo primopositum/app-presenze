@@ -139,5 +139,8 @@ AppPresenze/.example.env
 # AGENT SKILLS (local tooling)
 # ==========================================
 
-.agents/skills/caveman/
-.agents/skills/caveman-*/
+.agents/skills/
+skills-lock.json
+
+# Log locale del server di sviluppo Vite
+UIpresenze/vite-dev.err
