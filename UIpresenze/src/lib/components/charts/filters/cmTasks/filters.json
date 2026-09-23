@@ -1,0 +1,263 @@
+{
+  "id": "cm-tasks",
+  "title": "Task CM",
+  "description": "Indipendenti dai progetti selezionati nella barra di sinistra.",
+  "groups": [
+    {
+      "id": "compare",
+      "label": "Confronto",
+      "filters": [
+        {
+          "id": "compareIssue",
+          "type": "select",
+          "label": "Task CM da confrontare",
+          "source": "cmIssues",
+          "placeholder": "Cerca per chiave o titolo",
+          "help": "Elenco basato sul marcatore CM. Aggiunge in fondo il confronto con le altre task CM filtrate."
+        }
+      ]
+    },
+    {
+      "id": "marker",
+      "label": "Marcatore",
+      "filters": [
+        {
+          "id": "marker",
+          "type": "text",
+          "label": "Marcatore da cercare",
+          "placeholder": "CM",
+          "help": "Vuoto = CM."
+        },
+        {
+          "id": "markerScope",
+          "type": "segmented",
+          "label": "Dove cercarlo",
+          "options": [
+            {
+              "value": "both",
+              "label": "Issue o progetto"
+            },
+            {
+              "value": "issue",
+              "label": "Solo issue"
+            },
+            {
+              "value": "project",
+              "label": "Solo progetto"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "time",
+      "label": "Periodo",
+      "filters": [
+        {
+          "id": "period",
+          "type": "dateRange",
+          "label": "Worklog dal / al"
+        },
+        {
+          "id": "weekdays",
+          "type": "multiselect",
+          "label": "Giorni della settimana",
+          "options": [
+            {
+              "value": "0",
+              "label": "Lun"
+            },
+            {
+              "value": "1",
+              "label": "Mar"
+            },
+            {
+              "value": "2",
+              "label": "Mer"
+            },
+            {
+              "value": "3",
+              "label": "Gio"
+            },
+            {
+              "value": "4",
+              "label": "Ven"
+            },
+            {
+              "value": "5",
+              "label": "Sab"
+            },
+            {
+              "value": "6",
+              "label": "Dom"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scope",
+      "label": "Perimetro",
+      "filters": [
+        {
+          "id": "projects",
+          "type": "multiselect",
+          "label": "Progetti",
+          "source": "projects"
+        },
+        {
+          "id": "authors",
+          "type": "multiselect",
+          "label": "Persone",
+          "source": "authors"
+        },
+        {
+          "id": "issueTypes",
+          "type": "multiselect",
+          "label": "Tipi di issue",
+          "source": "issueTypes"
+        },
+        {
+          "id": "statuses",
+          "type": "multiselect",
+          "label": "Stato corrente",
+          "source": "statuses"
+        },
+        {
+          "id": "resolution",
+          "type": "segmented",
+          "label": "Risoluzione",
+          "options": [
+            {
+              "value": "all",
+              "label": "Tutte"
+            },
+            {
+              "value": "open",
+              "label": "Aperte"
+            },
+            {
+              "value": "resolved",
+              "label": "Risolte"
+            }
+          ]
+        },
+        {
+          "id": "search",
+          "type": "text",
+          "label": "Cerca chiave o titolo",
+          "placeholder": "es. CM-42"
+        }
+      ]
+    },
+    {
+      "id": "thresholds",
+      "label": "Soglie",
+      "filters": [
+        {
+          "id": "issueHours",
+          "type": "range",
+          "label": "Ore per task",
+          "unit": "h",
+          "step": 0.5,
+          "min": 0
+        },
+        {
+          "id": "hideUnassigned",
+          "type": "toggle",
+          "label": "Escludi worklog senza autore"
+        }
+      ]
+    },
+    {
+      "id": "display",
+      "label": "Visualizzazione",
+      "filters": [
+        {
+          "id": "bucket",
+          "type": "segmented",
+          "label": "Granularita' andamento",
+          "options": [
+            {
+              "value": "auto",
+              "label": "Auto"
+            },
+            {
+              "value": "day",
+              "label": "Giorno"
+            },
+            {
+              "value": "month",
+              "label": "Mese"
+            }
+          ]
+        },
+        {
+          "id": "shareBase",
+          "type": "segmented",
+          "label": "Quota calcolata su",
+          "options": [
+            {
+              "value": "period",
+              "label": "Tutto il periodo"
+            },
+            {
+              "value": "filtered",
+              "label": "Ore filtrate"
+            }
+          ],
+          "help": "Il denominatore della quota CM: tutte le ore caricate o solo quelle che passano i filtri di periodo e persona."
+        },
+        {
+          "id": "topCount",
+          "type": "number",
+          "label": "Voci nelle classifiche",
+          "min": 1,
+          "max": 50,
+          "placeholder": "12"
+        }
+      ]
+    },
+    {
+      "id": "advanced",
+      "label": "Avanzati",
+      "filters": [
+        {
+          "id": "keyPattern",
+          "type": "regex",
+          "label": "Regex sulla chiave",
+          "placeholder": "^CM-\\d{3,}$",
+          "technical": true
+        },
+        {
+          "id": "excludeKeys",
+          "type": "text",
+          "label": "Escludi chiavi",
+          "placeholder": "CM-1, CM-2",
+          "technical": true
+        },
+        {
+          "id": "worklogMinutes",
+          "type": "range",
+          "label": "Durata singolo worklog",
+          "unit": "min",
+          "step": 5,
+          "min": 0,
+          "technical": true
+        },
+        {
+          "id": "createdRange",
+          "type": "dateRange",
+          "label": "Issue create dal / al",
+          "technical": true
+        },
+        {
+          "id": "updatedRange",
+          "type": "dateRange",
+          "label": "Issue aggiornate dal / al",
+          "technical": true
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,161 @@
+{
+  "id": "redditivita",
+  "title": "Redditivita'",
+  "description": "Si applicano ai contratti con ore sul pool nel periodo.",
+  "groups": [
+    {
+      "id": "compare",
+      "label": "Confronto",
+      "filters": [
+        {
+          "id": "compareContract",
+          "type": "select",
+          "label": "Contratto da confrontare",
+          "source": "contracts",
+          "placeholder": "Cerca per ID contratto",
+          "help": "Serve almeno un'ora sulle task del pool nel periodo. Aggiunge in fondo il confronto con gli altri contratti filtrati."
+        }
+      ]
+    },
+    {
+      "id": "scope",
+      "label": "Perimetro",
+      "filters": [
+        {
+          "id": "clients",
+          "type": "multiselect",
+          "label": "Clienti",
+          "source": "clients"
+        },
+        {
+          "id": "position",
+          "type": "segmented",
+          "label": "Rispetto alla media",
+          "options": [
+            {
+              "value": "all",
+              "label": "Tutti"
+            },
+            {
+              "value": "above",
+              "label": "Sopra media"
+            },
+            {
+              "value": "below",
+              "label": "Sotto media"
+            }
+          ]
+        },
+        {
+          "id": "search",
+          "type": "text",
+          "label": "Cerca contratto o cliente",
+          "placeholder": "es. ACME"
+        }
+      ]
+    },
+    {
+      "id": "thresholds",
+      "label": "Soglie",
+      "filters": [
+        {
+          "id": "hourlyRate",
+          "type": "range",
+          "label": "Tariffa oraria",
+          "unit": "€/h",
+          "step": 5,
+          "min": 0
+        },
+        {
+          "id": "hours",
+          "type": "range",
+          "label": "Ore sul pool",
+          "unit": "h",
+          "step": 1,
+          "min": 0
+        },
+        {
+          "id": "value",
+          "type": "range",
+          "label": "Valore maturato",
+          "unit": "€",
+          "step": 100,
+          "min": 0
+        }
+      ]
+    },
+    {
+      "id": "display",
+      "label": "Visualizzazione",
+      "filters": [
+        {
+          "id": "averageScope",
+          "type": "segmented",
+          "label": "Media calcolata su",
+          "options": [
+            {
+              "value": "all",
+              "label": "Tutti i contratti"
+            },
+            {
+              "value": "filtered",
+              "label": "Contratti filtrati"
+            }
+          ],
+          "help": "La linea di riferimento e il confronto \"sopra / sotto media\"."
+        },
+        {
+          "id": "topCount",
+          "type": "number",
+          "label": "Voci nelle classifiche",
+          "min": 1,
+          "max": 50,
+          "placeholder": "12"
+        }
+      ]
+    },
+    {
+      "id": "advanced",
+      "label": "Avanzati",
+      "filters": [
+        {
+          "id": "idPattern",
+          "type": "regex",
+          "label": "Regex sull'ID contratto",
+          "placeholder": "^CTR-",
+          "technical": true
+        },
+        {
+          "id": "coverage",
+          "type": "number",
+          "label": "Copertura minima del pool",
+          "unit": "%",
+          "min": 0,
+          "max": 100,
+          "step": 5,
+          "placeholder": "0",
+          "technical": true,
+          "help": "Quota di task del pool con almeno un worklog nel periodo."
+        },
+        {
+          "id": "minPoolSize",
+          "type": "number",
+          "label": "Task minime nel pool",
+          "min": 1,
+          "placeholder": "1",
+          "technical": true
+        },
+        {
+          "id": "taskHours",
+          "type": "range",
+          "label": "Ore per task (valore generato)",
+          "unit": "h",
+          "step": 0.5,
+          "min": 0,
+          "technical": true,
+          "help": "Agisce solo sulla classifica del valore generato per task."
+        }
+      ]
+    }
+  ]
+}

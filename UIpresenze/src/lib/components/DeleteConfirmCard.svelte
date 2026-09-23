@@ -1,11 +1,27 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+
   export let message = '';
   export let deleting = false;
   export let onCancel: () => void;
   export let onConfirm: () => void | Promise<void>;
+
+  let dialog: HTMLDivElement;
+
+  function closeOnEscape(event: KeyboardEvent) {
+    if (event.key !== 'Escape' || deleting) return;
+    event.preventDefault();
+    onCancel();
+  }
+
+  onMount(() => {
+    dialog?.focus();
+  });
 </script>
 
-<div class="card" role="dialog" aria-modal="true" aria-labelledby="delete-confirm-title" tabindex="-1">
+<svelte:window on:keydown={closeOnEscape} />
+
+<div bind:this={dialog} class="card" role="alertdialog" aria-modal="true" aria-labelledby="delete-confirm-title" tabindex="-1">
   <div class="card2">
     <div class="form">
       <div class="header">
@@ -13,14 +29,14 @@
           <i class="fa-solid fa-triangle-exclamation"></i>
           Conferma eliminazione
         </span>
-        <button class="close-btn" type="button" on:click={onCancel} disabled={deleting} aria-label="Chiudi">×</button>
+        <button class="close-btn" type="button" data-history-hover-exclude on:click={onCancel} disabled={deleting} aria-label="Chiudi">×</button>
       </div>
 
       <p class="message">{message}</p>
 
       <div class="actions">
-        <button class="cancel-btn" type="button" on:click={onCancel} disabled={deleting}>Annulla</button>
-        <button class="delete-btn" type="button" on:click={onConfirm} disabled={deleting}>
+        <button class="cancel-btn" type="button" data-history-hover-exclude on:click={onCancel} disabled={deleting}>Annulla</button>
+        <button class="delete-btn" type="button" data-history-hover-exclude on:click={onConfirm} disabled={deleting}>
           {deleting ? 'Eliminazione...' : 'Elimina'}
         </button>
       </div>

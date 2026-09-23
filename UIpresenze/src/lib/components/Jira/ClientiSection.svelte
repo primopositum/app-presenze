@@ -1,45 +1,51 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import {
-    useClientiList,
     useClienteDelete,
     useClienteUpdate,
-    useContrattiClientiList,
     useContrattoClienteDelete,
     useContrattoClientePoolTaskAppend,
     useContrattoClientePoolTaskDelete
   } from '$lib/hooks/useClienti';
   import type { Cliente, ContrattoCliente } from '$lib/services/clienti';
+  import { contractProfitability, tasksByKey } from '$lib/components/charts/contractsSelectors';
+  import {
+    chartsData,
+    ensureContrattiLoaded,
+    removeCliente,
+    removeContratto,
+    replaceContratto
+  } from '$lib/remo/chartsData';
   import ClientiCreateCards from '$lib/components/Jira/ClientiCreateCards.svelte';
   import ContractListItem from '$lib/components/Jira/ContractListItem.svelte';
   import ContractTaskPool from '$lib/components/Jira/ContractTaskPool.svelte';
   import EditContrattoModal from '$lib/components/Jira/EditContrattoModal.svelte';
   import DeleteConfirmCard from '$lib/components/DeleteConfirmCard.svelte';
   import ToastState from '$lib/components/ToastState.svelte';
+  import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
+  import { faChevronDown, faChevronUp } from '@fortawesome/free-solid-svg-icons';
 
-  type JiraPoolTask = {
-    key: string;
-    summary: string;
-    seconds: number;
-  };
-
-  type PoolTaskRow = JiraPoolTask & { found: boolean; costoOrario: number; guadagno: number };
   type ClientSortDirection = 'asc' | 'desc' | null;
   type DeleteTarget =
     | { type: 'cliente'; cliente: Cliente }
     | { type: 'contratto'; contratto: ContrattoCliente };
 
-  export let jiraTasks: JiraPoolTask[] = [];
-
   type ClienteForm = { id: number | null; nome: string; indirizzo: string; telefono: string };
 
   const emptyClienteForm = (): ClienteForm => ({ id: null, nome: '', indirizzo: '', telefono: '' });
 
-  let clienti: Cliente[] = [];
-  let contratti: ContrattoCliente[] = [];
+  // Clienti, contratti e task Jira arrivano dallo store condiviso /remo: la
+  // schermata contratti del cubo legge esattamente gli stessi dati.
+  $: clienti = $chartsData.clienti as Cliente[];
+  $: contratti = $chartsData.contratti as ContrattoCliente[];
+  $: jiraTasks = $chartsData.poolTasks;
+  // Prima carica: non c'e' ancora niente da mostrare. Una ricarica successiva
+  // tiene la lista a schermo, altrimenti ogni aggiornamento la farebbe sparire.
+  $: loading = !$chartsData.contrattiLoaded;
+  $: refreshing = $chartsData.contrattiRefreshing;
+
   let contractSearch = '';
   let clientSortDirection: ClientSortDirection = null;
-  let loading = true;
   let savingCliente = false;
   let toastOpen = false;
   let toastSuccess = true;
@@ -74,35 +80,13 @@
         return clientSortDirection === 'asc' ? comparison : -comparison;
       })
     : filteredContracts;
-  $: jiraTasksByKey = new Map(jiraTasks.map((task) => [task.key.trim().toUpperCase(), task]));
-  $: selectedPoolTaskRows = buildPoolTaskRows(selectedContratto, jiraTasksByKey);
+  // Ore e quote di valore del pool: e' lo stesso calcolo che alimenta i grafici
+  // di redditivita', quindi vive una volta sola nei selettori dei contratti.
+  $: jiraTasksByKey = tasksByKey(jiraTasks);
+  $: selectedPoolTaskRows = selectedContratto
+    ? contractProfitability(selectedContratto, jiraTasksByKey).tasks
+    : [];
   $: selectedPoolTaskTotalSeconds = selectedPoolTaskRows.reduce((total, task) => total + task.seconds, 0);
-
-  function buildPoolTaskRows(
-    contratto: ContrattoCliente | null,
-    tasksByKey: Map<string, JiraPoolTask>
-  ): PoolTaskRow[] {
-    if (!contratto) return [];
-
-    const totalSeconds = contratto.pool_task.reduce(
-      (total, taskKey) => total + Math.max(0, Number(tasksByKey.get(taskKey.trim().toUpperCase())?.seconds || 0)),
-      0
-    );
-    const value = contractDisplayValue(contratto);
-
-    return contratto.pool_task.map((taskKey) => {
-      const task = tasksByKey.get(taskKey.trim().toUpperCase());
-      const seconds = Math.max(0, Number(task?.seconds || 0));
-      return {
-        key: taskKey,
-        summary: task?.summary || 'Task non presente nei worklog del periodo',
-        seconds,
-        found: Boolean(task),
-        costoOrario: totalSeconds > 0 ? value / (totalSeconds / 3600) : 0,
-        guadagno: totalSeconds > 0 ? (value / totalSeconds) * seconds : 0
-      };
-    });
-  }
 
   function formatHours(seconds: number) {
     const hours = seconds / 3600;
@@ -141,16 +125,11 @@
       : 'Ordina i clienti dalla A alla Z';
   }
 
-  async function loadData() {
-    loading = true;
+  async function loadData(force = true) {
     try {
-      const [loadedClienti, loadedContratti] = await Promise.all([useClientiList(), useContrattiClientiList()]);
-      clienti = loadedClienti;
-      contratti = loadedContratti;
+      await ensureContrattiLoaded(force);
     } catch (cause: any) {
       showToast(String(cause?.message || cause || 'Impossibile caricare clienti e contratti.'), false);
-    } finally {
-      loading = false;
     }
   }
 
@@ -212,26 +191,36 @@
       : `Sei veramente sicuro di eliminare il contratto per ${contractClientName(target.contratto)}? Se lo elimini perderai il valore delle task associate.`;
   }
 
+  /**
+   * Elimina e basta: appena il server conferma si toglie la voce dalla memoria
+   * condivisa, senza ricaricare tutto.
+   *
+   * Una ricarica completa svuotava clienti, contratti e grafici per il tempo
+   * della richiesta, e la pagina lampeggiava in bianco a ogni eliminazione.
+   */
   async function confirmDelete() {
     if (!deleteTarget) return;
+    const target = deleteTarget;
     deleting = true;
     try {
-      if (deleteTarget.type === 'cliente') {
-        const { cliente } = deleteTarget;
-        await useClienteDelete(cliente.id);
-        if (clienteForm.id === cliente.id) clienteForm = emptyClienteForm();
+      if (target.type === 'cliente') {
+        await useClienteDelete(target.cliente.id);
+        if (clienteForm.id === target.cliente.id) clienteForm = emptyClienteForm();
+        removeCliente(target.cliente.id);
         showToast('Cliente eliminato.');
       } else {
-        const { contratto } = deleteTarget;
-        await useContrattoClienteDelete(contratto.id);
-        if (editingContrattoId === contratto.id) editingContrattoId = null;
-        if (selectedContrattoId === contratto.id) selectedContrattoId = null;
+        await useContrattoClienteDelete(target.contratto.id);
+        if (editingContrattoId === target.contratto.id) editingContrattoId = null;
+        if (selectedContrattoId === target.contratto.id) selectedContrattoId = null;
+        removeContratto(target.contratto.id);
         showToast('Contratto commerciale eliminato.');
       }
-      await loadData();
       deleteTarget = null;
     } catch (cause: any) {
-      const fallback = deleteTarget.type === 'cliente' ? 'Impossibile eliminare il cliente.' : 'Impossibile eliminare il contratto.';
+      const fallback =
+        target.type === 'cliente'
+          ? 'Impossibile eliminare il cliente.'
+          : 'Impossibile eliminare il contratto.';
       showToast(String(cause?.message || cause || fallback), false);
     } finally {
       deleting = false;
@@ -254,7 +243,7 @@
     const task = String(poolTaskInputs[contratto.id] || '').trim();
     try {
       const updated = await useContrattoClientePoolTaskAppend(contratto.id, task);
-      contratti = contratti.map((item) => (item.id === updated.id ? updated : item));
+      replaceContratto(updated);
       poolTaskInputs = { ...poolTaskInputs, [contratto.id]: '' };
       showToast('Task aggiunta al pool.');
     } catch (cause: any) {
@@ -265,7 +254,7 @@
   async function deleteTask(contratto: ContrattoCliente, task: string) {
     try {
       const updated = await useContrattoClientePoolTaskDelete(contratto.id, task);
-      contratti = contratti.map((item) => (item.id === updated.id ? updated : item));
+      replaceContratto(updated);
       showToast('Task rimossa dal pool.');
     } catch (cause: any) {
       showToast(String(cause?.message || cause || 'Impossibile rimuovere la task.'), false);
@@ -277,7 +266,7 @@
   }
 
   onMount(() => {
-    void loadData();
+    void loadData(false);
   });
 </script>
 
@@ -287,7 +276,9 @@
       <h2>Clienti e contratti commerciali</h2>
       <p>Gestisci anagrafiche, valori contrattuali e pool di task Jira.</p>
     </div>
-    <button type="button" class="refresh-button" on:click={loadData} disabled={loading}>Aggiorna</button>
+    <button type="button" class="refresh-button" on:click={() => loadData()} disabled={loading || refreshing}>
+      {refreshing ? 'Aggiorno...' : 'Aggiorna'}
+    </button>
   </header>
 
   <ClientiCreateCards
@@ -314,12 +305,14 @@
   {/if}
 
   <button type="button" class="list-toggle" on:click={() => (listsOpen = !listsOpen)} aria-expanded={listsOpen}>
-    <span>{listsOpen ? '⌃' : '⌄'}</span>
+    <span class="toggle-icon">
+      {#if listsOpen}<FontAwesomeIcon icon={faChevronUp} />{:else}<FontAwesomeIcon icon={faChevronDown} />{/if}
+    </span>
     Contratti esistenti ({contratti.length})
   </button>
 
   {#if listsOpen}
-  <div class="data-grid">
+  <div class="data-grid" class:stale={refreshing}>
     <aside class="contracts-tools">
       <h3>Cerca contratti</h3>
       <label class="search-label" for="contracts-search">Ricerca</label>
@@ -433,8 +426,8 @@
                     <span>{task.summary}</span>
                   </div>
                   <span>{formatHours(task.seconds)}</span>
-                  <span>{formatCurrency(task.costoOrario)}/h</span>
-                  <strong>{formatCurrency(task.guadagno)}</strong>
+                  <span>{formatCurrency(task.hourlyRate)}/h</span>
+                  <strong>{formatCurrency(task.share)}</strong>
                 </div>
               {/each}
             </div>
@@ -453,9 +446,10 @@
   .section-header, .row-actions, .form-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .55rem; }
   .section-header { justify-content: space-between; margin-bottom: 1rem; }
   h2, h3, p { margin-top: 0; } h2 { font-size: 1.1rem; } h3 { font-size: .92rem; } .section-header p, .list-card > p { margin-bottom: 0; color: #64748b; font-size: .82rem; }
-  button { max-width: 100%; border: 0; border-radius: 7px; padding: .42rem .65rem; color: white; background: #2563eb; cursor: pointer; font: inherit; font-size: .78rem; overflow-wrap: anywhere; } button:disabled { opacity: .6; cursor: not-allowed; } button.secondary { background: #64748b; } button.danger { background: #dc2626; } .refresh-button { background: #475569; } .list-toggle { width: 100%; display: flex; align-items: center; gap: .45rem; margin-top: 1rem; background: #334155; text-align: left; } .list-toggle span { flex: 0 0 auto; font-size: 1rem; }
+  button { max-width: 100%; border: 0; border-radius: 7px; padding: .42rem .65rem; color: white; background: #2563eb; cursor: pointer; font: inherit; font-size: .78rem; overflow-wrap: anywhere; } button:disabled { opacity: .6; cursor: not-allowed; } button.secondary { background: #64748b; } button.danger { background: #dc2626; } .refresh-button { background: #475569; } .list-toggle { width: 100%; display: flex; align-items: center; gap: .45rem; margin-top: 1rem; background: #334155; text-align: left; } .list-toggle .toggle-icon { flex: 0 0 auto; display: inline-flex; font-size: .78rem; }
   .editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
-  .data-grid { --contracts-panel-height: 460px; display: grid; grid-template-columns: minmax(190px, .42fr) minmax(230px, .7fr) minmax(300px, 1.15fr); align-items: start; gap: .7rem; margin-top: .7rem; padding: .1rem .45rem .1rem .1rem; } .data-grid > * { min-width: 0; }
+  .data-grid.stale { opacity: .65; }
+  .data-grid { transition: opacity .16s ease; --contracts-panel-height: 460px; display: grid; grid-template-columns: minmax(190px, .42fr) minmax(230px, .7fr) minmax(300px, 1.15fr); align-items: start; gap: .7rem; margin-top: .7rem; padding: .1rem .45rem .1rem .1rem; } .data-grid > * { min-width: 0; }
   .editor-card, .list-card, .contracts-tools { padding: .85rem; border: 1px solid #e2e8f0; border-radius: 9px; background: #f8fafc; }
   .list-card { padding: .7rem; }
   .contracts-card { display: grid; grid-template-rows: auto minmax(0, 1fr); height: var(--contracts-panel-height); overflow: hidden; }
@@ -480,7 +474,7 @@
   .pool-task-result-list { display: grid; gap: .35rem; margin-top: .55rem; } .pool-task-result { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: .55rem; padding: .45rem .5rem; border: 1px solid #dbeafe; border-radius: 7px; background: #fff; } .pool-task-result > div { display: grid; min-width: 0; gap: .1rem; } .pool-task-result > div > strong { color: #1e3a8a; font-family: var(--font-mono); font-size: .7rem; } .pool-task-result > div > span { overflow: hidden; color: #334155; font-size: .7rem; text-overflow: ellipsis; white-space: nowrap; } .pool-task-result > span { color: #475569; font-size: .7rem; white-space: nowrap; } .pool-task-result > strong { color: #166534; font-size: .74rem; white-space: nowrap; } .task-not-found { border-style: dashed; opacity: .72; } .task-not-found > strong { color: #92400e; }
   .detail-placeholder { margin: 0; color: #64748b; font-size: .8rem; }
   .delete-confirm-overlay { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 1rem; }
-  .delete-confirm-backdrop { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: rgb(15 23 42 / .68); cursor: default; }
+  .delete-confirm-backdrop { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; padding: 0; border: 0; border-radius: 0; background: rgb(15 23 42 / .68); cursor: default; }
   .delete-confirm-content { position: relative; z-index: 1; width: min(100%, 390px); }
   @media (max-width: 980px) { .data-grid { grid-template-columns: minmax(180px, .45fr) minmax(0, 1fr); } .contract-detail { grid-column: 1 / -1; } }
   @media (max-width: 760px) { .editor-grid, .data-grid { grid-template-columns: 1fr; } .data-grid { --contracts-panel-height: 420px; } .contract-detail { grid-column: auto; } .contract-data { grid-template-columns: 1fr; } .section-header, .detail-heading { align-items: flex-start; flex-direction: column; } .sort-tooltip { top: calc(100% + .4rem); left: 0; transform: none; } .pool-task-result { grid-template-columns: 1fr; gap: .25rem; } .row-actions { flex-wrap: wrap; } }
@@ -491,14 +485,14 @@
     contratto={editingContratto}
     {clienti}
     onClose={closeEditContratto}
-    onSaved={loadData}
+    onSaved={() => loadData()}
     onNotify={showToast}
   />
 {/if}
 
 {#if deleteTarget}
   <div class="delete-confirm-overlay" data-history-hover-exclude>
-    <button class="delete-confirm-backdrop" type="button" aria-label="Annulla eliminazione" on:click={closeDeleteConfirmation}></button>
+    <button class="delete-confirm-backdrop" type="button" data-history-hover-exclude aria-label="Annulla eliminazione" on:click={closeDeleteConfirmation}></button>
     <div class="delete-confirm-content" data-history-hover-exclude>
       <DeleteConfirmCard
         message={deleteConfirmationMessage(deleteTarget)}

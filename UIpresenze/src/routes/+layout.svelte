@@ -4,6 +4,7 @@
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { jiraControl, ensureJiraControlLoaded, isJiraRoute, resetJiraControl } from '$lib/stores/jiraControl';
+	import { resetChartsData } from '$lib/remo/chartsData';
 	import { getProfile, startAutoRefresh, stopAutoRefresh } from '$lib/api';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
@@ -16,6 +17,7 @@
 		auth.init();
 		if (!$auth.isAuthed) {
 			resetJiraControl();
+			resetChartsData();
 			stopAutoRefresh();
 			goto('/login');
 			return;
@@ -39,6 +41,8 @@
 
 	$: if (!$auth.isAuthed && $jiraControl.loaded) {
 		resetJiraControl();
+		// Lo store dei grafici vive in memoria: al logout va svuotato.
+		resetChartsData();
 	}
 </script>
 

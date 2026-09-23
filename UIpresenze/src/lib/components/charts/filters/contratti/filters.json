@@ -1,0 +1,231 @@
+{
+  "id": "contratti",
+  "title": "Contratti",
+  "description": "Valgono per tutte le card della schermata, cifre comprese.",
+  "groups": [
+    {
+      "id": "compare",
+      "label": "Confronto",
+      "filters": [
+        {
+          "id": "compareContract",
+          "type": "select",
+          "label": "Contratto da confrontare",
+          "source": "contracts",
+          "placeholder": "Cerca per ID contratto",
+          "help": "Aggiunge in fondo il confronto con gli altri contratti filtrati. Non restringe gli altri grafici."
+        }
+      ]
+    },
+    {
+      "id": "scope",
+      "label": "Perimetro",
+      "filters": [
+        {
+          "id": "clients",
+          "type": "multiselect",
+          "label": "Clienti",
+          "source": "clients"
+        },
+        {
+          "id": "status",
+          "type": "multiselect",
+          "label": "Stato alla data di riferimento",
+          "options": [
+            {
+              "value": "active",
+              "label": "Attivi"
+            },
+            {
+              "value": "upcoming",
+              "label": "Futuri"
+            },
+            {
+              "value": "expired",
+              "label": "Scaduti"
+            }
+          ]
+        },
+        {
+          "id": "billing",
+          "type": "segmented",
+          "label": "Fatturazione",
+          "options": [
+            {
+              "value": "all",
+              "label": "Tutti"
+            },
+            {
+              "value": "recurring",
+              "label": "Ricorrenti"
+            },
+            {
+              "value": "oneoff",
+              "label": "Una tantum"
+            }
+          ]
+        },
+        {
+          "id": "pool",
+          "type": "segmented",
+          "label": "Pool task",
+          "options": [
+            {
+              "value": "all",
+              "label": "Tutti"
+            },
+            {
+              "value": "with",
+              "label": "Con pool"
+            },
+            {
+              "value": "without",
+              "label": "Senza pool"
+            }
+          ]
+        },
+        {
+          "id": "search",
+          "type": "text",
+          "label": "Cerca contratto o cliente",
+          "placeholder": "es. CTR-2026"
+        }
+      ]
+    },
+    {
+      "id": "values",
+      "label": "Valori",
+      "filters": [
+        {
+          "id": "currentValue",
+          "type": "range",
+          "label": "Valore maturato",
+          "unit": "€",
+          "step": 100,
+          "min": 0
+        },
+        {
+          "id": "monthlyRate",
+          "type": "range",
+          "label": "Canone mensile",
+          "unit": "€",
+          "step": 50,
+          "min": 0,
+          "help": "Normalizzato a 30 giorni; i contratti una tantum valgono 0."
+        }
+      ]
+    },
+    {
+      "id": "dates",
+      "label": "Date",
+      "filters": [
+        {
+          "id": "referenceDate",
+          "type": "date",
+          "label": "Data di riferimento",
+          "help": "Vuota = oggi. Decide contratti attivi, scadenze e partenza della previsione."
+        },
+        {
+          "id": "startRange",
+          "type": "dateRange",
+          "label": "Inizio contratto dal / al"
+        },
+        {
+          "id": "endRange",
+          "type": "dateRange",
+          "label": "Fine contratto dal / al"
+        },
+        {
+          "id": "endMode",
+          "type": "segmented",
+          "label": "Scadenza",
+          "options": [
+            {
+              "value": "all",
+              "label": "Tutti"
+            },
+            {
+              "value": "fixed",
+              "label": "Con fine"
+            },
+            {
+              "value": "open",
+              "label": "Senza fine"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "display",
+      "label": "Visualizzazione",
+      "filters": [
+        {
+          "id": "expiringDays",
+          "type": "number",
+          "label": "Soglia \"in scadenza\"",
+          "unit": "gg",
+          "min": 1,
+          "placeholder": "90"
+        },
+        {
+          "id": "forecastMonths",
+          "type": "number",
+          "label": "Mesi di previsione",
+          "min": 1,
+          "max": 36,
+          "placeholder": "12"
+        },
+        {
+          "id": "topCount",
+          "type": "number",
+          "label": "Voci nelle classifiche",
+          "min": 1,
+          "max": 50,
+          "placeholder": "12"
+        }
+      ]
+    },
+    {
+      "id": "advanced",
+      "label": "Avanzati",
+      "filters": [
+        {
+          "id": "idPattern",
+          "type": "regex",
+          "label": "Regex sull'ID contratto",
+          "placeholder": "^CTR-2026-",
+          "technical": true
+        },
+        {
+          "id": "initialValue",
+          "type": "range",
+          "label": "Valore firmato",
+          "unit": "€",
+          "step": 100,
+          "min": 0,
+          "technical": true
+        },
+        {
+          "id": "expiryHorizon",
+          "type": "number",
+          "label": "Orizzonte scadenze",
+          "unit": "gg",
+          "min": 1,
+          "placeholder": "365",
+          "technical": true
+        },
+        {
+          "id": "donutSlices",
+          "type": "number",
+          "label": "Spicchi della ciambella",
+          "min": 2,
+          "max": 8,
+          "placeholder": "6",
+          "technical": true,
+          "help": "Oltre gli otto la palette non distingue piu' le tinte adiacenti."
+        }
+      ]
+    }
+  ]
+}

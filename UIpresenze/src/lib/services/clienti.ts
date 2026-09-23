@@ -51,7 +51,10 @@ export type ContrattoClienteCreatePayload = {
 };
 
 export type ContrattoClienteUpdatePayload = Partial<
-  Pick<ContrattoClienteCreatePayload, 'contract_id' | 'client_id' | 'value' | 'pool_task' | 'start_date' | 'end_date'>
+  Pick<
+    ContrattoClienteCreatePayload,
+    'contract_id' | 'client_id' | 'value' | 'pool_task' | 'start_date' | 'end_date' | 'periodicity'
+  >
 >;
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';

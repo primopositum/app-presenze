@@ -1,0 +1,281 @@
+{
+  "id": "jira-history",
+  "title": "Ore Jira",
+  "description": "Si sommano ai progetti scelti nella barra di sinistra.",
+  "groups": [
+    {
+      "id": "compare",
+      "label": "Confronto",
+      "filters": [
+        {
+          "id": "compareIssue",
+          "type": "select",
+          "label": "Task da confrontare",
+          "source": "issues",
+          "placeholder": "Cerca per chiave o titolo",
+          "help": "Aggiunge in fondo i grafici di confronto con le altre issue filtrate. Non restringe gli altri grafici."
+        }
+      ]
+    },
+    {
+      "id": "time",
+      "label": "Periodo",
+      "filters": [
+        {
+          "id": "period",
+          "type": "dateRange",
+          "label": "Worklog dal / al",
+          "help": "Restringe il periodo caricato: le ore fuori intervallo escono da tutti i grafici."
+        },
+        {
+          "id": "weekdays",
+          "type": "multiselect",
+          "label": "Giorni della settimana",
+          "options": [
+            {
+              "value": "0",
+              "label": "Lun"
+            },
+            {
+              "value": "1",
+              "label": "Mar"
+            },
+            {
+              "value": "2",
+              "label": "Mer"
+            },
+            {
+              "value": "3",
+              "label": "Gio"
+            },
+            {
+              "value": "4",
+              "label": "Ven"
+            },
+            {
+              "value": "5",
+              "label": "Sab"
+            },
+            {
+              "value": "6",
+              "label": "Dom"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scope",
+      "label": "Perimetro",
+      "filters": [
+        {
+          "id": "projects",
+          "type": "multiselect",
+          "label": "Progetti",
+          "source": "projects"
+        },
+        {
+          "id": "authors",
+          "type": "multiselect",
+          "label": "Persone",
+          "source": "authors"
+        },
+        {
+          "id": "issueTypes",
+          "type": "multiselect",
+          "label": "Tipi di issue",
+          "source": "issueTypes"
+        },
+        {
+          "id": "statuses",
+          "type": "multiselect",
+          "label": "Stato corrente",
+          "source": "statuses"
+        },
+        {
+          "id": "hierarchy",
+          "type": "segmented",
+          "label": "Livello",
+          "options": [
+            {
+              "value": "all",
+              "label": "Tutte"
+            },
+            {
+              "value": "task",
+              "label": "Solo task"
+            },
+            {
+              "value": "subtask",
+              "label": "Solo subtask"
+            }
+          ]
+        },
+        {
+          "id": "resolution",
+          "type": "segmented",
+          "label": "Risoluzione",
+          "options": [
+            {
+              "value": "all",
+              "label": "Tutte"
+            },
+            {
+              "value": "open",
+              "label": "Aperte"
+            },
+            {
+              "value": "resolved",
+              "label": "Risolte"
+            }
+          ]
+        },
+        {
+          "id": "search",
+          "type": "text",
+          "label": "Cerca chiave o titolo",
+          "placeholder": "es. PRJ-12 o login"
+        }
+      ]
+    },
+    {
+      "id": "thresholds",
+      "label": "Soglie",
+      "filters": [
+        {
+          "id": "issueHours",
+          "type": "range",
+          "label": "Ore per issue",
+          "unit": "h",
+          "step": 0.5,
+          "min": 0,
+          "help": "Sulle ore rimaste dopo gli altri filtri."
+        },
+        {
+          "id": "hideUnassigned",
+          "type": "toggle",
+          "label": "Escludi worklog senza autore"
+        }
+      ]
+    },
+    {
+      "id": "estimates",
+      "label": "Stima contro consuntivo",
+      "filters": [
+        {
+          "id": "estimateDirection",
+          "type": "segmented",
+          "label": "Scostamento",
+          "options": [
+            {
+              "value": "all",
+              "label": "Tutti"
+            },
+            {
+              "value": "over",
+              "label": "Sopra stima"
+            },
+            {
+              "value": "under",
+              "label": "Sotto stima"
+            }
+          ]
+        },
+        {
+          "id": "deviationMin",
+          "type": "number",
+          "label": "Scostamento minimo",
+          "unit": "%",
+          "min": 0,
+          "step": 5,
+          "placeholder": "0"
+        },
+        {
+          "id": "estimateLimit",
+          "type": "number",
+          "label": "Issue nel confronto",
+          "min": 1,
+          "max": 50,
+          "placeholder": "10"
+        }
+      ]
+    },
+    {
+      "id": "display",
+      "label": "Visualizzazione",
+      "filters": [
+        {
+          "id": "bucket",
+          "type": "segmented",
+          "label": "Granularita' andamento",
+          "options": [
+            {
+              "value": "auto",
+              "label": "Auto"
+            },
+            {
+              "value": "day",
+              "label": "Giorno"
+            },
+            {
+              "value": "month",
+              "label": "Mese"
+            }
+          ]
+        },
+        {
+          "id": "topCount",
+          "type": "number",
+          "label": "Voci nelle classifiche",
+          "min": 1,
+          "max": 50,
+          "placeholder": "12"
+        }
+      ]
+    },
+    {
+      "id": "advanced",
+      "label": "Avanzati",
+      "description": "Filtri per chi conosce la struttura dei dati Jira.",
+      "filters": [
+        {
+          "id": "keyPattern",
+          "type": "regex",
+          "label": "Regex sulla chiave",
+          "placeholder": "^(ABC|DEF)-\\d+$",
+          "technical": true,
+          "help": "Senza distinzione fra maiuscole e minuscole."
+        },
+        {
+          "id": "excludeKeys",
+          "type": "text",
+          "label": "Escludi chiavi",
+          "placeholder": "ABC-1, ABC-2",
+          "technical": true
+        },
+        {
+          "id": "worklogMinutes",
+          "type": "range",
+          "label": "Durata singolo worklog",
+          "unit": "min",
+          "step": 5,
+          "min": 0,
+          "technical": true,
+          "help": "Utile per scartare registrazioni anomale, troppo brevi o troppo lunghe."
+        },
+        {
+          "id": "createdRange",
+          "type": "dateRange",
+          "label": "Issue create dal / al",
+          "technical": true
+        },
+        {
+          "id": "updatedRange",
+          "type": "dateRange",
+          "label": "Issue aggiornate dal / al",
+          "technical": true
+        }
+      ]
+    }
+  ]
+}

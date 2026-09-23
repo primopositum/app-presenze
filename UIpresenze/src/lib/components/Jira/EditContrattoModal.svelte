@@ -12,6 +12,11 @@
   let clienteId = String(contratto.client_id);
   let contractId = contratto.contract_id;
   let value = String(contratto.value);
+  const hasPeriodicity = Boolean(contratto.periodicity);
+  let periodicValue = String(contratto.periodicity?.periodic_value ?? '');
+  let periodDays = String(contratto.periodicity?.period_days ?? '');
+  let firstMeetingDate = contratto.periodicity?.first_meeting_date ?? '';
+  let notificationDays = String(contratto.periodicity?.notification_days ?? '');
   let saving = false;
   let clienteSelect: HTMLSelectElement | null = null;
 
@@ -33,11 +38,39 @@
       const normalizedValue = String(value ?? '').trim();
       if (!normalizedValue) throw new Error('Il valore del contratto è obbligatorio.');
 
+      const normalizedPeriodicValue = String(periodicValue ?? '').trim();
+      const parsedPeriodicValue = Number(normalizedPeriodicValue);
+      const parsedPeriodDays = Number(periodDays);
+      const parsedNotificationDays = Number(notificationDays);
+      if (
+        hasPeriodicity &&
+        (!normalizedPeriodicValue ||
+          !Number.isFinite(parsedPeriodicValue) ||
+          parsedPeriodicValue <= 0 ||
+          !firstMeetingDate ||
+          !Number.isInteger(parsedPeriodDays) ||
+          parsedPeriodDays <= 0 ||
+          !Number.isInteger(parsedNotificationDays) ||
+          parsedNotificationDays <= 0)
+      ) {
+        throw new Error('Per la periodicità inserisci valore, periodo, primo incontro e preavviso validi.');
+      }
+
       await useContrattoClienteUpdate(contratto.id, {
         contract_id: normalizedContractId,
         client_id: parsedClienteId,
         value: normalizedValue,
-        pool_task: contratto.pool_task
+        pool_task: contratto.pool_task,
+        ...(hasPeriodicity
+          ? {
+              periodicity: {
+                periodic_value: normalizedPeriodicValue,
+                period_days: parsedPeriodDays,
+                first_meeting_date: firstMeetingDate,
+                notification_days: parsedNotificationDays
+              }
+            }
+          : {})
       });
       onClose?.();
       onNotify?.('Contratto commerciale salvato.', true);
@@ -74,6 +107,15 @@
       <label>Data inizio <input type="date" value={contratto.start_date} readonly /></label>
       <label>Data fine <input type="date" value={contratto.end_date || ''} readonly /></label>
     </div>
+    {#if hasPeriodicity}
+      <fieldset class="periodicity-fields">
+        <legend>Periodicità</legend>
+        <label>Valore periodico <input type="number" min="0.01" step="0.01" bind:value={periodicValue} required /></label>
+        <label>Periodo (giorni) <input type="number" min="1" step="1" bind:value={periodDays} required /></label>
+        <label>Primo incontro <input type="date" bind:value={firstMeetingDate} required /></label>
+        <label>Preavviso (giorni) <input type="number" min="1" step="1" bind:value={notificationDays} required /></label>
+      </fieldset>
+    {/if}
     <div class="form-actions">
       <button type="submit" data-history-hover-exclude disabled={saving || clienti.length === 0}>{saving ? 'Salvo...' : 'Salva contratto'}</button>
       <button type="button" class="secondary" data-history-hover-exclude on:click={close} disabled={saving}>Annulla</button>
@@ -92,6 +134,8 @@
   input, select { width: 100%; box-sizing: border-box; padding: .38rem .45rem; border: 1px solid #cbd5e1; border-radius: 6px; font: inherit; }
   input[readonly] { background: #f1f5f9; color: #475569; cursor: default; }
   .date-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; }
+  .periodicity-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; margin: 0; padding: .65rem; border: 1px solid #ddd6fe; border-radius: 8px; }
+  .periodicity-fields legend { padding: 0 .25rem; color: #6d28d9; font-size: .75rem; font-weight: 700; }
   .form-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .15rem; }
   .form-actions button { width: fit-content; max-width: 100%; border: 0; border-radius: 7px; padding: .42rem .65rem; color: #fff; background: #7c3aed; font: inherit; cursor: pointer; overflow-wrap: anywhere; }
   .form-actions .secondary { background: #64748b; }
@@ -99,6 +143,6 @@
   .close { flex: 0 0 auto; border: 0; background: transparent; color: #475569; font-size: 1.35rem; cursor: pointer; }
   @keyframes center-card { from { opacity: .45; transform: scale(.88); } to { opacity: 1; transform: scale(1); } }
   @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-  @media (max-width: 480px) { .date-fields { grid-template-columns: 1fr; } }
+  @media (max-width: 480px) { .date-fields, .periodicity-fields { grid-template-columns: 1fr; } }
   @media (prefers-reduced-motion: reduce) { .overlay-backdrop, .edit-card { animation: none; } }
 </style>

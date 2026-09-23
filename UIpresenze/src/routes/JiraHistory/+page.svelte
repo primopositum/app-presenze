@@ -5,9 +5,24 @@
   import type { JiraHistoryIssue, JiraYearWorklogResponse } from '$lib/services/jira';
   import JiraWorklogIssuesBar from '$lib/components/Jira/JiraWorklogIssuesBar.svelte';
   import JiraWorklogDetailBar from '$lib/components/Jira/JiraWorklogDetailBar.svelte';
-  import JiraHistoryCharts from '$lib/components/Jira/JiraHistoryCharts.svelte';
   import ClientiSection from '$lib/components/Jira/ClientiSection.svelte';
+  import CubeSwitcher from '$lib/components/charts/cube/CubeSwitcher.svelte';
+  import CubeFace from '$lib/components/charts/cube/CubeFace.svelte';
+  import JiraHistoryScreen from '$lib/components/charts/screens/JiraHistoryScreen.svelte';
+  import ContrattiScreen from '$lib/components/charts/screens/ContrattiScreen.svelte';
+  import CmTasksScreen from '$lib/components/charts/screens/CmTasksScreen.svelte';
+  import RedditivitaScreen from '$lib/components/charts/screens/RedditivitaScreen.svelte';
+  import {
+    setChartIssues,
+    setChartJiraStatus,
+    setChartPoolTasks,
+    setChartSelectedProjectKeys,
+    setChartWorklogEntries,
+    type ChartWorklogEntry
+  } from '$lib/remo/chartsData';
   import { ensureJiraControlLoaded, jiraControl } from '$lib/stores/jiraControl';
+  import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
+  import { faArrowLeft } from '@fortawesome/free-solid-svg-icons';
 
   type JiraIssue = JiraHistoryIssue;
   type ContractPoolTask = {
@@ -257,7 +272,6 @@
   }
 
   $: flattenedWorklogIssues = flattenWorklogIssues(worklogIssues);
-  $: chartIssues = flattenedWorklogIssues;
   $: jiraPoolTasks = (yearlyWorklogData?.projects || []).flatMap((project): ContractPoolTask[] =>
     project.issues.map((issue) => ({
       key: issue.issue_key,
@@ -265,6 +279,25 @@
       seconds: Math.max(0, Number(issue.total_seconds || 0))
     }))
   );
+  // I singoli worklog con la loro data: senza, i grafici non hanno un asse temporale.
+  $: jiraWorklogEntries = (yearlyWorklogData?.projects || []).flatMap((project) =>
+    project.issues.flatMap((issue): ChartWorklogEntry[] =>
+      (issue.worklogs || []).map((worklog) => ({
+        date: String(worklog.date || worklog.started || '').slice(0, 10),
+        seconds: Math.max(0, Number(worklog.time_spent_seconds || 0)),
+        author: worklog.author || 'Non assegnato',
+        projectKey: project.project_key,
+        issueKey: issue.issue_key
+      }))
+    )
+  );
+  // Store condiviso non persistente: le schermate del cubo e ClientiSection
+  // leggono da qui invece di ricevere gli stessi dati come prop.
+  $: setChartIssues(flattenedWorklogIssues);
+  $: setChartPoolTasks(jiraPoolTasks);
+  $: setChartWorklogEntries(jiraWorklogEntries);
+  $: setChartSelectedProjectKeys(selectedProjectKeys);
+  $: setChartJiraStatus(yearlyWorklogLoading, yearlyWorklogError);
   $: selectedPeriod = `${selectedYear}:${selectedMonth}`;
   $: selectedYearIsValid = Number.isInteger(selectedYear) && selectedYear >= 1900 && selectedYear <= 3000;
   $: if (jiraHistoryReady && selectedYearIsValid && selectedPeriod !== lastFetchedPeriod) {
@@ -302,7 +335,7 @@
           aria-label="Torna alla Jira Board"
           title="Torna alla Jira Board"
         >
-          ←
+          <FontAwesomeIcon icon={faArrowLeft} />
         </button>
         <p>Entrambe le viste mostrano le ore registrate nella data del worklog per il periodo selezionato.</p>
       </div>
@@ -362,9 +395,22 @@
     </div>
   </section>
 
-  <ClientiSection jiraTasks={jiraPoolTasks} />
+  <ClientiSection />
 
-  <JiraHistoryCharts issues={chartIssues} {selectedProjectKeys} />
+  <CubeSwitcher label="Grafici" expandable>
+    <CubeFace label="Ore Jira" filters="jira-history">
+      <JiraHistoryScreen />
+    </CubeFace>
+    <CubeFace label="Contratti" filters="contratti">
+      <ContrattiScreen />
+    </CubeFace>
+    <CubeFace label="Redditivita" filters="redditivita">
+      <RedditivitaScreen />
+    </CubeFace>
+    <CubeFace label="Task CM" filters="cm-tasks">
+      <CmTasksScreen />
+    </CubeFace>
+  </CubeSwitcher>
 </main>
 
 <style>
@@ -466,7 +512,7 @@
     align-items: center;
     justify-content: center;
     margin-bottom: 0.4rem;
-    font-size: 18px;
+    font-size: 13px;
     line-height: 1;
     font-family: var(--font-mono);
     cursor: pointer;
