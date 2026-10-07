@@ -9,7 +9,6 @@ import {
   issueStatusLabel,
   issueTitle,
   issueTypeLabel,
-  type EstimateComparison,
   type TimelineBucket
 } from '../../jiraSelectors';
 import {
@@ -95,21 +94,6 @@ export function applyJiraHistoryFilters(
   });
 }
 
-/** Confronto stima/consuntivo: direzione, scostamento minimo e numero di issue. */
-export function filterEstimates(rows: EstimateComparison[], values: FilterValues) {
-  const direction = readText(values, 'estimateDirection');
-  const minimum = readNumber(values, 'deviationMin') ?? 0;
-  return rows
-    .filter((row) => Math.abs(row.deviationPercent) >= minimum)
-    .filter((row) =>
-      direction === 'over'
-        ? row.deviationPercent > 0
-        : direction === 'under'
-          ? row.deviationPercent < 0
-          : true
-    )
-    .slice(0, readNumber(values, 'estimateLimit') ?? 10);
-}
 
 export function jiraHistoryDisplay(values: FilterValues, defaults: { topCount: number }) {
   return {

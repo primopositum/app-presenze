@@ -31,7 +31,7 @@
       ? 'Il termine di confronto sono i contratti che passano i filtri, questo escluso.'
       : 'Il contratto scelto e\' escluso dai filtri attivi: resta confrontato con i contratti filtrati.'}
     items={[
-      { label: 'Valore maturato', value: fmtEuro(comparison.value), hint: `media altri ${fmtEuro(comparison.averageValue)}` },
+      { label: 'Valore da compensi periodici', value: fmtEuro(comparison.value), hint: `media altri ${fmtEuro(comparison.averageValue)}` },
       { label: 'Posizione per valore', value: `#${fmtInt(comparison.standing.rank)}`, hint: `su ${fmtInt(comparison.standing.total)}` },
       {
         label: 'Percentile',
@@ -78,12 +78,12 @@
   </ChartCard>
 
   <ChartCard
-    title="Posizione in classifica per valore maturato"
+    title="Posizione in classifica per valore da compensi periodici"
     subtitle={`#${fmtInt(comparison.standing.rank)} su ${fmtInt(comparison.standing.total)}`}
     accent={FOCUS_COLOR}
     note="In arancio il contratto scelto; se e' fuori dalle prime posizioni compare in fondo con il suo numero."
   >
-    <BarChart rows={comparison.ranking} title="Classifica per valore maturato" axisFormat={fmtEuroAxis} {ontooltip} />
+    <BarChart rows={comparison.ranking} title="Classifica per valore da compensi periodici" axisFormat={fmtEuroAxis} {ontooltip} />
   </ChartCard>
 
   <ChartCard

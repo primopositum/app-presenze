@@ -53,6 +53,61 @@ export function issueProjectLabel(issue: JiraHistoryIssue) {
   return issue.fields?.project?.name || issue.fields?.project?.key || 'Progetto non disponibile';
 }
 
+/** Issue arrivata in fondo al flusso: categoria Done o stato "Completata"/"Completed". */
+export function isIssueDone(issue: JiraHistoryIssue) {
+  const status = issue.fields?.status;
+  const name = String(status?.name || '').trim().toLowerCase();
+  return status?.statusCategory?.key === 'done' || name === 'completata' || name === 'completed';
+}
+
+export type WeekFlowDay = { key: string; label: string; opened: number; closed: number };
+
+/**
+ * Task aperte e chiuse giorno per giorno, da lunedi a domenica della settimana di `referenceDate`.
+ * Aperta = creata quel giorno; chiusa = oggi Done e passata a Done quel giorno
+ * (`statuscategorychangedate`, o `resolutiondate` se manca).
+ */
+export function weekOpenedClosed(issues: JiraHistoryIssue[], referenceDate: Date): WeekFlowDay[] {
+  const monday = new Date(
+    referenceDate.getFullYear(),
+    referenceDate.getMonth(),
+    referenceDate.getDate() - ((referenceDate.getDay() + 6) % 7)
+  );
+  const labels = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
+  const days = labels.map((label, index) => {
+    const date = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + index);
+    return { key: dayKey(date), label: `${label} ${date.getDate()}`, opened: 0, closed: 0 };
+  });
+  const byKey = new Map(days.map((day) => [day.key, day]));
+
+  issues.forEach((issue) => {
+    const opened = timestampDay(issue.fields?.created);
+    if (opened) {
+      const day = byKey.get(opened);
+      if (day) day.opened += 1;
+    }
+    if (!isIssueDone(issue)) return;
+    const closed = timestampDay(issue.fields?.statuscategorychangedate || issue.fields?.resolutiondate);
+    if (closed) {
+      const day = byKey.get(closed);
+      if (day) day.closed += 1;
+    }
+  });
+
+  return days;
+}
+
+function dayKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+/** Giorno locale di un timestamp Jira ("2026-09-29T10:15:00.000+0200"). */
+function timestampDay(value: string | null | undefined) {
+  if (!value) return null;
+  const date = new Date(String(value).replace(/([+-]\d{2})(\d{2})$/, '$1:$2'));
+  return Number.isNaN(date.getTime()) ? null : dayKey(date);
+}
+
 export function issueTitle(issue: JiraHistoryIssue) {
   return String(issue.fields?.summary || '').trim() || issue.key;
 }

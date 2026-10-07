@@ -177,6 +177,14 @@
           "placeholder": "12"
         },
         {
+          "id": "signedYear",
+          "type": "select",
+          "label": "Anno dei contratti firmati",
+          "source": "contractYears",
+          "placeholder": "Anno della data di riferimento",
+          "help": "Vale solo per il grafico dei contratti firmati per mese."
+        },
+        {
           "id": "topCount",
           "type": "number",
           "label": "Voci nelle classifiche",

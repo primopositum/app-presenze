@@ -299,19 +299,21 @@
     }
   }
 
-  $: normalizedLoggableSearch = loggableSearch.trim().toLowerCase();
+  // Ogni parola cercata deve comparire in almeno uno dei campi (key, summary, progetto),
+  // così "progetto descrizione" trova l'issue anche se le parole stanno in campi diversi.
+  $: loggableSearchTokens = loggableSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
   $: filteredLoggableIssues = loggableIssues.filter((issue) => {
-    if (!normalizedLoggableSearch) return true;
-    const key = issue.key || '';
-    const summary = issue.fields?.summary || '';
-    const projectKey = issue.fields?.project?.key || '';
-    const projectName = issue.fields?.project?.name || '';
-    return (
-      key.toLowerCase().includes(normalizedLoggableSearch) ||
-      summary.toLowerCase().includes(normalizedLoggableSearch) ||
-      projectKey.toLowerCase().includes(normalizedLoggableSearch) ||
-      projectName.toLowerCase().includes(normalizedLoggableSearch)
-    );
+    if (loggableSearchTokens.length === 0) return true;
+    const haystack = [
+      issue.key,
+      issue.fields?.summary,
+      issue.fields?.project?.key,
+      issue.fields?.project?.name
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return loggableSearchTokens.every((token) => haystack.includes(token));
   });
 </script>
 
@@ -368,7 +370,7 @@
         <div class="composer-head">
           <strong>Nuovo worklog</strong>
           <div class="composer-actions">
-            {#if !fixedIssueKey}
+            {#if !fixedIssueKey} 
               <button
                 class="composer-ghost"
                 type="button"

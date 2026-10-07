@@ -9,7 +9,7 @@ import {
   issueTitle,
   issueTypeLabel
 } from '../jiraSelectors';
-import { clientName } from '../contractsSelectors';
+import { clientName, parseDay } from '../contractsSelectors';
 import { fmtHours, fmtInt } from '../format';
 import type { JiraHistoryIssue } from '$lib/services/jira';
 import type { FilterDef, FilterOption, FilterOptionSource } from './core/types';
@@ -38,6 +38,18 @@ function issueOptions(issues: JiraHistoryIssue[]): FilterOption[] {
       label: `${issue.key} · ${issueTitle(issue)}`,
       hint: fmtHours(seconds)
     }));
+}
+
+/** Anni in cui partono i contratti, dal piu' recente. */
+function contractYears(data: ChartsDataState): FilterOption[] {
+  const counts = new Map<number, number>();
+  data.contratti.forEach((contract) => {
+    const year = parseDay(contract.start_date)?.getFullYear();
+    if (year !== undefined) counts.set(year, (counts.get(year) ?? 0) + 1);
+  });
+  return [...counts]
+    .sort((first, second) => second[0] - first[0])
+    .map(([year, count]) => ({ value: String(year), label: String(year), hint: `${fmtInt(count)} contratti` }));
 }
 
 export function sourceOptions(source: FilterOptionSource, data: ChartsDataState): FilterOption[] {
@@ -83,6 +95,8 @@ export function sourceOptions(source: FilterOptionSource, data: ChartsDataState)
         label: contract.contract_id,
         hint: clientName(contract)
       }));
+    case 'contractYears':
+      return contractYears(data);
   }
 }
 

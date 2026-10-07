@@ -23,7 +23,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from docx import Document
-from docx.shared import Cm
+from docx.shared import Cm, Pt
 
 from pypdf import PdfWriter
 
@@ -40,6 +40,8 @@ DOCX_TEMPLATE_PATH = Path(
 
 SIGNATURE_WIDTH_CM = 5.0
 SIGNATURE_HEIGHT_CM = 2.5
+MONEY_CELL_MAX_CHARACTERS = 9
+MONEY_CELL_FONT_SIZE_PT = 8
 
 # Estensioni dei giustificativi che vanno convertiti in PDF prima di essere allegati.
 IMAGE_SCONTRINO_SUFFIXES = {".jpg", ".jpeg", ".png"}
@@ -72,7 +74,8 @@ def _italian_month_year(d: date) -> str:
 
 def _format_money(value: Decimal) -> str:
     amount = f"{value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):.2f}".replace(".", ",")
-    return f"{amount}\u00a0€"
+    # Lo spazio non separabile mantiene importo e simbolo € sulla stessa riga.
+    return f"{amount}\u00a0\u20ac"
 
 
 def _format_decimal(value: Decimal) -> str:
@@ -131,6 +134,19 @@ def _replace_text_in_row(row, replacements: Dict[str, str]) -> None:
     for cell in row.cells:
         for paragraph in cell.paragraphs:
             _replace_text_in_paragraph(paragraph, replacements)
+        _shrink_long_money_cell_text(cell)
+
+
+def _shrink_long_money_cell_text(cell) -> None:
+    """Riduce gli importi lunghi affinché restino su una riga nelle celle strette."""
+    text = cell.text.replace("\n", "")
+    if "\u20ac" not in text or len(text) <= MONEY_CELL_MAX_CHARACTERS:
+        return
+
+    for paragraph in cell.paragraphs:
+        for run in paragraph.runs:
+            if run.text:
+                run.font.size = Pt(MONEY_CELL_FONT_SIZE_PT)
 
 
 def _replace_text_in_part(part, replacements: Dict[str, str]) -> None:

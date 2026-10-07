@@ -13,7 +13,7 @@ import {
   type Cliente,
   type ContrattoCliente
 } from '$lib/services/clienti';
-import type { JiraHistoryIssue } from '$lib/services/jira';
+import { jiraSearch, type JiraHistoryIssue } from '$lib/services/jira';
 
 export type ChartPoolTask = {
   key: string;
@@ -42,6 +42,12 @@ export type ChartsDataState = {
   selectedProjectKeys: string[];
   jiraLoading: boolean;
   jiraError: string;
+  /** Issue aperte o passate a Done dal lunedi della settimana corrente. */
+  weekIssues: JiraHistoryIssue[];
+  /** Lunedi (YYYY-MM-DD) a cui si riferiscono `weekIssues`. */
+  weekIssuesFrom: string;
+  weekIssuesLoading: boolean;
+  weekIssuesError: string;
   clienti: Cliente[];
   contratti: ContrattoCliente[];
   contrattiLoaded: boolean;
@@ -59,6 +65,10 @@ const initialState: ChartsDataState = {
   selectedProjectKeys: [],
   jiraLoading: false,
   jiraError: '',
+  weekIssues: [],
+  weekIssuesFrom: '',
+  weekIssuesLoading: false,
+  weekIssuesError: '',
   clienti: [],
   contratti: [],
   contrattiLoaded: false,
@@ -72,6 +82,7 @@ const store = writable<ChartsDataState>({ ...initialState });
 export const chartsData = { subscribe: store.subscribe };
 
 let contrattiInFlight: Promise<void> | null = null;
+let weekIssuesInFlight: Promise<void> | null = null;
 
 function patch(changes: Partial<ChartsDataState>) {
   store.update((state) => ({ ...state, ...changes }));
@@ -177,7 +188,67 @@ export async function ensureContrattiLoaded(force = false): Promise<void> {
   return contrattiInFlight;
 }
 
+/** YYYY-MM-DD nel fuso locale. */
+function isoDay(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+/** Lunedi della settimana di `date`, a mezzanotte locale. */
+export function mondayOf(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() - ((date.getDay() + 6) % 7));
+}
+
+/**
+ * Issue aperte o chiuse nella settimana corrente, con una ricerca JQL sul proxy
+ * generico `/jira/search/`: non serve un endpoint dedicato.
+ *
+ * La JQL deve iniziare con una condizione sulle date. Il proxy aggiunge
+ * `status != "Completata"` alle query che iniziano con `project`/`filter`/`labels`
+ * e scarterebbe proprio le task chiuse. Per lo stesso motivo non nomina Done o
+ * "Completata": attiverebbe l'arricchimento con i worklog, qui inutile.
+ * Lo stato finale si legge poi lato client da `status.statusCategory`.
+ *
+ * Si ricarica solo se cambia la settimana o con `force`.
+ */
+export async function ensureWeekIssuesLoaded(force = false, today = new Date()): Promise<void> {
+  const from = isoDay(mondayOf(today));
+  const current = get(store);
+  if (!force && current.weekIssuesFrom === from && !current.weekIssuesError) return;
+  if (!force && weekIssuesInFlight) return weekIssuesInFlight;
+
+  patch({ weekIssuesLoading: true, weekIssuesError: '' });
+
+  weekIssuesInFlight = (async () => {
+    try {
+      const data = await jiraSearch({
+        jql: `(created >= "${from}" OR statusCategoryChangedDate >= "${from}") ORDER BY created DESC`,
+        fields: 'summary,status,issuetype,project,created,resolutiondate,statuscategorychangedate',
+        // 0 = tutte le pagine lato backend
+        maxResults: 0
+      });
+      patch({
+        weekIssues: Array.isArray(data?.issues) ? data.issues : [],
+        weekIssuesFrom: from,
+        weekIssuesLoading: false,
+        weekIssuesError: ''
+      });
+    } catch (cause) {
+      patch({
+        weekIssuesFrom: from,
+        weekIssuesLoading: false,
+        weekIssuesError:
+          cause instanceof Error ? cause.message : 'Impossibile caricare le task della settimana.'
+      });
+    } finally {
+      weekIssuesInFlight = null;
+    }
+  })();
+
+  return weekIssuesInFlight;
+}
+
 export function resetChartsData() {
   contrattiInFlight = null;
+  weekIssuesInFlight = null;
   store.set({ ...initialState });
 }

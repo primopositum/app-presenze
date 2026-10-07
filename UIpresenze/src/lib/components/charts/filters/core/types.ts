@@ -19,6 +19,7 @@ export type FilterOptionSource =
   | 'statuses'
   | 'clients'
   | 'contracts'
+  | 'contractYears'
   | 'issues'
   | 'cmIssues';
 

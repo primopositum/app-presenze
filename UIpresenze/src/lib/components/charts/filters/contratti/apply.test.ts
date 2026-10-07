@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ContrattoCliente } from '$lib/services/clienti';
 import { resolveValues } from '../core/filterState';
 import type { FilterValues } from '../core/types';
-import { applyContrattiFilters, contractStatus, contrattiFilters } from './apply';
+import { applyContrattiFilters, contractStatus, contrattiDisplay, contrattiFilters } from './apply';
 
 const base = {
   id: 1,
@@ -50,5 +50,15 @@ describe('filtri Contratti', () => {
     expect(
       applyContrattiFilters(all, values({ currentValue: { min: 2000, max: null } }), reference)
     ).toEqual([]);
+  });
+});
+
+describe('impostazioni di visualizzazione Contratti', () => {
+  const defaults = { referenceDate: new Date(2026, 9, 2), expiringDays: 90, forecastMonths: 12, topCount: 12 };
+
+  it("usa l'anno della data di riferimento finche' non se ne sceglie uno", () => {
+    expect(contrattiDisplay({}, defaults).signedYear).toBe(2026);
+    expect(contrattiDisplay({ referenceDate: '2024-05-10' }, defaults).signedYear).toBe(2024);
+    expect(contrattiDisplay({ signedYear: '2025' }, defaults).signedYear).toBe(2025);
   });
 });

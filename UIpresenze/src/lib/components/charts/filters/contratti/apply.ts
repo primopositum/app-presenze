@@ -71,11 +71,14 @@ export type ContrattiDisplayDefaults = {
 
 /** Impostazioni di visualizzazione: i campi vuoti ricadono sulle prop della schermata. */
 export function contrattiDisplay(values: FilterValues, defaults: ContrattiDisplayDefaults) {
+  const referenceDate = parseDay(readText(values, 'referenceDate')) ?? defaults.referenceDate;
   return {
-    referenceDate: parseDay(readText(values, 'referenceDate')) ?? defaults.referenceDate,
+    referenceDate,
     expiringDays: readNumber(values, 'expiringDays') ?? defaults.expiringDays,
     forecastMonths: Math.min(36, Math.max(1, readNumber(values, 'forecastMonths') ?? defaults.forecastMonths)),
     topCount: readNumber(values, 'topCount') ?? defaults.topCount,
+    /** Anno del grafico dei contratti firmati; vuoto = quello della data di riferimento. */
+    signedYear: Number(readText(values, 'signedYear')) || referenceDate.getFullYear(),
     expiryHorizon: readNumber(values, 'expiryHorizon') ?? 365,
     // Oltre gli otto spicchi la palette non distingue piu' le tinte adiacenti.
     donutSlices: Math.min(8, Math.max(2, readNumber(values, 'donutSlices') ?? 6)),

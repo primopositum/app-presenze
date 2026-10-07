@@ -5,6 +5,8 @@ STAMP_FILE="${CONTRACT_ALERT_STAMP_FILE:-/tmp/email_contract_alert.last_run}"
 RUN_AT="${CONTRACT_ALERT_TIME:-08:00}"
 CHECK_INTERVAL_SECONDS="${SCHEDULER_CHECK_INTERVAL_SECONDS:-30}"
 HC_URL="${CONTRACT_ALERT_HC_URL:-}"
+# I destinatari sono letti da CONTRACT_ALERT_RECIPIENTS nel file .env.
+# Per aggiungerne più di uno, separa gli indirizzi con una virgola.
 
 # Ping healthchecks opzionale (python: l'immagine slim non ha wget/curl)
 ping_hc() {

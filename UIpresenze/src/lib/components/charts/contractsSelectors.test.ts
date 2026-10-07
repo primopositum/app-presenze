@@ -7,8 +7,12 @@ import {
   contractValueRows,
   contractsSummary,
   expiryRows,
+  forecastByClient,
   forecastPoints,
+  forecastStack,
+  forecastUntilYearEnd,
   profitabilityList,
+  signedByMonth,
   taskValueRows,
   tasksByKey
 } from './contractsSelectors';
@@ -65,6 +69,54 @@ describe('selettori contratti', () => {
     const points = forecastPoints([contract()], new Date(2026, 8, 21), 3);
 
     expect(points.map((point) => point.value)).toEqual([0, 600, 300]);
+  });
+
+  it('si ferma al 31 dicembre dello stesso anno', () => {
+    const points = forecastUntilYearEnd([contract()], new Date(2026, 9, 2));
+
+    expect(points.map((point) => point.key)).toEqual(['2026-10', '2026-11', '2026-12']);
+    expect(points.map((point) => point.value)).toEqual([300, 300, 300]);
+  });
+
+  it("conta i contratti firmati per mese di inizio, solo nell'anno indicato", () => {
+    const points = signedByMonth(
+      [
+        contract({ id: 1, start_date: '2026-03-10' }),
+        contract({ id: 2, start_date: '2026-03-28' }),
+        contract({ id: 3, start_date: '2026-11-01' }),
+        contract({ id: 4, start_date: '2025-03-15' })
+      ],
+      2026
+    );
+
+    expect(points).toHaveLength(12);
+    expect(points[0].key).toBe('2026-01');
+    expect(points.map((point) => point.value)).toEqual([0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0]);
+  });
+
+  it('divide gli incassi per cliente e piega la coda in Altri', () => {
+    const contracts = [1, 2, 3].map((id) =>
+      contract({
+        id,
+        client_id: id,
+        client: { id, nome: `Cliente ${id}`, indirizzo: '', telefono: '' },
+        periodicity: {
+          periodic_value: String(id * 100),
+          period_days: 30,
+          first_meeting_date: '2026-09-01',
+          notification_days: 7
+        }
+      })
+    );
+    const byClient = forecastByClient(contracts, new Date(2026, 9, 2), 3);
+    const stack = forecastStack(byClient, 2);
+
+    expect(byClient.clients.map((client) => client.id)).toEqual(['3', '2', '1']);
+    expect(stack.series.map((item) => item.id)).toEqual(['3', '__other__']);
+    expect(stack.series[1].values).toEqual([300, 300, 300]);
+    expect(stack.total).toBe(1800);
+    expect(stack.fullLegend).toHaveLength(3);
+    expect(stack.fullLegend[2].hint).toBe('in Altri (2)');
   });
 
   it('mette nel grafico per contratto il solo valore maturato', () => {

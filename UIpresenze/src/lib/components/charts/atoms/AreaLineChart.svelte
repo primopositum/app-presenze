@@ -20,6 +20,8 @@
     color?: string;
     mode?: ChartRenderMode | 'auto';
     valueLabel?: string;
+    /** Conteggi: solo tacche intere sull'asse, mai "0,5 contratti". */
+    integer?: boolean;
     ontooltip?: (tooltip: ChartTooltipState | null) => void;
   };
 
@@ -31,6 +33,7 @@
     color = ACCENT,
     mode = 'auto',
     valueLabel,
+    integer = false,
     ontooltip
   }: Props = $props();
 
@@ -44,7 +47,9 @@
   const tickFormat = $derived(axisFormat ?? format);
 
   const maxValue = $derived(Math.max(0, ...points.map((point) => point.value)));
-  const ticks = $derived(niceTicks(maxValue, sizing.tickCount));
+  const ticks = $derived(
+    niceTicks(maxValue, sizing.tickCount).filter((tick) => !integer || Number.isInteger(tick))
+  );
   const yMax = $derived(ticks[ticks.length - 1] || 1);
 
   const axisWidth = $derived(

@@ -3,50 +3,42 @@
    * Schermata A del cubo: le ore Jira del periodo.
    *
    * Ogni grafico ha una domanda sola:
-   * - quando sono state loggate (andamento nel tempo);
-   * - da chi e su cosa (classifiche a barre);
-   * - in che proporzione fra i tipi di attivita' (ciambella, poche voci);
-   * - quanto si sono discostate dalle stime (confronto a due punte).
+   * - quante task si aprono e si chiudono nella settimana corrente (colonne affiancate);
+   * - da chi e su cosa (classifiche a barre).
    */
-  import { chartsData } from '$lib/remo/chartsData';
+  import { onMount } from 'svelte';
+  import { chartsData, ensureWeekIssuesLoaded } from '$lib/remo/chartsData';
   import {
     addGrouped,
     buildChartRows,
     totalOf,
-    withOther,
     type ChartGroups
   } from '../chartData';
-  import { fmtHours, fmtHoursAxis, fmtInt, fmtPercent } from '../format';
+  import { fmtHours, fmtHoursAxis, fmtInt } from '../format';
   import {
     addIssueUserSeconds,
-    estimateComparisons,
     issueLoggedSeconds,
     issueProjectKey,
     issueProjectLabel,
     issueTitle,
-    issueTypeLabel,
-    weekdayTotals,
+    weekOpenedClosed,
     worklogTimeline
   } from '../jiraSelectors';
   import { CARD_ACCENT, SERIES } from '../palette';
   import { activeCount, chartFilters, resolveValues } from '../filters/core/filterState';
   import {
     applyJiraHistoryFilters,
-    filterEstimates,
     jiraHistoryDisplay,
     jiraHistoryFilters as FILTERS
   } from '../filters/jiraHistory/apply';
   import { compareIssue } from '../filters/core/issueCompare';
   import IssueCompareCards from '../filters/core/IssueCompareCards.svelte';
-  import AreaLineChart from '../atoms/AreaLineChart.svelte';
   import BarChart from '../atoms/BarChart.svelte';
   import ChartCard from '../atoms/ChartCard.svelte';
   import ChartEmpty from '../atoms/ChartEmpty.svelte';
   import ChartScreenLayout from '../atoms/ChartScreenLayout.svelte';
   import ChartTooltip from '../atoms/ChartTooltip.svelte';
-  import ColumnChart from '../atoms/ColumnChart.svelte';
-  import DonutPanel from '../atoms/DonutPanel.svelte';
-  import DumbbellChart from '../atoms/DumbbellChart.svelte';
+  import GroupedColumnChart from '../atoms/GroupedColumnChart.svelte';
   import MetricCard from '../atoms/MetricCard.svelte';
   import type { ChartTooltipState } from '../atoms/tooltip';
 
@@ -103,35 +95,31 @@
     return buildChartRows(groups, { format: fmtHours });
   });
 
-  const typeRows = $derived.by(() => {
-    const groups: ChartGroups = {};
-    selectedIssues.forEach((issue) =>
-      addGrouped(groups, issueTypeLabel(issue), issueTypeLabel(issue), issueLoggedSeconds(issue))
-    );
-    return withOther(buildChartRows(groups, { format: fmtHours, palette: 'identity' }), 6, fmtHours);
+  const timeline = $derived(worklogTimeline(worklogEntries, display.bucket));
+
+  onMount(() => {
+    void ensureWeekIssuesLoaded();
   });
 
-  const timeline = $derived(worklogTimeline(worklogEntries, display.bucket));
-  const timelinePoints = $derived(
-    timeline.points.map((point) => ({ key: point.key, label: point.label, value: point.seconds }))
+  /** Aperte contro chiuse nella settimana corrente: vale la sola selezione dei progetti di sinistra. */
+  const WEEK_SERIES = [
+    { id: 'opened', label: 'Aperte', color: SERIES[0] },
+    { id: 'closed', label: 'Chiuse', color: SERIES[1] }
+  ];
+  const weekIssues = $derived(
+    hasSelection
+      ? $chartsData.weekIssues.filter((issue) => selectedSet.has(issueProjectKey(issue)))
+      : $chartsData.weekIssues
   );
-  const weekdayPoints = $derived(
-    weekdayTotals(worklogEntries).map((day) => ({ key: day.key, label: day.label.slice(0, 3), value: day.seconds }))
+  const weekPoints = $derived(
+    weekOpenedClosed(weekIssues, new Date()).map((day) => ({
+      key: day.key,
+      label: day.label,
+      values: { opened: day.opened, closed: day.closed }
+    }))
   );
-
-  /** Solo le issue della selezione che hanno davvero una stima con cui confrontarsi. */
-  const estimateRows = $derived(
-    filterEstimates(estimateComparisons(selectedIssues), filters)
-      .map((row) => ({
-        id: row.key,
-        label: `${row.key} · ${row.title}`,
-        from: row.estimateSeconds,
-        to: row.loggedSeconds,
-        hint:
-          row.deviationPercent >= 0
-            ? `${fmtPercent(row.deviationPercent, 0)} sopra la stima`
-            : `${fmtPercent(Math.abs(row.deviationPercent), 0)} sotto la stima`
-      }))
+  const weekHasData = $derived(
+    weekPoints.some((point) => point.values.opened > 0 || point.values.closed > 0)
   );
 
   // Si calcola solo con una task scelta: senza, il confronto non costa nulla.
@@ -175,23 +163,27 @@
   {/snippet}
 
   <ChartCard
-    title={`Andamento ore per ${bucketName}`}
-    subtitle={fmtHours(totalSeconds)}
+    title="Task aperte e chiuse questa settimana"
+    subtitle={weekPoints.length > 0 ? `${weekPoints[0].label} - ${weekPoints[weekPoints.length - 1].label}` : undefined}
     accent={CARD_ACCENT.time}
     wide
-    note="I periodi senza worklog restano sull'asse: saltarli mostrerebbe una continuita' che non c'e'."
+    note="Aperte: create quel giorno. Chiuse: passate a Done (o Completata) quel giorno. Settimana corrente, indipendente dal periodo scelto; vale solo la selezione dei progetti."
   >
-    {#if timelinePoints.length > 1}
-      <AreaLineChart
-        points={timelinePoints}
-        title={`Ore loggate per ${bucketName}`}
-        format={fmtHours}
-        axisFormat={fmtHoursAxis}
-        valueLabel="ore"
+    {#if $chartsData.weekIssuesLoading && !weekHasData}
+      <ChartEmpty message="Caricamento delle task della settimana..." />
+    {:else if $chartsData.weekIssuesError}
+      <ChartEmpty message={`Impossibile caricare le task della settimana: ${$chartsData.weekIssuesError}`} />
+    {:else if weekHasData}
+      <GroupedColumnChart
+        points={weekPoints}
+        series={WEEK_SERIES}
+        title="Task aperte e chiuse per giorno, settimana corrente"
+        format={(value) => fmtInt(value)}
+        integer
         ontooltip={(next) => (tooltip = next)}
       />
     {:else}
-      <ChartEmpty message="Serve piu' di un periodo con worklog per disegnare un andamento." />
+      <ChartEmpty message="Nessuna task aperta o chiusa questa settimana." />
     {/if}
   </ChartCard>
 
@@ -231,6 +223,7 @@
     title={`Top ${Math.min(topCount, issueRows.length)} issue per ore`}
     subtitle={`${fmtInt(issueRows.length)} issue`}
     accent={CARD_ACCENT.jira}
+    wide
   >
     <BarChart
       rows={issueRows}
@@ -239,64 +232,6 @@
       axisFormat={fmtHoursAxis}
       ontooltip={(next) => (tooltip = next)}
     />
-  </ChartCard>
-
-  <ChartCard
-    title="Composizione per tipo di attivita'"
-    subtitle={`${fmtInt(typeRows.length)} voci`}
-    accent={CARD_ACCENT.time}
-  >
-    {#if typeRows.length > 1}
-      <DonutPanel
-        rows={typeRows}
-        title="Ore per tipo di issue"
-        centerValue={fmtHours(totalSeconds)}
-        centerLabel="totale"
-        ontooltip={(next) => (tooltip = next)}
-      />
-    {:else}
-      <ChartEmpty message="Le issue del periodo appartengono a un solo tipo." />
-    {/if}
-  </ChartCard>
-
-  <ChartCard
-    title="Ore per giorno della settimana"
-    subtitle={fmtHours(totalSeconds)}
-    accent={CARD_ACCENT.people}
-  >
-    <ColumnChart
-      points={weekdayPoints}
-      title="Ore per giorno della settimana"
-      format={fmtHours}
-      axisFormat={fmtHoursAxis}
-      color={SERIES[2]}
-      valueLabel="ore"
-      ontooltip={(next) => (tooltip = next)}
-    />
-  </ChartCard>
-
-  <ChartCard
-    title="Stima contro consuntivo"
-    subtitle={`${fmtInt(estimateRows.length)} issue`}
-    accent={CARD_ACCENT.forecast}
-    wide
-    note="Solo le issue che hanno una stima originale in Jira, ordinate per scostamento."
-  >
-    {#if estimateRows.length > 0}
-      <DumbbellChart
-        rows={estimateRows}
-        title="Stima contro ore loggate"
-        format={fmtHours}
-        axisFormat={fmtHoursAxis}
-        fromLabel="Stimato"
-        toLabel="Loggato"
-        fromColor="#9ec5f4"
-        toColor={SERIES[0]}
-        ontooltip={(next) => (tooltip = next)}
-      />
-    {:else}
-      <ChartEmpty message="Nessuna issue del periodo ha una stima originale con cui confrontare le ore." />
-    {/if}
   </ChartCard>
 
   {#if display.compareKey}

@@ -159,48 +159,6 @@
       ]
     },
     {
-      "id": "estimates",
-      "label": "Stima contro consuntivo",
-      "filters": [
-        {
-          "id": "estimateDirection",
-          "type": "segmented",
-          "label": "Scostamento",
-          "options": [
-            {
-              "value": "all",
-              "label": "Tutti"
-            },
-            {
-              "value": "over",
-              "label": "Sopra stima"
-            },
-            {
-              "value": "under",
-              "label": "Sotto stima"
-            }
-          ]
-        },
-        {
-          "id": "deviationMin",
-          "type": "number",
-          "label": "Scostamento minimo",
-          "unit": "%",
-          "min": 0,
-          "step": 5,
-          "placeholder": "0"
-        },
-        {
-          "id": "estimateLimit",
-          "type": "number",
-          "label": "Issue nel confronto",
-          "min": 1,
-          "max": 50,
-          "placeholder": "10"
-        }
-      ]
-    },
-    {
       "id": "display",
       "label": "Visualizzazione",
       "filters": [

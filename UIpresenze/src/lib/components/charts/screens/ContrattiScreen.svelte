@@ -12,12 +12,15 @@
   import { fmtEuro, fmtEuroAxis, fmtInt, fmtDays } from '../format';
   import { CARD_ACCENT, SERIES } from '../palette';
   import {
-    clientMonthlyRows,
     clientValueRows,
+    contractInitialValue,
     contractValueRows,
     contractsSummary,
     expiryRows,
-    forecastPoints
+    forecastByClient,
+    forecastStack,
+    forecastUntilYearEnd,
+    signedByMonth
   } from '../contractsSelectors';
   import { activeCount, chartFilters, resolveValues } from '../filters/core/filterState';
   import {
@@ -27,6 +30,7 @@
   } from '../filters/contratti/apply';
   import { compareContract } from '../filters/contratti/compare';
   import ContractCompareCards from '../filters/contratti/CompareCards.svelte';
+  import AreaLineChart from '../atoms/AreaLineChart.svelte';
   import BarChart from '../atoms/BarChart.svelte';
   import ChartCard from '../atoms/ChartCard.svelte';
   import ChartEmpty from '../atoms/ChartEmpty.svelte';
@@ -35,6 +39,7 @@
   import ColumnChart from '../atoms/ColumnChart.svelte';
   import DonutPanel from '../atoms/DonutPanel.svelte';
   import MetricCard from '../atoms/MetricCard.svelte';
+  import StackedColumnChart from '../atoms/StackedColumnChart.svelte';
   import type { ChartTooltipState } from '../atoms/tooltip';
 
   type Props = {
@@ -79,18 +84,19 @@
   const contracts = $derived(applyContrattiFilters(allContracts, filters, referenceDate));
   const summary = $derived(contractsSummary(contracts, referenceDate, expiringDays));
   const valueByContract = $derived(contractValueRows(contracts));
-  const valueByClient = $derived(clientValueRows(contracts));
-  const monthlyByClient = $derived(clientMonthlyRows(summary.active));
+  // Solo il valore firmato: i compensi periodici maturati restano fuori dalla ciambella.
+  const valueByClient = $derived(clientValueRows(contracts, contractInitialValue));
   const expiries = $derived(expiryRows(contracts, referenceDate, expiryHorizon));
-  const forecast = $derived(
-    forecastPoints(contracts, referenceDate, forecastMonths).map((point) => ({
-      key: point.key,
-      label: point.label,
-      value: point.value
-    }))
-  );
-  const forecastTotal = $derived(forecast.reduce((total, point) => total + point.value, 0));
+  /** Ogni colonna divisa per cliente: i primi cinque con la loro tinta, il resto in "Altri". */
+  const forecastClients = $derived(forecastByClient(contracts, referenceDate, forecastMonths));
+  const forecast = $derived(forecastStack(forecastClients, 6));
+  const forecastTotal = $derived(forecast.total);
+  const yearEnd = $derived(forecastUntilYearEnd(contracts, referenceDate));
+  const yearEndTotal = $derived(yearEnd.reduce((total, point) => total + point.value, 0));
   const nextExpiry = $derived(expiries[0] ?? null);
+  const signedYear = $derived(display.signedYear);
+  const signed = $derived(signedByMonth(contracts, signedYear));
+  const signedTotal = $derived(signed.reduce((total, point) => total + point.value, 0));
   const comparison = $derived(
     display.compareId
       ? compareContract(allContracts, contracts, display.compareId, display)
@@ -112,14 +118,14 @@
     : 'Nessun contratto commerciale registrato.'}
 >
   {#snippet metrics()}
-    <MetricCard label="Valore maturato" value={fmtEuro(summary.currentValue)} lead />
+    <MetricCard label="Valore da compensi periodici" value={fmtEuro(summary.currentValue)} lead />
     <MetricCard
       label="Contratti attivi"
       value={fmtInt(summary.active.length)}
       hint={`${fmtInt(contracts.length)} in archivio`}
     />
     <MetricCard
-      label="Maturato oltre il firmato"
+      label="Da compensi periodici oltre il firmato"
       value={fmtEuro(summary.accruedValue)}
       hint={`firmato ${fmtEuro(summary.initialValue)}`}
     />
@@ -136,7 +142,7 @@
   {/snippet}
 
   <ChartCard
-    title="Valore maturato per contratto"
+    title="Valore da compensi periodici per contratto"
     subtitle={`${fmtInt(valueByContract.length)} contratti`}
     accent={CARD_ACCENT.money}
     wide
@@ -147,7 +153,7 @@
     <BarChart
       rows={valueByContract}
       limit={topCount}
-      title="Valore maturato per contratto"
+      title="Valore da compensi periodici per contratto"
       axisFormat={fmtEuroAxis}
       ontooltip={(next) => (tooltip = next)}
     />
@@ -158,16 +164,17 @@
     subtitle={fmtEuro(forecastTotal)}
     accent={CARD_ACCENT.forecast}
     wide
-    note="Proiezione dei soli contratti con periodicita' impostata."
+    note="Proiezione dei soli contratti con periodicita' impostata. Ogni colonna e' divisa per cliente: a schermo intero la legenda li elenca tutti."
   >
     {#if forecastTotal > 0}
-      <ColumnChart
-        points={forecast}
-        title="Incassi previsti per mese"
+      <StackedColumnChart
+        categories={forecastClients.months}
+        series={forecast.series}
+        legend={forecast.legend}
+        fullLegend={forecast.fullLegend}
+        title="Incassi previsti per mese, divisi per cliente"
         format={fmtEuro}
         axisFormat={fmtEuroAxis}
-        color={SERIES[1]}
-        valueLabel="previsto"
         ontooltip={(next) => (tooltip = next)}
       />
     {:else}
@@ -176,16 +183,17 @@
   </ChartCard>
 
   <ChartCard
-    title="Valore maturato per cliente"
+    title="Valore contratto"
     subtitle={`${fmtInt(valueByClient.length)} clienti`}
     accent={CARD_ACCENT.money}
   >
     {#if valueByClient.length > 0}
       <DonutPanel
         rows={withOther(valueByClient, donutSlices, fmtEuro)}
-        title="Valore maturato per cliente"
-        centerValue={fmtEuro(summary.currentValue)}
-        centerLabel="maturato"
+        allRows={valueByClient}
+        title="Valore contratto per cliente"
+        centerValue={fmtEuro(summary.initialValue)}
+        centerLabel="firmato"
         ontooltip={(next) => (tooltip = next)}
       />
     {:else}
@@ -194,20 +202,44 @@
   </ChartCard>
 
   <ChartCard
-    title="Canone mensile per cliente"
-    subtitle={fmtEuro(summary.monthlyRecurring)}
-    accent={CARD_ACCENT.jira}
+    title="Incassi fino a fine anno"
+    subtitle={fmtEuro(yearEndTotal)}
+    accent={CARD_ACCENT.forecast}
+    note={`Incassi periodici previsti fino al 31/12/${referenceDate.getFullYear()}.`}
   >
-    {#if monthlyByClient.length > 0}
-      <BarChart
-        rows={monthlyByClient}
-        limit={topCount}
-        title="Canone mensile per cliente"
+    {#if yearEndTotal > 0}
+      <ColumnChart
+        points={yearEnd}
+        title="Incassi periodici previsti fino a fine anno"
+        format={fmtEuro}
         axisFormat={fmtEuroAxis}
+        color={SERIES[1]}
+        valueLabel="previsto"
         ontooltip={(next) => (tooltip = next)}
       />
     {:else}
-      <ChartEmpty message="Nessun contratto ricorrente attivo alla data di riferimento." />
+      <ChartEmpty message="Nessun incasso periodico previsto entro fine anno." />
+    {/if}
+  </ChartCard>
+
+  <ChartCard
+    title={`Contratti firmati nel ${signedYear}`}
+    subtitle={`${fmtInt(signedTotal)} contratti`}
+    accent={CARD_ACCENT.money}
+    wide
+    note="Ogni contratto conta nel mese della sua data di inizio: i picchi sono i mesi di maggiore attivita' commerciale."
+  >
+    {#if signedTotal > 0}
+      <AreaLineChart
+        points={signed}
+        title={`Contratti firmati per mese nel ${signedYear}`}
+        format={fmtInt}
+        valueLabel="firmati"
+        integer
+        ontooltip={(next) => (tooltip = next)}
+      />
+    {:else}
+      <ChartEmpty message={`Nessun contratto con inizio nel ${signedYear}.`} />
     {/if}
   </ChartCard>
 

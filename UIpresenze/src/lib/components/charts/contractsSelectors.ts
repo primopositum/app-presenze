@@ -1,9 +1,9 @@
 /** Trasformazioni pure dei contratti commerciali nei dati per i grafici. */
 import type { ContrattoCliente } from '$lib/services/clienti';
 import type { ChartPoolTask } from '$lib/remo/chartsData';
-import { addGrouped, buildChartRows, type ChartGroups, type ChartRow } from './chartData';
-import { fmtEuro, fmtDays, fmtHours, fmtMonth, fmtRate } from './format';
-import { ACCENT, STATUS } from './palette';
+import { addGrouped, buildChartRows, withOther, type ChartGroups, type ChartRow } from './chartData';
+import { fmtEuro, fmtDays, fmtHours, fmtMonth, fmtMonthName, fmtRate } from './format';
+import { ACCENT, NEUTRAL, STATUS } from './palette';
 
 export type ContractsSummary = {
   active: ContrattoCliente[];
@@ -113,23 +113,69 @@ export function contractValueRows(contracts: ContrattoCliente[]): ChartRow[] {
   return buildChartRows(groups, { format: fmtEuro, hintOf: (id) => hints[id] });
 }
 
-export function clientValueRows(contracts: ContrattoCliente[]): ChartRow[] {
+/** Valore per cliente: di default il maturato, oppure la misura passata in `valueOf`. */
+export function clientValueRows(
+  contracts: ContrattoCliente[],
+  valueOf: (contract: ContrattoCliente) => number = contractCurrentValue
+): ChartRow[] {
   const groups: ChartGroups = {};
   contracts.forEach((contract) =>
-    addGrouped(groups, String(contract.client_id), clientName(contract), contractCurrentValue(contract))
+    addGrouped(groups, String(contract.client_id), clientName(contract), valueOf(contract))
   );
   return buildChartRows(groups, { format: fmtEuro, palette: 'identity' });
 }
 
-export function clientMonthlyRows(contracts: ContrattoCliente[]): ChartRow[] {
-  const groups: ChartGroups = {};
-  contracts.forEach((contract) =>
-    addGrouped(groups, String(contract.client_id), clientName(contract), monthlyRate(contract))
-  );
-  return buildChartRows(groups, { format: fmtEuro });
+export type ForecastPoint = { key: string; label: string; value: number };
+
+type ForecastBucket = { key: string; label: string; start: Date; end: Date };
+
+function forecastBuckets(start: Date, months: number): ForecastBucket[] {
+  return Array.from({ length: Math.max(1, months) }, (_, offset) => {
+    const monthStart = new Date(start.getFullYear(), start.getMonth() + offset, 1);
+    return {
+      key: `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, '0')}`,
+      label: fmtMonth(monthStart),
+      start: monthStart,
+      end: new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0)
+    };
+  });
 }
 
-export type ForecastPoint = { key: string; label: string; value: number };
+/** Incassi periodici di un contratto in ciascun mese, a partire da `start`. */
+function contractForecast(contract: ContrattoCliente, buckets: ForecastBucket[], start: Date): number[] {
+  const values = buckets.map(() => 0);
+  const periodicity = contract.periodicity;
+  const firstMeeting = parseDay(periodicity?.first_meeting_date);
+  const contractStart = parseDay(contract.start_date);
+  const contractEnd = parseDay(contract.end_date);
+  const periodDays = Number(periodicity?.period_days || 0);
+  const periodicValue = toNumber(periodicity?.periodic_value);
+  if (!firstMeeting || periodDays <= 0 || periodicValue <= 0) return values;
+
+  buckets.forEach((bucket, index) => {
+    const windowStart = bucket.start < start ? start : bucket.start;
+    const windowEnd = contractEnd && contractEnd < bucket.end ? contractEnd : bucket.end;
+    if (contractStart && windowEnd < contractStart) return;
+    if (windowEnd < windowStart) return;
+
+    const firstValidDay = contractStart && contractStart > windowStart ? contractStart : windowStart;
+    const offset = Math.max(0, Math.ceil(daysBetween(firstMeeting, firstValidDay) / periodDays));
+    const occurrence = new Date(
+      firstMeeting.getFullYear(),
+      firstMeeting.getMonth(),
+      firstMeeting.getDate() + offset * periodDays
+    );
+    for (
+      let due = occurrence;
+      due <= windowEnd;
+      due = new Date(due.getFullYear(), due.getMonth(), due.getDate() + periodDays)
+    ) {
+      if (due >= firstValidDay) values[index] += periodicValue;
+    }
+  });
+
+  return values;
+}
 
 /** Incassi ricorrenti stimati per ciascuno dei prossimi mesi. */
 export function forecastPoints(
@@ -138,50 +184,117 @@ export function forecastPoints(
   months = 12
 ): ForecastPoint[] {
   const start = dayStart(from);
-  const buckets = Array.from({ length: Math.max(1, months) }, (_, offset) => {
-    const monthStart = new Date(start.getFullYear(), start.getMonth() + offset, 1);
-    return {
-      key: `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, '0')}`,
-      label: fmtMonth(monthStart),
-      start: monthStart,
-      end: new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0),
-      value: 0
-    };
-  });
+  const buckets = forecastBuckets(start, months);
+  const totals = buckets.map(() => 0);
+  contracts.forEach((contract) =>
+    contractForecast(contract, buckets, start).forEach((value, index) => (totals[index] += value))
+  );
+  return buckets.map(({ key, label }, index) => ({ key, label, value: totals[index] }));
+}
+
+export type ClientForecast = {
+  months: { key: string; label: string }[];
+  /** Un cliente per riga, dal piu' alto per totale: `values` e' allineato a `months`. */
+  clients: { id: string; label: string; values: number[]; total: number }[];
+};
+
+/** Gli stessi incassi di `forecastPoints`, divisi per cliente. */
+export function forecastByClient(contracts: ContrattoCliente[], from: Date, months = 12): ClientForecast {
+  const start = dayStart(from);
+  const buckets = forecastBuckets(start, months);
+  const clients = new Map<string, { id: string; label: string; values: number[]; total: number }>();
 
   contracts.forEach((contract) => {
-    const periodicity = contract.periodicity;
-    const firstMeeting = parseDay(periodicity?.first_meeting_date);
-    const contractStart = parseDay(contract.start_date);
-    const contractEnd = parseDay(contract.end_date);
-    const periodDays = Number(periodicity?.period_days || 0);
-    const periodicValue = toNumber(periodicity?.periodic_value);
-    if (!firstMeeting || periodDays <= 0 || periodicValue <= 0) return;
-
-    buckets.forEach((bucket) => {
-      const windowStart = bucket.start < start ? start : bucket.start;
-      const windowEnd = contractEnd && contractEnd < bucket.end ? contractEnd : bucket.end;
-      if (contractStart && windowEnd < contractStart) return;
-      if (windowEnd < windowStart) return;
-
-      const firstValidDay = contractStart && contractStart > windowStart ? contractStart : windowStart;
-      const offset = Math.max(0, Math.ceil(daysBetween(firstMeeting, firstValidDay) / periodDays));
-      const occurrence = new Date(
-        firstMeeting.getFullYear(),
-        firstMeeting.getMonth(),
-        firstMeeting.getDate() + offset * periodDays
-      );
-      for (
-        let due = occurrence;
-        due <= windowEnd;
-        due = new Date(due.getFullYear(), due.getMonth(), due.getDate() + periodDays)
-      ) {
-        if (due >= firstValidDay) bucket.value += periodicValue;
-      }
+    const values = contractForecast(contract, buckets, start);
+    if (!values.some((value) => value > 0)) return;
+    const id = String(contract.client_id);
+    const client = clients.get(id) ?? { id, label: clientName(contract), values: buckets.map(() => 0), total: 0 };
+    values.forEach((value, index) => {
+      client.values[index] += value;
+      client.total += value;
     });
+    clients.set(id, client);
   });
 
-  return buckets.map(({ key, label, value }) => ({ key, label, value }));
+  return {
+    months: buckets.map(({ key, label }) => ({ key, label })),
+    clients: [...clients.values()].sort((first, second) => second.total - first.total)
+  };
+}
+
+export type ForecastStack = {
+  total: number;
+  /** Pezzi delle colonne, dal cliente piu' alto alla base fino ad "Altri" in cima. */
+  series: { id: string; label: string; color: string; values: number[] }[];
+  /** Legenda della card: i primi clienti e la voce "Altri". */
+  legend: ChartRow[];
+  /** Legenda completa: ogni cliente, quelli piegati in "Altri" con il grigio di "Altri". */
+  fullLegend: ChartRow[];
+};
+
+/**
+ * Incassi per cliente pronti per le colonne impilate: i primi `slices - 1`
+ * clienti hanno una tinta propria, gli altri si sommano in "Altri".
+ */
+export function forecastStack(forecast: ClientForecast, slices = 6): ForecastStack {
+  const groups: ChartGroups = {};
+  forecast.clients.forEach((client) => addGrouped(groups, client.id, client.label, client.total));
+  const rows = buildChartRows(groups, { format: fmtEuro, palette: 'identity' });
+  const legend = withOther(rows, slices, fmtEuro);
+  const head = legend.filter((row) => row.id !== '__other__');
+  const headIds = new Set(head.map((row) => row.id));
+  const byId = new Map(forecast.clients.map((client) => [client.id, client]));
+
+  const series = head.map((row) => ({
+    id: row.id,
+    label: row.label,
+    color: row.color,
+    values: byId.get(row.id)?.values ?? forecast.months.map(() => 0)
+  }));
+  const other = legend.find((row) => row.id === '__other__');
+  if (other) {
+    series.push({
+      id: other.id,
+      label: other.label,
+      color: other.color,
+      values: forecast.months.map((_, index) =>
+        forecast.clients
+          .filter((client) => !headIds.has(client.id))
+          .reduce((sum, client) => sum + client.values[index], 0)
+      )
+    });
+  }
+
+  return {
+    total: rows.reduce((sum, row) => sum + row.value, 0),
+    series,
+    legend,
+    fullLegend: rows.map((row) =>
+      headIds.has(row.id) ? row : { ...row, color: NEUTRAL, hint: `in ${other?.label ?? 'Altri'}` }
+    )
+  };
+}
+
+/** Incassi ricorrenti da `from` al 31 dicembre dello stesso anno, mese per mese. */
+export function forecastUntilYearEnd(contracts: ContrattoCliente[], from: Date): ForecastPoint[] {
+  return forecastPoints(contracts, from, 12 - from.getMonth());
+}
+
+/**
+ * Contratti firmati in ciascun mese di `year`, contati sulla data di inizio.
+ * I dodici mesi restano tutti sull'asse, anche quelli senza firme.
+ */
+export function signedByMonth(contracts: ContrattoCliente[], year: number): ForecastPoint[] {
+  const counts = Array.from({ length: 12 }, () => 0);
+  contracts.forEach((contract) => {
+    const start = parseDay(contract.start_date);
+    if (start && start.getFullYear() === year) counts[start.getMonth()] += 1;
+  });
+  return counts.map((value, month) => ({
+    key: `${year}-${String(month + 1).padStart(2, '0')}`,
+    label: fmtMonthName(new Date(year, month, 1)),
+    value
+  }));
 }
 
 /**

@@ -60,6 +60,11 @@ export function fmtMonth(date: Date) {
   return date.toLocaleDateString(IT, { month: 'short', year: '2-digit' });
 }
 
+/** Solo il mese, quando l'anno e' gia' nel titolo: "set". */
+export function fmtMonthName(date: Date) {
+  return date.toLocaleDateString(IT, { month: 'short' });
+}
+
 /** Etichetta breve di un giorno: "21 set". */
 export function fmtDay(date: Date) {
   return date.toLocaleDateString(IT, { day: 'numeric', month: 'short' });

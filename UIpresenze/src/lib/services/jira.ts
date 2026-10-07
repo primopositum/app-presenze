@@ -181,7 +181,7 @@ export type JiraHistoryIssue = {
   self?: string;
   fields?: {
     summary?: string;
-    status?: { name?: string };
+    status?: { name?: string; statusCategory?: { key?: string } | null };
     assignee?: { displayName?: string } | null;
     issuetype?: { name?: string; subtask?: boolean } | null;
     parent?: { key?: string; fields?: { summary?: string } } | null;
@@ -201,6 +201,8 @@ export type JiraHistoryIssue = {
     created?: string;
     updated?: string;
     resolutiondate?: string | null;
+    /** Ultimo cambio di categoria dello stato (es. passaggio a Done). */
+    statuscategorychangedate?: string | null;
     worklog_authors?: { displayName?: string; timeSpentSeconds?: number }[];
     worklog_primary_author?: { displayName?: string; timeSpentSeconds?: number };
   };

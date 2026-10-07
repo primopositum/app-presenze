@@ -88,6 +88,7 @@
   const contractsWithPool = $derived(
     contracts.filter((contract) => (contract.pool_task || []).length > 0).length
   );
+  const hasExtremes = $derived(Boolean(best && worst && best.id !== worst.id));
 </script>
 
 <ChartScreenLayout
@@ -154,7 +155,7 @@
     {#if scatterPoints.length > 1}
       <ScatterChart
         points={scatterPoints}
-        title="Ore loggate contro valore maturato"
+        title="Ore loggate contro valore da compensi periodici"
         xLabel="ore sul pool"
         yLabel="valore maturato"
         formatX={(value) => fmtHours(value * 3600)}
@@ -169,10 +170,12 @@
     {/if}
   </ChartCard>
 
+  <!-- Affiancata agli estremi del periodo; da sola occupa tutta la riga. -->
   <ChartCard
     title="Ore sul pool per contratto"
     subtitle={fmtHours(totalHours * 3600)}
     accent={CARD_ACCENT.jira}
+    wide={!hasExtremes}
   >
     <BarChart
       rows={hoursRows}
@@ -183,27 +186,7 @@
     />
   </ChartCard>
 
-  <ChartCard
-    title={`Top ${Math.min(topCount, valueRows.length)} task per valore generato`}
-    subtitle={`${fmtInt(valueRows.length)} task`}
-    accent={CARD_ACCENT.people}
-    wide
-    note="Il valore del contratto ripartito fra le sue task in proporzione alle ore."
-  >
-    {#if valueRows.length > 0}
-      <BarChart
-        rows={valueRows}
-        limit={topCount}
-        title="Valore generato per task"
-        axisFormat={fmtEuroAxis}
-        ontooltip={(next) => (tooltip = next)}
-      />
-    {:else}
-      <ChartEmpty message="Nessuna task del pool ha ore nel periodo." />
-    {/if}
-  </ChartCard>
-
-  {#if best && worst && best.id !== worst.id}
+  {#if hasExtremes && best && worst}
     <ChartCard title="Estremi del periodo" accent={SERIES[6]}>
       <dl class="extremes">
         <div>
@@ -225,6 +208,26 @@
       </dl>
     </ChartCard>
   {/if}
+
+  <ChartCard
+    title={`Top ${Math.min(topCount, valueRows.length)} task per valore generato`}
+    subtitle={`${fmtInt(valueRows.length)} task`}
+    accent={CARD_ACCENT.people}
+    wide
+    note="Il valore del contratto ripartito fra le sue task in proporzione alle ore."
+  >
+    {#if valueRows.length > 0}
+      <BarChart
+        rows={valueRows}
+        limit={topCount}
+        title="Valore generato per task"
+        axisFormat={fmtEuroAxis}
+        ontooltip={(next) => (tooltip = next)}
+      />
+    {:else}
+      <ChartEmpty message="Nessuna task del pool ha ore nel periodo." />
+    {/if}
+  </ChartCard>
 
   {#if display.compareId}
     <ProfitabilityCompareCards

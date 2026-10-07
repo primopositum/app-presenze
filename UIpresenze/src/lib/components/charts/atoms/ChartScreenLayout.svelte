@@ -111,11 +111,13 @@
    * Le card hanno una larghezza minima: finche' ci stanno si affiancano, poi
    * vanno su una colonna sola e, se anche quella non basta, la faccia scorre.
    * Cosi' i grafici non vengono compressi fino a diventare illeggibili.
+   * Le card affiancate prendono l'altezza della piu' alta della riga: il
+   * contenuto resta in testa, la cornice si allunga.
    */
   .charts-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(var(--chart-card-min, 360px), 1fr));
-    align-items: start;
+    align-items: stretch;
     gap: 0.7rem;
     transition: opacity 160ms ease;
   }
