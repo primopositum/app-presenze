@@ -68,9 +68,8 @@ export function applyRedditivitaFilters(
   };
 }
 
-export function redditivitaDisplay(values: FilterValues, defaults: { topCount: number }) {
+export function redditivitaDisplay(values: FilterValues) {
   return {
-    topCount: readNumber(values, 'topCount') ?? defaults.topCount,
     /** Id del contratto da confrontare; vuoto = nessun confronto. */
     compareId: readText(values, 'compareContract')
   };

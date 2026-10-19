@@ -7,8 +7,6 @@ import type { ChartWorklogEntry } from '$lib/remo/chartsData';
 import {
   issueProjectKey,
   issueStatusLabel,
-  issueTitle,
-  issueTypeLabel,
   type TimelineBucket
 } from '../../jiraSelectors';
 import {
@@ -25,7 +23,6 @@ import {
   inList,
   inRange,
   keyList,
-  textMatches,
   weekdayOf
 } from '../core/primitives';
 import { sliceJira, type JiraSlice } from '../core/jiraSlice';
@@ -35,21 +32,11 @@ import definition from './filters.json';
 export const jiraHistoryFilters = definition as FilterScreen;
 
 function issueMatches(issue: JiraHistoryIssue, values: FilterValues) {
-  const hierarchy = readText(values, 'hierarchy');
-  const resolution = readText(values, 'resolution');
   const pattern = compileRegex(readText(values, 'keyPattern'));
   const fields = issue.fields;
-  const isSubtask = Boolean(fields?.issuetype?.subtask);
-  const resolved = Boolean(fields?.resolutiondate);
 
   if (!inList(readList(values, 'projects'), issueProjectKey(issue))) return false;
-  if (!inList(readList(values, 'issueTypes'), issueTypeLabel(issue))) return false;
   if (!inList(readList(values, 'statuses'), issueStatusLabel(issue))) return false;
-  if (hierarchy === 'task' && isSubtask) return false;
-  if (hierarchy === 'subtask' && !isSubtask) return false;
-  if (resolution === 'open' && resolved) return false;
-  if (resolution === 'resolved' && !resolved) return false;
-  if (!textMatches(readText(values, 'search'), issue.key, issueTitle(issue))) return false;
   if (pattern && !pattern.test(issue.key)) return false;
   if (keyList(readText(values, 'excludeKeys')).has(String(issue.key).toUpperCase())) return false;
   if (!inDates(readDates(values, 'createdRange'), fields?.created)) return false;

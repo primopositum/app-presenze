@@ -37,16 +37,14 @@
   import ScatterChart from '../atoms/ScatterChart.svelte';
   import type { ChartTooltipState } from '../atoms/tooltip';
 
-  type Props = { topCount?: number };
-
-  let { topCount: defaultTopCount = 12 }: Props = $props();
+  /** Le classifiche restano confrontabili fra le aperture della schermata. */
+  const TOP_COUNT = 12;
 
   let tooltip = $state<ChartTooltipState | null>(null);
 
   const filters = $derived(resolveValues(FILTERS, $chartFilters[FILTERS.id]));
   const filterCount = $derived(activeCount(FILTERS, $chartFilters[FILTERS.id]));
-  const display = $derived(redditivitaDisplay(filters, { topCount: defaultTopCount }));
-  const topCount = $derived(display.topCount);
+  const display = $derived(redditivitaDisplay(filters));
 
   onMount(() => {
     void ensureContrattiLoaded().catch(() => undefined);
@@ -64,7 +62,7 @@
   const averageRate = $derived(filtered.averageRate);
   const comparison = $derived(
     display.compareId
-      ? compareProfitability(fullList, list, display.compareId, { averageRate, topCount })
+      ? compareProfitability(fullList, list, display.compareId, { averageRate, topCount: TOP_COUNT })
       : null
   );
 
@@ -137,7 +135,7 @@
   >
     <BarChart
       rows={rateRows}
-      limit={topCount}
+      limit={TOP_COUNT}
       title="Tariffa oraria effettiva per contratto"
       axisFormat={(value) => `${Math.round(value)} €`}
       reference={{ value: averageRate, label: 'media' }}
@@ -179,7 +177,7 @@
   >
     <BarChart
       rows={hoursRows}
-      limit={topCount}
+      limit={TOP_COUNT}
       title="Ore loggate sulle task del pool"
       axisFormat={fmtHoursAxis}
       ontooltip={(next) => (tooltip = next)}
@@ -210,7 +208,7 @@
   {/if}
 
   <ChartCard
-    title={`Top ${Math.min(topCount, valueRows.length)} task per valore generato`}
+    title={`Top ${Math.min(TOP_COUNT, valueRows.length)} task per valore generato`}
     subtitle={`${fmtInt(valueRows.length)} task`}
     accent={CARD_ACCENT.people}
     wide
@@ -219,7 +217,7 @@
     {#if valueRows.length > 0}
       <BarChart
         rows={valueRows}
-        limit={topCount}
+        limit={TOP_COUNT}
         title="Valore generato per task"
         axisFormat={fmtEuroAxis}
         ontooltip={(next) => (tooltip = next)}

@@ -81,60 +81,10 @@
           "source": "authors"
         },
         {
-          "id": "issueTypes",
-          "type": "multiselect",
-          "label": "Tipi di issue",
-          "source": "issueTypes"
-        },
-        {
           "id": "statuses",
           "type": "multiselect",
           "label": "Stato corrente",
           "source": "statuses"
-        },
-        {
-          "id": "hierarchy",
-          "type": "segmented",
-          "label": "Livello",
-          "options": [
-            {
-              "value": "all",
-              "label": "Tutte"
-            },
-            {
-              "value": "task",
-              "label": "Solo task"
-            },
-            {
-              "value": "subtask",
-              "label": "Solo subtask"
-            }
-          ]
-        },
-        {
-          "id": "resolution",
-          "type": "segmented",
-          "label": "Risoluzione",
-          "options": [
-            {
-              "value": "all",
-              "label": "Tutte"
-            },
-            {
-              "value": "open",
-              "label": "Aperte"
-            },
-            {
-              "value": "resolved",
-              "label": "Risolte"
-            }
-          ]
-        },
-        {
-          "id": "search",
-          "type": "text",
-          "label": "Cerca chiave o titolo",
-          "placeholder": "es. PRJ-12 o login"
         }
       ]
     },

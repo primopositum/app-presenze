@@ -112,41 +112,10 @@
           "source": "authors"
         },
         {
-          "id": "issueTypes",
-          "type": "multiselect",
-          "label": "Tipi di issue",
-          "source": "issueTypes"
-        },
-        {
           "id": "statuses",
           "type": "multiselect",
           "label": "Stato corrente",
           "source": "statuses"
-        },
-        {
-          "id": "resolution",
-          "type": "segmented",
-          "label": "Risoluzione",
-          "options": [
-            {
-              "value": "all",
-              "label": "Tutte"
-            },
-            {
-              "value": "open",
-              "label": "Aperte"
-            },
-            {
-              "value": "resolved",
-              "label": "Risolte"
-            }
-          ]
-        },
-        {
-          "id": "search",
-          "type": "text",
-          "label": "Cerca chiave o titolo",
-          "placeholder": "es. CM-42"
         }
       ]
     },

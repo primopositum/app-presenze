@@ -9,8 +9,6 @@ import {
   issueLoggedSeconds,
   issueProjectKey,
   issueStatusLabel,
-  issueTitle,
-  issueTypeLabel,
   type TimelineBucket
 } from '../../jiraSelectors';
 import {
@@ -27,7 +25,6 @@ import {
   inList,
   inRange,
   keyList,
-  textMatches,
   weekdayOf
 } from '../core/primitives';
 import { sliceJira } from '../core/jiraSlice';
@@ -49,16 +46,10 @@ function matchesMarker(issue: JiraHistoryIssue, marker: string, scope: string) {
 }
 
 function issueMatches(issue: JiraHistoryIssue, values: FilterValues) {
-  const resolution = readText(values, 'resolution');
   const pattern = compileRegex(readText(values, 'keyPattern'));
-  const resolved = Boolean(issue.fields?.resolutiondate);
 
   if (!inList(readList(values, 'projects'), issueProjectKey(issue))) return false;
-  if (!inList(readList(values, 'issueTypes'), issueTypeLabel(issue))) return false;
   if (!inList(readList(values, 'statuses'), issueStatusLabel(issue))) return false;
-  if (resolution === 'open' && resolved) return false;
-  if (resolution === 'resolved' && !resolved) return false;
-  if (!textMatches(readText(values, 'search'), issue.key, issueTitle(issue))) return false;
   if (pattern && !pattern.test(issue.key)) return false;
   if (keyList(readText(values, 'excludeKeys')).has(String(issue.key).toUpperCase())) return false;
   if (!inDates(readDates(values, 'createdRange'), issue.fields?.created)) return false;

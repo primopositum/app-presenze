@@ -38,6 +38,10 @@
   const technicalCount = $derived(
     screen.groups.flatMap((group) => group.filters).filter((def) => def.technical).length
   );
+  /** Il perimetro definisce cosa si sta guardando: resta sempre la prima sezione. */
+  const scopeFirst = (groups: FilterGroup[]) =>
+    [...groups].sort((first, second) => Number(second.id === 'scope') - Number(first.id === 'scope'));
+  const scrollGroups = $derived(scopeFirst(screen.groups));
 
   /** Le frecce servono ai campi, non al cubo; Esc chiude il pannello e non riduce il cubo. */
   function handleKeydown(event: KeyboardEvent) {
@@ -97,7 +101,7 @@
   </div>
 
   <div class="groups">
-    {#each screen.groups as group (group.id)}
+    {#each scrollGroups as group (group.id)}
       {@const fields = group.filters.filter(visible)}
       {#if fields.length > 0}
         <details open>

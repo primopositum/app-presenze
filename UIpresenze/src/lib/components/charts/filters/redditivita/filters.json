@@ -103,14 +103,6 @@
             }
           ],
           "help": "La linea di riferimento e il confronto \"sopra / sotto media\"."
-        },
-        {
-          "id": "topCount",
-          "type": "number",
-          "label": "Voci nelle classifiche",
-          "min": 1,
-          "max": 50,
-          "placeholder": "12"
         }
       ]
     },
